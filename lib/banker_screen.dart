@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import 'package:mon/main.dart';
 import 'package:mon/pay.dart';
 import 'package:mon/receive.dart';
+import 'package:mon/transactions.dart';
 import 'package:qr_code_scanner/qr_code_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
@@ -33,6 +34,8 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
   Timer? _pollingTimer;
   bool _dialogShown = false; // Track if a dialog is already shown
   double value = 0;
+  String payOption = 'ScanPay';
+  String ID = '';
   @override
   void initState() {
     super.initState();
@@ -82,8 +85,10 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
           .eq('role', 'banker');
 
       final data2 = response2.first["wallet"];
+      final option = response2.first['SP/IP'];
       setState(() {
         value = double.parse(data2.toStringAsFixed(2));
+        payOption = option;
       });
       print(data2);
       // Check for new requests
@@ -146,7 +151,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Text("Name: ${request['name']}"),
-              /*   Text("Wallet: ${request['wallet']}"), */
+                /*   Text("Wallet: ${request['wallet']}"), */
               ],
             ),
             actions: [
@@ -174,6 +179,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                     'game_id': widget.gameId,
                     'role': 'player',
                     'player_id': request['player_id'],
+                    'SP/IP': payOption
                   });
 
                   await supabase
@@ -198,6 +204,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
 
                     setState(() {
                       value = updatedWallet.toDouble();
+                      ID= banker['player_id'];
                     });
                   }
 
@@ -222,8 +229,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-                    backgroundColor: Colors.yellow.shade50,
-
+        backgroundColor: Colors.yellow.shade50,
         title: Text('Game QR Code', style: TextStyle(fontSize: 18.sp)),
         content: SizedBox(
           width: 60.w,
@@ -237,7 +243,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                 size: 50.w,
                 gapless: false,
               ),
-             /*  SizedBox(height: 2.h),
+              /*  SizedBox(height: 2.h),
               Text('Bank: ${widget.gameId}',
                   style:
                       TextStyle(fontWeight: FontWeight.bold, fontSize: 18.sp)), */
@@ -256,11 +262,12 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
 
   Widget _buildPlayerRow(BuildContext context, Player player) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 10),
-      margin: const EdgeInsets.symmetric(vertical: 5),
+      height: 6.h,
+      padding: EdgeInsets.symmetric(vertical: 0.h, horizontal: 2.w),
+      margin: EdgeInsets.symmetric(vertical: 0.5.h),
       decoration: BoxDecoration(
-        color: player.color.withOpacity(0.4),
-        borderRadius: BorderRadius.circular(10),
+        color: player.color.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(2.w),
       ),
       child: Row(
         children: [
@@ -276,127 +283,26 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
           ),
           Expanded(
             flex: 4,
-            child: Text(
-              player.value.toStringAsFixed(2),
-              style: TextStyle(
-                  fontSize: 16.sp,
-                  color: player.color,
-                  fontWeight: FontWeight.bold),
-              textAlign: TextAlign.center,
+            child: AnimatedFlipCounter(
+              mainAxisAlignment: MainAxisAlignment.end,
+              value: player.value,
+              fractionDigits: 2,
+              textStyle: TextStyle(
+                fontSize: 16.sp,
+                color: player.color,
+              ),
+              duration: const Duration(milliseconds: 500), // optional
             ),
           ),
+          const SizedBox(width: 10),
           Expanded(
-            flex: 6,
+            flex: 7,
             child: Wrap(
               alignment: WrapAlignment.end,
               direction: Axis.horizontal, // Ensures horizontal layout
               spacing: 0, // Horizontal space between children
               runSpacing: 0.h, // Vertical space between lines
               children: [
-                ElevatedButton(
-                  onPressed: () async {
-                    final prefs = await SharedPreferences.getInstance();
-                    final payerPlayerID =
-                        prefs.getString('playerID') ?? 'UnknownPlayer';
-                    double advanceValue = prefs.getDouble('advance')!;
-                    double advanceAmount = advanceValue;
-
-                    // Step 1: Fetch payer's wallet
-                    final payerResponse = await Supabase.instance.client
-                        .from('players_test')
-                        .select('wallet')
-                        .eq('game_id', widget.gameId)
-                        .eq('player_id', payerPlayerID)
-                        .maybeSingle();
-
-                    // Step 2: Fetch receiver's wallet
-                    final receiverResponse = await Supabase.instance.client
-                        .from('players_test')
-                        .select('wallet')
-                        .eq('game_id', widget.gameId)
-                        .eq('player_id', player.playerID)
-                        .maybeSingle();
-
-                    if (payerResponse != null &&
-                        receiverResponse != null &&
-                        payerResponse['wallet'] != null &&
-                        receiverResponse['wallet'] != null) {
-                      double payerWallet =
-                          (payerResponse['wallet'] as num).toDouble();
-                      double receiverWallet =
-                          (receiverResponse['wallet'] as num).toDouble();
-
-                      if (payerWallet >= advanceAmount) {
-                        double newPayerWallet = payerWallet - advanceAmount;
-                        double newReceiverWallet =
-                            receiverWallet + advanceAmount;
-
-                        // Update payer
-                        await Supabase.instance.client
-                            .from('players_test')
-                            .update({'wallet': newPayerWallet})
-                            .eq('game_id', widget.gameId)
-                            .eq('player_id', payerPlayerID);
-
-                        // Update receiver
-                        await Supabase.instance.client
-                            .from('players_test')
-                            .update({'wallet': newReceiverWallet})
-                            .eq('game_id', widget.gameId)
-                            .eq('player_id', player.playerID);
-
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                                content: Text(
-                                    'Advanced ₹$advanceAmount to ${player.name}')),
-                          );
-                          await Supabase.instance.client
-                              .from('transactions')
-                              .insert({
-                            'game_id': widget.gameId,
-                            'value': advanceAmount,
-                            'from': "Bank (Advance)",
-                            'to': player.name,
-                            'code': "${payerPlayerID}_${player.playerID}",
-                            'date':
-                                DateFormat('yyyy-MM-dd').format(DateTime.now()),
-                            'time':
-                                DateFormat('HH:mm:ss').format(DateTime.now()),
-                          });
-                        }
-                      } else {
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                                content: Text(
-                                    'Insufficient balance to advance ₹200')),
-                          );
-                        }
-                      }
-                    } else {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                              content: Text('Failed to fetch wallet data')),
-                        );
-                      }
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    elevation: 0,
-                    foregroundColor: player.color,
-                    backgroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                  child: Icon(
-                    CupertinoIcons.goforward_plus,
-                    size: 18.sp,
-                  ),
-                ),
-                const SizedBox(width: 10),
                 ElevatedButton(
                   onPressed: () async {
                     final TextEditingController _amountController =
@@ -494,7 +400,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                             .insert({
                           'game_id': widget.gameId,
                           'value': rewardAmount,
-                          'from': "Bank (Reward)",
+                          'from': "banker",
                           'to': player.name,
                           'code': "${payerPlayerID}_${player.playerID}",
                           'date':
@@ -527,16 +433,136 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                     }
                   },
                   style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.all(5), // Remove internal padding
+                    fixedSize: Size(25.sp, 20.sp), // 👈 Set button size here
+
                     elevation: 0,
+                    foregroundColor: player.color,
+                    backgroundColor: Colors.white.withOpacity(1),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  child: Image.asset(
+                    'assets/images/pay.png', fit: BoxFit.contain,
+
+                    width: 23
+                        .sp, // Use MediaQuery or a fixed size if sp is undefined
+                    height: 23.sp,
+                    color: player.color, // Apply red color
+                    colorBlendMode:
+                        BlendMode.srcIn, // Ensures image is tinted red
+                  ),
+                ),
+                const SizedBox(width: 10),
+                ElevatedButton(
+                  onPressed: () async {
+                    final prefs = await SharedPreferences.getInstance();
+                    final payerPlayerID =
+                        prefs.getString('playerID') ?? 'UnknownPlayer';
+                    double advanceValue = prefs.getDouble('advance')!;
+                    double advanceAmount = advanceValue;
+
+                    // Step 1: Fetch payer's wallet
+                    final payerResponse = await Supabase.instance.client
+                        .from('players_test')
+                        .select('wallet')
+                        .eq('game_id', widget.gameId)
+                        .eq('player_id', payerPlayerID)
+                        .maybeSingle();
+
+                    // Step 2: Fetch receiver's wallet
+                    final receiverResponse = await Supabase.instance.client
+                        .from('players_test')
+                        .select('wallet')
+                        .eq('game_id', widget.gameId)
+                        .eq('player_id', player.playerID)
+                        .maybeSingle();
+
+                    if (payerResponse != null &&
+                        receiverResponse != null &&
+                        payerResponse['wallet'] != null &&
+                        receiverResponse['wallet'] != null) {
+                      double payerWallet =
+                          (payerResponse['wallet'] as num).toDouble();
+                      double receiverWallet =
+                          (receiverResponse['wallet'] as num).toDouble();
+
+                      if (payerWallet >= advanceAmount) {
+                        double newPayerWallet = payerWallet - advanceAmount;
+                        double newReceiverWallet =
+                            receiverWallet + advanceAmount;
+
+                        // Update payer
+                        await Supabase.instance.client
+                            .from('players_test')
+                            .update({'wallet': newPayerWallet})
+                            .eq('game_id', widget.gameId)
+                            .eq('player_id', payerPlayerID);
+
+                        // Update receiver
+                        await Supabase.instance.client
+                            .from('players_test')
+                            .update({'wallet': newReceiverWallet})
+                            .eq('game_id', widget.gameId)
+                            .eq('player_id', player.playerID);
+
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                                content: Text(
+                                    'Advanced ₹$advanceAmount to ${player.name}')),
+                          );
+                          await Supabase.instance.client
+                              .from('transactions')
+                              .insert({
+                            'game_id': widget.gameId,
+                            'value': advanceAmount,
+                            'from': "Bank (Advance)",
+                            'to': player.name,
+                            'code': "${payerPlayerID}_${player.playerID}",
+                            'date':
+                                DateFormat('yyyy-MM-dd').format(DateTime.now()),
+                            'time':
+                                DateFormat('HH:mm:ss').format(DateTime.now()),
+                          });
+                        }
+                      } else {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content: Text(
+                                    'Insufficient balance to advance ₹200')),
+                          );
+                        }
+                      }
+                    } else {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              content: Text('Failed to fetch wallet data')),
+                        );
+                      }
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    elevation: 0,
+                    padding: const EdgeInsets.all(5), // Remove internal padding
+                    fixedSize: Size(25.sp,
+                        20.sp), // 👈 Set button size here                    elevation: 0,
                     foregroundColor: player.color,
                     backgroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10),
                     ),
                   ),
-                  child: Icon(
-                    FontAwesomeIcons.gifts,
-                    size: 18.sp,
+                  child: Image.asset(
+                    'assets/images/advance.png',
+                    width: 23.sp,
+                    height: 23.sp,
+                    fit: BoxFit.contain,
+                    color: player.color,
+                    colorBlendMode: BlendMode.srcIn,
                   ),
                 ),
               ],
@@ -587,6 +613,21 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
           actions: [
+             IconButton(
+                onPressed: () async {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => TransactionHistoryPage(
+                        gameId: widget.gameId,
+                        playerId: ID ?? '-',
+                      ),
+                    ),
+                  );
+                },
+                icon: const Icon(FontAwesomeIcons.history)),
+                            const SizedBox(width: 10),
+
             IconButton(
               onPressed: () => _showQRDialog(context),
               icon: const Icon(FontAwesomeIcons.peopleGroup),
@@ -661,42 +702,41 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                       duration: const Duration(
                           milliseconds: 500), // optional: animation speed
                     ),
-                    const SizedBox(height: 20),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const ReceiveButton(),
-                        const SizedBox(width: 12),
-                        ElevatedButton.icon(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    QRPayScanner(gameId: widget.gameId),
-                              ),
-                            );
-                          },
-                          icon: Icon(FontAwesomeIcons.moneyBill, size: 16.sp),
-                          label: Text(
-                            'Pay',
-                            style: TextStyle(fontSize: 16.sp),
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.red.shade600,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 5),
-                            textStyle: TextStyle(
-                                fontSize: 14.sp, fontWeight: FontWeight.w500),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
+                    const SizedBox(height: 10),
+                    if (payOption == 'ScanPay')
+                      const Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          ReceiveButton(),
+                          SizedBox(width: 0),
+/*                           ElevatedButton.icon(
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      QRPayScanner(gameId: widget.gameId),
+                                ),
+                              );
+                            },
+                            icon: Icon(FontAwesomeIcons.moneyBill, size: 16.sp),
+                            label: Text(
+                              'Pay',
+                              style: TextStyle(fontSize: 16.sp),
                             ),
-                            elevation: 0, // Flat look
+                             style: ElevatedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 5),
+                                  backgroundColor: Colors.red.shade600,
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
                           ),
-                        ),
-                      ],
-                    ),
+ */
+                        ],
+                      ),
                   ],
                 ),
               ),

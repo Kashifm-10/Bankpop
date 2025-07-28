@@ -83,6 +83,8 @@ flutter:
   assets:
     - assets/images/play_icon.jpg
     - assets/images/background.jpeg
+    - assets/images/advance.png
+    - assets/images/pay.png
     - assets/lottie/splash.json
     - assets/lottie/first.json
     - assets/lottie/second.json

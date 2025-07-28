@@ -5,6 +5,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:intl/intl.dart';
 import 'package:lottie/lottie.dart';
 import 'package:mon/pay.dart';
 import 'package:mon/receive.dart';
@@ -16,14 +17,20 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class Player {
+  final String player_id;
   final String name;
   final double value;
   final Color color;
 
-  Player({required this.name, required this.value, required this.color});
+  Player(
+      {required this.player_id,
+      required this.name,
+      required this.value,
+      required this.color});
 
   factory Player.fromMap(Map<String, dynamic> map) {
     return Player(
+      player_id: map['player_id'],
       name: map['name'],
       value: double.tryParse(map['wallet'].toString()) ?? 0.0,
       color: Colors.primaries[map['name'].hashCode % Colors.primaries.length],
@@ -55,6 +62,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
   double? previousWallet;
   int playerPosition = 1;
   String positionStatus = 'none';
+  String payOption = 'ScanPay';
 
   @override
   void initState() {
@@ -221,6 +229,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
       final currentPlayer = allPlayers[currentPlayerIndex];
       final wallet = currentPlayer['wallet'] as num;
       final playerId = currentPlayer['player_id'];
+      final option = currentPlayer['SP/IP'];
+
       final position = currentPlayerIndex + 1; // 1-based position
       final totalPlayers = allPlayers.length;
 
@@ -243,6 +253,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
         value = double.parse(wallet.toStringAsFixed(2));
         playerPosition = position; // Requires defining this state variable
         positionStatus = positionLabel; // Requires defining this too
+        payOption = option;
       });
 
       // Show SnackBar only if there's a change
@@ -276,7 +287,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
     final bool isCurrentPlayer = player.name == currentPlayerName;
 
     return Container(
-      padding: EdgeInsets.symmetric(vertical: 1.h, horizontal: 3.w),
+      height: 6.h,
+      padding: EdgeInsets.symmetric(vertical: 0.h, horizontal: 3.w),
       margin: EdgeInsets.symmetric(vertical: 0.5.h),
       decoration: BoxDecoration(
         color: player.color.withOpacity(0.2),
@@ -285,7 +297,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
       child: Row(
         children: [
           Expanded(
-            flex: 3,
+            flex: 4,
             child: Text(
               !isCurrentPlayer ? player.name : "${player.name} (me)",
               style: TextStyle(
@@ -294,18 +306,175 @@ class _PlayersScreenState extends State<PlayersScreen> {
                   color: player.color),
             ),
           ),
+          const SizedBox(width: 10),
           Expanded(
-            flex: 2,
+            flex: 4,
             child: AnimatedFlipCounter(
+              mainAxisAlignment: MainAxisAlignment.end,
               value: player.value,
               fractionDigits: 2,
               textStyle: TextStyle(
                 fontSize: 16.sp,
                 color: player.color,
               ),
-              duration: const Duration(milliseconds: 900), // optional
+              duration: const Duration(milliseconds: 500), // optional
             ),
           ),
+          SizedBox(width: isCurrentPlayer ? 10 : 20),
+          if (!isCurrentPlayer && payOption == 'ScanPay')
+            Expanded(
+              flex: 1,
+              child: ElevatedButton(
+                onPressed: () async {
+                  final TextEditingController _amountController =
+                      TextEditingController();
+
+                  double? enteredAmount = await showDialog<double>(
+                    context: context,
+                    builder: (context) {
+                      return AlertDialog(
+                        title: const Text('Enter Amount'),
+                        content: TextField(
+                          controller: _amountController,
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true),
+                          decoration:
+                              const InputDecoration(hintText: 'e.g. 200'),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () {
+                              Navigator.of(context).pop(); // cancel
+                            },
+                            child: const Text('Cancel'),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              final value =
+                                  double.tryParse(_amountController.text);
+                              if (value != null && value > 0) {
+                                Navigator.of(context).pop(value);
+                              } else {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                      content:
+                                          Text('Enter a valid reward amount')),
+                                );
+                              }
+                            },
+                            child: const Text('Reward'),
+                          ),
+                        ],
+                      );
+                    },
+                  );
+
+                  if (enteredAmount == null)
+                    return; // user cancelled or invalid input
+
+                  final prefs = await SharedPreferences.getInstance();
+                  final payerPlayerID =
+                      prefs.getString('playerID') ?? 'UnknownPlayer';
+                  double rewardAmount = enteredAmount;
+
+                  final payerResponse = await Supabase.instance.client
+                      .from('players_test')
+                      .select('wallet')
+                      .eq('game_id', widget.gameId)
+                      .eq('player_id', payerPlayerID)
+                      .maybeSingle();
+
+                  final receiverResponse = await Supabase.instance.client
+                      .from('players_test')
+                      .select('wallet')
+                      .eq('game_id', widget.gameId)
+                      .eq('player_id', player.player_id)
+                      .maybeSingle();
+
+                  if (payerResponse != null &&
+                      receiverResponse != null &&
+                      payerResponse['wallet'] != null &&
+                      receiverResponse['wallet'] != null) {
+                    double payerWallet =
+                        (payerResponse['wallet'] as num).toDouble();
+                    double receiverWallet =
+                        (receiverResponse['wallet'] as num).toDouble();
+
+                    if (payerWallet >= rewardAmount) {
+                      double newPayerWallet = payerWallet - rewardAmount;
+                      double newReceiverWallet = receiverWallet + rewardAmount;
+
+                      await Supabase.instance.client
+                          .from('players_test')
+                          .update({'wallet': newPayerWallet})
+                          .eq('game_id', widget.gameId)
+                          .eq('player_id', payerPlayerID);
+
+                      await Supabase.instance.client
+                          .from('players_test')
+                          .update({'wallet': newReceiverWallet})
+                          .eq('game_id', widget.gameId)
+                          .eq('player_id', player.player_id);
+                      await Supabase.instance.client
+                          .from('transactions')
+                          .insert({
+                        'game_id': widget.gameId,
+                        'value': rewardAmount,
+                        'from': currentPlayerName,
+                        'to': player.name,
+                        'code': "${payerPlayerID}_${player.player_id}",
+                        'date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
+                        'time': DateFormat('HH:mm:ss').format(DateTime.now()),
+                      });
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                              content: Text(
+                                  'Rewarded ₹$rewardAmount to ${player.name}')),
+                        );
+                      }
+                    } else {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                              content: Text(
+                                  'Insufficient balance to reward ₹$rewardAmount')),
+                        );
+                      }
+                    }
+                  } else {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                            content: Text('Failed to fetch wallet data')),
+                      );
+                    }
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  padding: EdgeInsets.all(5), // Remove internal padding
+
+                  fixedSize: Size(25.sp, 20.sp), // 👈 Set button size here
+
+                  elevation: 0,
+                  foregroundColor: player.color,
+                  backgroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                child: Image.asset(
+                  'assets/images/pay.png', fit: BoxFit.contain,
+
+                  width: 23
+                      .sp, // Use MediaQuery or a fixed size if sp is undefined
+                  height: 23.sp,
+                  color: player.color, // Apply red color
+                  colorBlendMode:
+                      BlendMode.srcIn, // Ensures image is tinted red
+                ),
+              ),
+            )
           /*  if (!isCurrentPlayer)
             Expanded(
               flex: 5,
@@ -383,6 +552,118 @@ class _PlayersScreenState extends State<PlayersScreen> {
         false; // If the user cancels, return false, else return true to pop
   }
 
+  Future<void> payBank() async {
+    final TextEditingController _amountController = TextEditingController();
+
+    double? enteredAmount = await showDialog<double>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Enter Amount'),
+          content: TextField(
+            controller: _amountController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(hintText: 'e.g. 200'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop(); // cancel
+              },
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                final value = double.tryParse(_amountController.text);
+                if (value != null && value > 0) {
+                  Navigator.of(context).pop(value);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Enter amount')),
+                  );
+                }
+              },
+              child: const Text('Pay'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (enteredAmount == null) return; // user cancelled or invalid input
+
+    final prefs = await SharedPreferences.getInstance();
+    final payerPlayerID = prefs.getString('playerID') ?? 'UnknownPlayer';
+    double rewardAmount = enteredAmount;
+
+    final payerResponse = await Supabase.instance.client
+        .from('players_test')
+        .select('wallet')
+        .eq('game_id', widget.gameId)
+        .eq('player_id', payerPlayerID)
+        .maybeSingle();
+
+    final receiverResponse = await Supabase.instance.client
+        .from('players_test')
+        .select('wallet, player_id, name')
+        .eq('game_id', widget.gameId)
+        .eq('role', "banker")
+        .maybeSingle();
+
+    if (payerResponse != null &&
+        receiverResponse != null &&
+        payerResponse['wallet'] != null &&
+        receiverResponse['wallet'] != null) {
+      double payerWallet = (payerResponse['wallet'] as num).toDouble();
+      double receiverWallet = (receiverResponse['wallet'] as num).toDouble();
+
+      if (payerWallet >= rewardAmount) {
+        double newPayerWallet = payerWallet - rewardAmount;
+        double newReceiverWallet = receiverWallet + rewardAmount;
+
+        await Supabase.instance.client
+            .from('players_test')
+            .update({'wallet': newPayerWallet})
+            .eq('game_id', widget.gameId)
+            .eq('player_id', payerPlayerID);
+
+        final bank = await Supabase.instance.client
+            .from('players_test')
+            .update({'wallet': newReceiverWallet})
+            .eq('game_id', widget.gameId)
+            .eq('role', "banker");
+        await Supabase.instance.client.from('transactions').insert({
+          'game_id': widget.gameId,
+          'value': rewardAmount,
+          'from': currentPlayerName,
+          'to': receiverResponse['name'],
+          'code': "${payerPlayerID}_${receiverResponse['player_id']}",
+          'date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
+          'time': DateFormat('HH:mm:ss').format(DateTime.now()),
+        });
+        if (context.mounted) {
+          /*  ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text('Rewarded ₹$rewardAmount to ${player.name}')),
+          ); */
+        }
+      } else {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text('Insufficient balance to pay ₹$rewardAmount')),
+          );
+        }
+      }
+    } else {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to fetch wallet data')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
@@ -404,7 +685,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
                     MaterialPageRoute(
                       builder: (_) => TransactionHistoryPage(
                         gameId: widget.gameId,
-                        playerId: playerID??'-',
+                        playerId: playerID ?? '-',
                       ),
                     ),
                   );
@@ -540,17 +821,19 @@ class _PlayersScreenState extends State<PlayersScreen> {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              const ReceiveButton(),
-                              const SizedBox(width: 12),
+                              /*    const ReceiveButton(),
+                              const SizedBox(width: 12), */
                               ElevatedButton.icon(
                                 onPressed: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) =>
-                                          QRPayScanner(gameId: widget.gameId),
-                                    ),
-                                  );
+                                  payOption == 'ScanPay'
+                                      ? Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) => QRPayScanner(
+                                                gameId: widget.gameId),
+                                          ),
+                                        )
+                                      : payBank();
                                 },
                                 icon: Icon(FontAwesomeIcons.moneyBill,
                                     size: 16.sp),
@@ -559,17 +842,13 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                   style: TextStyle(fontSize: 16.sp),
                                 ),
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.red.shade600,
-                                  foregroundColor: Colors.white,
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 10, vertical: 5),
-                                  textStyle: TextStyle(
-                                      fontSize: 14.sp,
-                                      fontWeight: FontWeight.w500),
+                                  backgroundColor: Colors.red.shade600,
+                                  foregroundColor: Colors.white,
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(10),
                                   ),
-                                  elevation: 0, // Flat look
                                 ),
                               ),
                             ],

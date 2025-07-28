@@ -17,6 +17,7 @@ class BankValueScreen extends StatefulWidget {
 
 class _BankValueScreenState extends State<BankValueScreen> {
   bool _isLoading = false;
+  String _selectedOption = 'ScanPay';
 
   final TextEditingController _bankValueController = TextEditingController();
   final TextEditingController _playerAmountController = TextEditingController();
@@ -51,6 +52,7 @@ class _BankValueScreenState extends State<BankValueScreen> {
     }
     setState(() {
       _isLoading = true;
+      
     });
     final bankValue = double.tryParse(_bankValueController.text.trim());
     final playerValue = double.tryParse(_playerAmountController.text.trim());
@@ -75,8 +77,10 @@ class _BankValueScreenState extends State<BankValueScreen> {
       'role': role,
       'name': playerName,
       'wallet': bankValue,
-      'player_id': playerID
+      'player_id': playerID,
+      'SP/IP': _selectedOption
     });
+        await prefs.setString('name', 'banker');
 
     // Proceed to next screen
     Navigator.pushReplacement(
@@ -129,6 +133,47 @@ class _BankValueScreenState extends State<BankValueScreen> {
               _buildBrownTextField(
                 controller: _advanceAmountController,
                 label: 'Set Advance Value',
+              ),
+              SizedBox(height: 2.h),
+              Center(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    Row(
+                      children: [
+                        Radio<String>(
+                          value: 'ScanPay',
+                          groupValue: _selectedOption,
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() {
+                                _selectedOption = value;
+                              });
+                            }
+                          },
+                        ),
+                        const Text('ScanPay'),
+                      ],
+                    ),
+                    const SizedBox(width: 20),
+                    Row(
+                      children: [
+                        Radio<String>(
+                          value: 'InstantPay',
+                          groupValue: _selectedOption,
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() {
+                                _selectedOption = value;
+                              });
+                            }
+                          },
+                        ),
+                        const Text('InstantPay'),
+                      ],
+                    ),
+                  ],
+                ),
               ),
               SizedBox(height: 4.h),
               SizedBox(
