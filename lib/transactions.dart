@@ -197,38 +197,108 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
         backgroundColor: Colors.yellow.shade50,
         actions: [
           IconButton(
-              onPressed: () async {
-                Navigator.of(context)
-                    .pop(); // or your custom logic to leave the game
-              },
-              icon: Icon(
-                FontAwesomeIcons.close,
-                size: 20.sp,
-              )),
+            onPressed: () {
+              Navigator.of(context).pop(); // Exit logic
+            },
+            icon: Icon(
+              FontAwesomeIcons.close,
+              size: 20.sp,
+            ),
+          ),
           const SizedBox(width: 10),
         ],
       ),
-      body: FutureBuilder<List<Transaction>>(
-        future: _transactionsFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          } else if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
-          } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            return const Center(child: Text("No transactions yet."));
-          }
+      body: SizedBox(
+        height: 90.h,
+        child: Column(
+          children: [
+            // Header row
+            Padding(
+              padding:
+                  const EdgeInsets.symmetric(vertical: 0.0, horizontal: 10),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(vertical: 0, horizontal: 10),
+                decoration: BoxDecoration(
+                  color: Colors.yellow.shade50,
+                  //   border: Border.all(color: Colors.grey, width: 1),
+                  borderRadius: const BorderRadius.all(Radius.circular(12)),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      flex: 4,
+                      child: Text(
+                        "From",
+                        style: TextStyle(
+                            fontSize: 14.sp, fontWeight: FontWeight.w500),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Expanded(
+                      flex: 3,
+                      child: Text(
+                        "To",
+                        style: TextStyle(
+                            fontSize: 14.sp, fontWeight: FontWeight.w500),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        "Value",
+                        style: TextStyle(
+                          fontSize: 14.sp,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black,
+                        ),
+                        textAlign: TextAlign.right,
+                      ),
+                    ),
+                    Expanded(
+                      flex: 3,
+                      child: Text(
+                        "Time",
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14.sp,
+                          color: Colors.black,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
 
-          final transactions = snapshot.data!;
-          return ListView.builder(
-            padding: const EdgeInsets.all(10),
-            itemCount: transactions.length, //+ 1,
-            itemBuilder: (context, index) {
-              //  if (index == 0) return _buildHeaderRow();
-              return _buildTransactionRow(transactions[index /* - 1 */]);
-            },
-          );
-        },
+            // Transactions list
+            Expanded(
+              child: FutureBuilder<List<Transaction>>(
+                future: _transactionsFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  } else if (snapshot.hasError) {
+                    return Center(child: Text('Error: ${snapshot.error}'));
+                  } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                    return const Center(child: Text("No transactions yet."));
+                  }
+
+                  final transactions = snapshot.data!;
+                  return ListView.builder(
+                    padding: const EdgeInsets.all(10),
+                    itemCount: transactions.length,
+                    itemBuilder: (context, index) {
+                      return _buildTransactionRow(transactions[index]);
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

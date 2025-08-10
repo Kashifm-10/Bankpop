@@ -415,7 +415,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                             .insert({
                           'game_id': widget.gameId,
                           'value': rewardAmount,
-                          'from': "banker",
+                          'from': "Bank",
                           'to': player.name,
                           'code': "${payerPlayerID}_${player.playerID}",
                           'date':
