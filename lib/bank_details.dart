@@ -2,7 +2,6 @@ import 'dart:math';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:mon/banker_screen.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -52,7 +51,6 @@ class _BankValueScreenState extends State<BankValueScreen> {
     }
     setState(() {
       _isLoading = true;
-      
     });
     final bankValue = double.tryParse(_bankValueController.text.trim());
     final playerValue = double.tryParse(_playerAmountController.text.trim());
@@ -67,7 +65,7 @@ class _BankValueScreenState extends State<BankValueScreen> {
     // Example data
     String gameId = generateGameId(5);
     String role = 'banker'; // You can adjust this based on context
-    String playerName = 'banker'; // Replace with actual input if needed
+    String playerName = 'Bank'; // Replace with actual input if needed
     SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setDouble('playerValue', playerValue!);
     await prefs.setDouble('advance', advanceValue);
@@ -80,13 +78,15 @@ class _BankValueScreenState extends State<BankValueScreen> {
       'player_id': playerID,
       'SP/IP': _selectedOption
     });
-        await prefs.setString('name', 'banker');
+    await prefs.setString('name', 'banker');
+    await prefs.setString('gameID', gameId);
 
     // Proceed to next screen
+    // ignore: use_build_context_synchronously
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
-        builder: (_) => LeaderboardScreen(
+        builder: (_) => BankerGameScreen(
           bankValue: bankValue,
           gameId: gameId,
         ),

@@ -6,13 +6,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class PlayerQRScannerScreen extends StatefulWidget {
-  final String playerName;
-  final double wallet;
+   final bool scan;
 
   const PlayerQRScannerScreen({
     super.key,
-    required this.playerName,
-    required this.wallet,
+     required this.scan,
   });
 
   @override
@@ -103,7 +101,7 @@ class _PlayerQRScannerScreenState extends State<PlayerQRScannerScreen> {
         .eq('player_id', playerID)
         .limit(1);
 
-    final existingPlayerData = existingPlayerResponse as List<dynamic>;
+    final existingPlayerData = existingPlayerResponse;
     if (existingPlayerData.isEmpty) {
       // If player doesn't exist, insert a new record
       try {
@@ -121,6 +119,7 @@ class _PlayerQRScannerScreenState extends State<PlayerQRScannerScreen> {
       }
     }
 
+    // ignore: use_build_context_synchronously
     _showWaitingDialog(context);
 
     final stopwatch = Stopwatch()..start();
@@ -139,9 +138,9 @@ class _PlayerQRScannerScreenState extends State<PlayerQRScannerScreen> {
           //.eq('name', nameController.text)
           .limit(1);
 
-      final data = response as List<dynamic>;
+      final data = response;
       if (data.isNotEmpty) {
-        approvedPlayer = data.first as Map<String, dynamic>;
+        approvedPlayer = data.first;
         break;
       }
 
@@ -151,6 +150,7 @@ class _PlayerQRScannerScreenState extends State<PlayerQRScannerScreen> {
     Navigator.of(context).pop(); // Close waiting dialog
 
     if (approvedPlayer != null) {
+      // ignore: use_build_context_synchronously
       Navigator.pop(context, approvedPlayer); // Return player data
     } else {
       _showUnableToJoinDialog();

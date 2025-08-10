@@ -16,6 +16,8 @@ import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'home.dart';
+
 class Player {
   final String player_id;
   final String name;
@@ -62,7 +64,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
   double? previousWallet;
   int playerPosition = 1;
   String positionStatus = 'none';
-  String payOption = 'ScanPay';
+  String payOption = 'InstantPay';
 
   @override
   void initState() {
@@ -88,6 +90,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
 
   Future<void> fetchCurrentPlayerName() async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('gameID', widget.gameId);
+
     setState(() {
       currentPlayerName = prefs.getString('name');
     });
@@ -696,8 +700,17 @@ class _PlayersScreenState extends State<PlayersScreen> {
                 onPressed: () async {
                   bool shouldLeave = await _onWillPop();
                   if (shouldLeave) {
-                    Navigator.of(context)
-                        .pop(); // or your custom logic to leave the game
+                     SharedPreferences prefs =
+                        await SharedPreferences.getInstance();
+                    await prefs.remove('gameID');
+
+                    // ignore: use_build_context_synchronously
+                    Navigator.pushAndRemoveUntil(
+                      context,
+                      MaterialPageRoute(
+                          builder: (context) => const WelcomePage()),
+                      (Route<dynamic> route) => false,
+                    ); // or your custom logic to leave the game
                   }
                 },
                 icon: const Icon(FontAwesomeIcons.signOutAlt)),

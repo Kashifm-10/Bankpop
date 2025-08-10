@@ -6,6 +6,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:mon/home.dart';
 import 'package:mon/main.dart';
 import 'package:mon/pay.dart';
 import 'package:mon/receive.dart';
@@ -17,24 +18,24 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart'; // Add to pubspec.yaml
 
-class LeaderboardScreen extends StatefulWidget {
+class BankerGameScreen extends StatefulWidget {
   final double bankValue;
   final String gameId;
 
-  const LeaderboardScreen(
+  const BankerGameScreen(
       {super.key, required this.bankValue, required this.gameId});
 
   @override
-  State<LeaderboardScreen> createState() => _LeaderboardScreenState();
+  State<BankerGameScreen> createState() => _BankerGameScreenState();
 }
 
-class _LeaderboardScreenState extends State<LeaderboardScreen> {
+class _BankerGameScreenState extends State<BankerGameScreen> {
   List<Player> players = [];
   bool isLoading = true;
   Timer? _pollingTimer;
   bool _dialogShown = false; // Track if a dialog is already shown
   double value = 0;
-  String payOption = 'ScanPay';
+  String payOption = 'InstantPay';
   String ID = '';
   @override
   void initState() {
@@ -66,7 +67,6 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
           .eq('game_id', widget.gameId)
           .eq('role', 'player')
           .order('wallet', ascending: false); // Sort by wallet descending
-      ;
 
       final data = response as List<dynamic>;
       final updatedPlayers =
@@ -204,7 +204,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
 
                     setState(() {
                       value = updatedWallet.toDouble();
-                      ID= banker['player_id'];
+                      ID = banker['player_id'];
                     });
                   }
 
@@ -230,32 +230,47 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: Colors.yellow.shade50,
-        title: Text('Game QR Code', style: TextStyle(fontSize: 18.sp)),
+        titlePadding:
+            const EdgeInsets.only(top: 10.0, left: 16.0, right: 8.0, bottom: 0),
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Join Game',
+              style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold),
+            ),
+            IconButton(
+              icon: const Icon(Icons.close),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+          ],
+        ),
         content: SizedBox(
           width: 60.w,
-          height: 70.w,
+          height: 30.h,
           child: Column(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             mainAxisSize: MainAxisSize.min,
             children: [
               QrImageView(
                 data: widget.gameId,
                 version: QrVersions.auto,
-                size: 50.w,
+                size: 50.sp,
                 gapless: false,
               ),
-              /*  SizedBox(height: 2.h),
-              Text('Bank: ${widget.gameId}',
-                  style:
-                      TextStyle(fontWeight: FontWeight.bold, fontSize: 18.sp)), */
+              Text(
+                'Game ID: ${widget.gameId}',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18.sp),
+                textAlign: TextAlign.center,
+              ),
+              Text(
+                'Scan or enter the Game ID to join',
+                style: TextStyle(fontWeight: FontWeight.w400, fontSize: 16.sp),
+                textAlign: TextAlign.center,
+              ),
             ],
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text("Close", style: TextStyle(fontSize: 16.sp)),
-          )
-        ],
       ),
     );
   }
@@ -613,7 +628,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
           actions: [
-             IconButton(
+            IconButton(
                 onPressed: () async {
                   Navigator.push(
                     context,
@@ -626,8 +641,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                   );
                 },
                 icon: const Icon(FontAwesomeIcons.history)),
-                            const SizedBox(width: 10),
-
+            const SizedBox(width: 10),
             IconButton(
               onPressed: () => _showQRDialog(context),
               icon: const Icon(FontAwesomeIcons.peopleGroup),
@@ -638,8 +652,17 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                 onPressed: () async {
                   bool shouldLeave = await _onWillPop();
                   if (shouldLeave) {
-                    Navigator.of(context)
-                        .pop(); // or your custom logic to leave the game
+                    SharedPreferences prefs =
+                        await SharedPreferences.getInstance();
+                    await prefs.remove('gameID');
+
+                    // ignore: use_build_context_synchronously
+                    Navigator.pushAndRemoveUntil(
+                      context,
+                      MaterialPageRoute(
+                          builder: (context) => const WelcomePage()),
+                      (Route<dynamic> route) => false,
+                    );
                   }
                 },
                 icon: const Icon(FontAwesomeIcons.signOutAlt)),

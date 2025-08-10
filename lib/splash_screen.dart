@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
+import 'package:mon/home.dart';
 import 'package:mon/role.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 
@@ -18,7 +19,7 @@ class _SplashScreenState extends State<SplashScreen> {
     Timer(const Duration(seconds: 3), () {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => const SelectRoleScreen()),
+        MaterialPageRoute(builder: (context) => const WelcomePage()),
       );
     });
   }
