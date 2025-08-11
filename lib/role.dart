@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:lottie/lottie.dart';
 import 'package:mon/bank_details.dart';
 import 'package:mon/main.dart';
 import 'package:mon/player_details.dart';
@@ -383,39 +384,73 @@ class SelectRoleScreen extends StatelessWidget {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        'Continue as',
-                        style: TextStyle(
-                          fontSize: 24.sp,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.black45,
-                          letterSpacing: 1.2,
+                      Padding(
+                        padding: const EdgeInsets.only(right: 15.0),
+                        child: SizedBox(
+                          height: 15.h,
+                          child: Lottie.asset("assets/lottie/thinking.json",
+                              fit: BoxFit.contain, repeat: true),
                         ),
                       ),
-                      SizedBox(height: 5.h),
-                      _buildRoleButton(
-                        context,
-                        title: 'Banker',
-                        icon: Icons.account_balance,
-                        color: Colors.brown,
-                        colors: [
-                          const Color(0xFF5B86E5),
-                          const Color(0xFF36D1DC)
-                        ], // Blue gradient
+                      SizedBox(height: 2.5.h),
+                      RoleButtonCard(
+                        title: "Become a\nBanker",
+                        gradientColors: [
+                          Color.fromARGB(255, 168, 167, 112),
+                          Color.fromARGB(255, 143, 138, 65)
+                        ],
+                        lottieAssetPath: "assets/lottie/bank_role.json",
+                        overlayImageUrl:
+                            "https://i.pinimg.com/736x/ba/71/9d/ba719dbedd1f8a0291a5415710f9ca53.jpg",
                         onTap: () => _goToBanker(context),
                       ),
-                      SizedBox(height: 3.h),
-                      _buildRoleButton(
-                        context,
-                        title: 'Player',
-                        icon: FontAwesomeIcons.dice,
-                        color: Colors.blue.shade300,
-                        colors: [
-                          const Color(0xFF7F00FF),
-                          const Color(0xFFE100FF)
-                        ], // Purple gradient
+                      const SizedBox(height: 20),
+                      RoleButtonCard(
+                        title: "Play as a\nPlayer",
+                        gradientColors: [
+                          Color.fromARGB(255, 123, 177, 228),
+                          Color.fromARGB(255, 104, 116, 223)
+                        ],
+                        lottieAssetPath: "assets/lottie/player_role.json",
+                        overlayImageUrl:
+                            "https://i.pinimg.com/1200x/ec/64/53/ec64534337b9832dcee5e7a4ab8f816d.jpg",
                         onTap: () => _goToPlayer(context),
                       ),
+                      const SizedBox(height: 10),
+                      Padding(
+                        padding: const EdgeInsets.all(10.0),
+                        child: Align(
+                            alignment: Alignment.bottomLeft,
+                            child: ElevatedButton(
+                              onPressed: () => Navigator.of(context).pop(),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red, // Background color
+                                foregroundColor:
+                                    Colors.white, // Text (foreground) color
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(
+                                      15), // Rounded corners
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize
+                                    .min, // Ensures the button only wraps its content
+                                children: [
+                                  Icon(
+                                    Icons.arrow_back_ios,
+                                    size: 15.sp,
+                                  ), // Left chevron icon
+                                  SizedBox(
+                                      width:
+                                          5), // Spacing between icon and text
+                                  Text(
+                                    'Back',
+                                    style: TextStyle(fontSize: 16.sp),
+                                  ),
+                                ],
+                              ),
+                            )),
+                      )
                     ],
                   ),
                 ),
@@ -475,6 +510,84 @@ class SelectRoleScreen extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class RoleButtonCard extends StatelessWidget {
+  final String title;
+  final IconData? icon;
+  final List<Color> gradientColors;
+  final String? overlayImageUrl; // Static image in the background
+  final String? lottieAssetPath; // 🆕 Foreground Lottie animation
+  final VoidCallback onTap;
+
+  const RoleButtonCard({
+    super.key,
+    required this.title,
+    required this.gradientColors,
+    this.icon,
+    this.overlayImageUrl,
+    this.lottieAssetPath,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 70.w,
+        height: 15.h,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(15),
+          gradient: LinearGradient(colors: gradientColors),
+        ),
+        child: Stack(
+          children: [
+            if (overlayImageUrl != null)
+              Opacity(
+                opacity: 0.5,
+                child: Image.network(
+                  overlayImageUrl!,
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  height: double.infinity,
+                ),
+              ),
+
+            // 🔥 Foreground Lottie animation
+            if (lottieAssetPath != null)
+              Positioned(
+                left: 0,
+                bottom: 0,
+                top: 0,
+                child: SizedBox(
+                  height: 12.h,
+                  width: 12.h,
+                  child: Lottie.asset(lottieAssetPath!,
+                      fit: BoxFit.contain, repeat: false),
+                ),
+              ),
+
+            Align(
+              alignment: Alignment.centerRight,
+              child: Padding(
+                padding: const EdgeInsets.all(25.0),
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 21.sp,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.right,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

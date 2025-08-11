@@ -1,8 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:lottie/lottie.dart';
 import 'package:mon/player_screen.dart';
 import 'package:mon/role.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -18,6 +20,10 @@ class WelcomePage extends StatefulWidget {
 
 class _WelcomePageState extends State<WelcomePage> {
   final supabase = Supabase.instance.client;
+  String appName = '';
+  String packageName = '';
+  String version = '';
+  String buildNumber = '';
 
   @override
   void initState() {
@@ -25,6 +31,17 @@ class _WelcomePageState extends State<WelcomePage> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkForPlayerAndNavigate();
+    });
+    _loadPackageInfo();
+  }
+
+  void _loadPackageInfo() async {
+    final info = await PackageInfo.fromPlatform();
+    setState(() {
+      appName = info.appName;
+      packageName = info.packageName;
+      version = info.version;
+      buildNumber = info.buildNumber;
     });
   }
 
@@ -159,19 +176,18 @@ class _WelcomePageState extends State<WelcomePage> {
                 child: Padding(
                   padding: EdgeInsets.only(top: 18.h),
                   child: Column(
-                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
                         'Welcome to Bankpop!',
                         style: TextStyle(
-                          fontSize: 25.sp,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.black45,
+                          fontSize: 26.sp,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.black87,
                           letterSpacing: 1.2,
                         ),
                       ),
-                      SizedBox(height: 8.h),
-                      _buildButton(
+                      SizedBox(height: 5.h),
+                      /*  _buildButton(
                         context,
                         title: 'Start Game',
                         icon: FontAwesomeIcons.dice,
@@ -193,6 +209,38 @@ class _WelcomePageState extends State<WelcomePage> {
                           const Color.fromARGB(255, 245, 113, 25)
                         ], // Red gradient
                         onTap: () => _exitApp(context),
+                      ), */
+                      ButtonCard(
+                        title: "Start",
+                        gradientColors: const [
+                          Color.fromARGB(255, 123, 177, 228),
+                          Color.fromARGB(255, 104, 116, 223)
+                        ],
+                        lottieAssetPath: "assets/lottie/dice.json",
+                        overlayImageUrl:
+                            "https://i.pinimg.com/736x/b2/93/53/b293530e766938aeaad897363c9df0eb.jpg",
+                        onTap: () => _startGame(context),
+                      ),
+                      const SizedBox(height: 20),
+                      ButtonCard(
+                        title: "Exit",
+                        gradientColors: const [
+                          Color.fromARGB(255, 235, 112, 112),
+                          Color.fromARGB(255, 214, 45, 45)
+                        ],
+                        lottieAssetPath: "assets/lottie/close.json",
+                        overlayImageUrl:
+                            "https://i.pinimg.com/736x/03/52/7d/03527dc76d013498547fb1e61759dcd4.jpg",
+                        onTap: () => _exitApp(context),
+                      ),
+                      SizedBox(height: 10.h),
+                      Text(
+                        'Ver: $version.$buildNumber',
+                        style: TextStyle(
+                          fontSize: 14.sp,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.black45,
+                        ),
                       ),
                     ],
                   ),
@@ -285,5 +333,85 @@ class _WelcomePageState extends State<WelcomePage> {
       // ignore: use_build_context_synchronously
       Navigator.of(context).pop(); // Close the current screen
     }
+  }
+}
+
+class ButtonCard extends StatelessWidget {
+  final String title;
+  final IconData? icon;
+  final List<Color> gradientColors;
+  final String? overlayImageUrl; // Static image in the background
+  final String? lottieAssetPath; // 🆕 Foreground Lottie animation
+  final VoidCallback onTap;
+
+  const ButtonCard({
+    super.key,
+    required this.title,
+    required this.gradientColors,
+    this.icon,
+    this.overlayImageUrl,
+    this.lottieAssetPath,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 70.w,
+        height: 12.h,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(15),
+          gradient: LinearGradient(colors: gradientColors),
+        ),
+        child: Stack(
+          children: [
+            if (overlayImageUrl != null)
+              Opacity(
+                opacity: 0.5,
+                child: Image.network(
+                  overlayImageUrl!,
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  height: double.infinity,
+                ),
+              ),
+
+            // 🔥 Foreground Lottie animation
+            if (lottieAssetPath != null)
+              Positioned(
+                left: 0,
+                bottom: 0,
+                top: 0,
+                child: SizedBox(
+                  height: 12.h,
+                  width: 12.h,
+                  child: Lottie.asset(lottieAssetPath!,
+                      fit: BoxFit.contain, repeat: true),
+                ),
+              ),
+
+            Align(
+              alignment: title == 'Exit Game'
+                  ? Alignment.bottomRight
+                  : Alignment.bottomRight,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 10.0, right: 10),
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 20.sp,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.right,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
