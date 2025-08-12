@@ -1,3 +1,8 @@
+buildscript {
+    ext {
+        agp_version = '7.2.1'
+    }
+}
 allprojects {
     repositories {
         google()
@@ -5,12 +10,42 @@ allprojects {
     }
 }
 
-rootProject.buildDir = "../build"
+rootProject.buildDir = '../build'
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
 }
 subprojects {
-    project.evaluationDependsOn(":app")
+    afterEvaluate { project ->
+        if (project.hasProperty("android")) {
+            project.android {
+                compileSdkVersion 35
+                compileOptions {
+                    sourceCompatibility JavaVersion.VERSION_1_8
+                    targetCompatibility JavaVersion.VERSION_1_8
+                    //compileSdkVersion 34
+                }
+            }
+ 
+            project.tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+                kotlinOptions {
+                    jvmTarget = "1.8"
+                }
+            }
+             project.android {
+                if (namespace == null) {
+                    namespace project.group
+                }
+            }
+        }
+        
+    }
+}
+
+
+configurations.all {
+    resolutionStrategy {
+        force 'androidx.core:core-ktx:1.6.0'
+    }
 }
 
 tasks.register("clean", Delete) {

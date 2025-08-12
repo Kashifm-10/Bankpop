@@ -51,6 +51,12 @@ dependencies:
   intl: ^0.20.2
   timeago: ^3.7.1
   package_info_plus: ^8.3.0
+  google_fonts: ^6.3.0
+  provider: ^6.1.5
+  image_cropper: ^9.1.0
+  image_picker: ^1.1.2
+  url_launcher: ^6.3.2
+  path_provider: ^2.1.5
 
 
 dev_dependencies:
@@ -101,6 +107,25 @@ flutter:
     - assets/lottie/thinking.json
     - assets/lottie/dice.json
     - assets/lottie/close.json
+    - assets/lottie/how_to.json
+    - assets/lottie/help.json
+    - assets/lottie/money_bag.json
+    - assets/lottie/instant.json
+    - assets/lottie/scan.json
+    - assets/avatars/girl1.jpg
+    - assets/avatars/girl2.jpg
+    - assets/avatars/girl3.jpg
+    - assets/avatars/girl4.jpg
+    - assets/avatars/girl5.jpg
+    - assets/avatars/girl6.jpg
+    - assets/avatars/girl7.jpg
+    - assets/avatars/boy1.jpg
+    - assets/avatars/boy2.jpg
+    - assets/avatars/boy3.jpg
+    - assets/avatars/boy4.jpg
+    - assets/avatars/boy5.jpg
+    - assets/avatars/boy6.jpg
+    - assets/avatars/boy7.jpg
   #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see
