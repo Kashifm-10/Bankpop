@@ -357,17 +357,17 @@ class SelectRoleScreen extends StatelessWidget {
             icon: Icon(
               CupertinoIcons.chevron_back,
               size: 22.sp,
-              color: Colors.white,
+              color:Color(0xFF689F38),
             )),
         title: const Text(
           "Choose Role",
           style: TextStyle(
             fontWeight: FontWeight.bold,
-            color: Colors.white,
+            color: Color(0xFF689F38),
             letterSpacing: 1.1,
           ),
         ),
-        backgroundColor: const Color(0xFF689F38), // fresh green
+        backgroundColor: Colors.transparent, // fresh green
         elevation: 0,
       ),
       body: Container(
@@ -376,8 +376,8 @@ class SelectRoleScreen extends StatelessWidget {
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             colors: [
-              Color(0xFFF1F8E9), // soft light green
-              Color(0xFFDDE8CC), // slightly darker soft green
+              Color(0xFFFFF8E1), // soft light green
+              Color(0xFFFFF8E1), // slightly darker soft green
             ],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,

@@ -112,16 +112,16 @@ class _BankValueScreenState extends State<BankValueScreen> {
             icon: Icon(
               CupertinoIcons.chevron_back,
               size: 22.sp,
-              color: Colors.white, // deep green icon
+              color: Color(0xFF689F38), // deep green icon
             ),
           ),
-          backgroundColor: const Color(0xFF689F38), // fresh green
+          backgroundColor: Colors.transparent, // fresh green
           elevation: 0,
           title: const Text(
             'Enter Bank Value',
             style: TextStyle(
               fontWeight: FontWeight.bold,
-              color: Colors.white, // deep green text
+              color: Color(0xFF689F38), // deep green text
             ),
           ),
         ),
@@ -129,8 +129,8 @@ class _BankValueScreenState extends State<BankValueScreen> {
           decoration: const BoxDecoration(
             gradient: LinearGradient(
               colors: [
-                Color(0xFFF1F8E9), // soft light green
-                Color(0xFFDDE8CC), // slightly darker soft green
+                Color(0xFFFFF8E1), // soft light green
+                Color(0xFFFFF8E1), // slightly darker soft green
               ],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
@@ -152,6 +152,10 @@ class _BankValueScreenState extends State<BankValueScreen> {
                     ),
                   ),
                 ),
+                _buildGreenTextField(
+                  controller: _bankValueController,
+                  label: 'Bank Total Value',
+                ),
                 Align(
                   alignment: Alignment.topLeft,
                   child: Padding(
@@ -166,11 +170,11 @@ class _BankValueScreenState extends State<BankValueScreen> {
                     ),
                   ),
                 ),
-                _buildGreenTextField(
-                  controller: _bankValueController,
-                  label: 'Bank Total Value',
-                ),
                 SizedBox(height: 1.5.h),
+                _buildGreenTextField(
+                  controller: _playerAmountController,
+                  label: 'Per Player',
+                ),
                 Align(
                   alignment: Alignment.topLeft,
                   child: Padding(
@@ -185,11 +189,11 @@ class _BankValueScreenState extends State<BankValueScreen> {
                     ),
                   ),
                 ),
-                _buildGreenTextField(
-                  controller: _playerAmountController,
-                  label: 'Per Player',
-                ),
                 SizedBox(height: 1.5.h),
+                _buildGreenTextField(
+                  controller: _advanceAmountController,
+                  label: 'Advance Value',
+                ),
                 Align(
                   alignment: Alignment.topLeft,
                   child: Padding(
@@ -203,10 +207,6 @@ class _BankValueScreenState extends State<BankValueScreen> {
                       ),
                     ),
                   ),
-                ),
-                _buildGreenTextField(
-                  controller: _advanceAmountController,
-                  label: 'Advance Value',
                 ),
                 SizedBox(height: 2.h),
                 Center(
@@ -313,6 +313,20 @@ class _BankValueScreenState extends State<BankValueScreen> {
                         ),
                       ),
                     ],
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.center,
+                  child: Padding(
+                    padding: const EdgeInsets.all(5.0),
+                    child: Text(
+                      'Choose the payment type to continue',
+                      style: TextStyle(
+                        fontSize: 14.sp,
+                        fontWeight: FontWeight.w400,
+                        color: const Color(0xFF33691E), // medium green
+                      ),
+                    ),
                   ),
                 ),
                 SizedBox(height: 4.h),

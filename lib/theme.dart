@@ -45,7 +45,7 @@ class MaterialTheme {
       onTertiaryContainer: Color(0xFF00201A),
       error: Color(0xFFB00020),
       onError: Colors.white,
-      background: Color(0xFFFFFDE7),
+      background: Color(0xFFFFF8E1),
       onBackground: Color(0xFF1B1B1B),
       surface: Color(0xFFF9F9F9),
       onSurface: Color(0xFF1B1B1B),

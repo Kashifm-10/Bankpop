@@ -198,7 +198,7 @@ class _WelcomePageState extends State<WelcomePage> {
                   "•  ",
                   style: TextStyle(
                     fontSize: 16,
-                    color: Color(0xFF33691E), // deep green bullet
+                    color: Color(0xFF827717),
                   ),
                 ),
                 Expanded(
@@ -206,7 +206,7 @@ class _WelcomePageState extends State<WelcomePage> {
                     text,
                     style: const TextStyle(
                       fontSize: 14,
-                      color: Color(0xFF2E7D32), // main text green
+                      color: Color(0xFF827717),
                     ),
                   ),
                 ),
@@ -224,23 +224,23 @@ class _WelcomePageState extends State<WelcomePage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  "$role (ScanPay):",
-                  style: const TextStyle(
+                const Text(
+                  "ScanPay",
+                  style: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 16,
-                    color: Color(0xFF2E7D32), // calm green
+                    color: Color(0xFFF57F17),
                   ),
                 ),
                 const SizedBox(height: 8),
                 ...scanPayPoints.map(bullet),
                 const SizedBox(height: 16),
-                Text(
-                  "$role (InstantPay):",
-                  style: const TextStyle(
+                const Text(
+                  "InstantPay",
+                  style: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 16,
-                    color: Color(0xFF1B5E20), // darker green
+                    color: Color(0xFFF57F17),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -253,7 +253,7 @@ class _WelcomePageState extends State<WelcomePage> {
         return AlertDialog(
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          backgroundColor: const Color(0xFFF1F8E9), // soft light green
+          backgroundColor: const Color(0xFFFFF9C4), // soft light green
           title: const Text(
             "How to Play",
             style: TextStyle(
@@ -394,6 +394,7 @@ class _WelcomePageState extends State<WelcomePage> {
                           },
                           child: const Icon(
                             CupertinoIcons.info_circle_fill,
+                            color: Color(0xFF33691E),
                           ),
                         )
                       ],
@@ -401,7 +402,7 @@ class _WelcomePageState extends State<WelcomePage> {
                     SizedBox(height: 2.h),
                     GestureDetector(
                       onTap: () {
-                        Navigator.push(
+                        Navigator.pushReplacement(
                           context,
                           MaterialPageRoute(
                               builder: (_) => const ProfilePage()),
@@ -423,7 +424,7 @@ class _WelcomePageState extends State<WelcomePage> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      'Hey, ydydbcsde',
+                                      'Hey, $userName',
                                       style: TextStyle(
                                         fontSize: 22.sp,
                                         fontWeight: FontWeight.bold,

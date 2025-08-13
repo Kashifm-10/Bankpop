@@ -6,6 +6,7 @@ import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class ProfileDialog extends StatefulWidget {
   final bool first;
@@ -57,32 +58,45 @@ class _ProfileDialogState extends State<ProfileDialog> {
   }
 
   Future<void> _pickAndCropImage() async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    // Request permissions
 
-    if (pickedFile != null) {
-      final cropped = await ImageCropper().cropImage(
-        sourcePath: pickedFile.path,
-        aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
-        compressQuality: 90,
-        uiSettings: [
-          AndroidUiSettings(
-            toolbarTitle: 'Crop Image',
-            toolbarColor: Colors.deepPurple,
-            toolbarWidgetColor: Colors.white,
-          ),
-          IOSUiSettings(title: 'Crop Image'),
-        ],
-      );
+    try {
+      final picker = ImagePicker();
+      final pickedFile = await picker.pickImage(source: ImageSource.gallery);
 
-      if (cropped != null) {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString("profile_image", cropped.path);
-        setState(() {
-          _profileImage = File(cropped.path);
-          _selectedAvatarIndex = null; // Clear avatar selection
-        });
+      if (pickedFile != null) {
+        final cropped = await ImageCropper().cropImage(
+          sourcePath: pickedFile.path,
+          aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
+          compressQuality: 90,
+          uiSettings: [
+            AndroidUiSettings(
+              toolbarTitle: 'Crop Image',
+              toolbarColor: Color(0xFF689F38),
+              toolbarWidgetColor: Colors.white,
+              backgroundColor: Color(0xFFFFF8E1),
+              activeControlsWidgetColor: Color(0xFF689F38),
+              dimmedLayerColor: Color(0xFFFFF8E1),
+              cropFrameColor: Color(0xFF689F38),
+              
+            ),
+            IOSUiSettings(title: 'Crop Image'),
+          ],
+        );
+
+        if (cropped != null) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString("profile_image", cropped.path);
+          setState(() {
+            _profileImage = File(cropped.path);
+            _selectedAvatarIndex = null; // Clear avatar selection
+          });
+        }
       }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e')),
+      );
     }
   }
 
@@ -127,7 +141,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       backgroundColor:
-          const Color(0xFFF1F8E9), // soft light green like body cards
+          const Color(0xFFFFF8E1), // soft light green like body cards
       title: const Text(
         "Edit Profile",
         style: TextStyle(
