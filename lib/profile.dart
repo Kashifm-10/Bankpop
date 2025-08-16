@@ -267,21 +267,25 @@ class _ProfilePageState extends State<ProfilePage> {
                       right: 4,
                       child: InkWell(
                         onTap: () async {
+                          final prefs = await SharedPreferences.getInstance();
+                          int? Index = prefs.getInt("selected_avatar_index");
+
                           //await _pickAndCropImage();
                           // Add a small bounce animation or ripple effect here if you want
                           bool? updated = await showDialog(
                             context: context,
-                            builder: (context) => const ProfileDialog(
+                            builder: (context) => ProfileDialog(
                               first: false,
+                              prevIndex: Index!,
                             ),
                           );
 
-                          if (updated == true) {
-                            await load();
+                          //  if (updated == true) {
+                          await load();
 
-                            // Reload UI after changes
-                            setState(() {});
-                          }
+                          // Reload UI after changes
+                          setState(() {});
+                          // }
                         },
                         borderRadius: BorderRadius.circular(30),
                         child: Container(

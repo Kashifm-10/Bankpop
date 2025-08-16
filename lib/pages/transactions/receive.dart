@@ -12,15 +12,16 @@ class ReceiveButton extends StatelessWidget {
   Future<void> _showValueDialog(BuildContext context) async {
     final prefs = await SharedPreferences.getInstance();
     final playerID = prefs.getString('playerID') ?? 'UnknownPlayer';
-    final name = prefs.getString('name') ?? 'Bank';
+    final name = prefs.getString('profile_name') ?? 'Bank';
 
     final TextEditingController controller = TextEditingController();
 
+    // ignore: use_build_context_synchronously
     showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
-          backgroundColor: Colors.yellow.shade50,
+          backgroundColor: const Color(0xFFFFF8E1),
           title: const Text('Enter Value'),
           content: TextField(
             controller: controller,

@@ -201,6 +201,7 @@ class _QRPayScannerState extends State<QRPayScanner> {
     return await showDialog<bool>(
           context: context,
           builder: (_) => AlertDialog(
+            backgroundColor: Color(0xFFFFF8E1),
             title: const Text('Confirm Payment'),
             content: Text('Pay $value to Player ID: $playerID?'),
             actions: [

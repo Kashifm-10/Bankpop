@@ -10,7 +10,9 @@ import 'package:permission_handler/permission_handler.dart';
 
 class ProfileDialog extends StatefulWidget {
   final bool first;
-  const ProfileDialog({super.key, required this.first});
+  final int prevIndex;
+  const ProfileDialog(
+      {super.key, required this.first, required this.prevIndex});
 
   @override
   State<ProfileDialog> createState() => _ProfileDialogState();
@@ -48,13 +50,14 @@ class _ProfileDialogState extends State<ProfileDialog> {
   Future<void> _loadSavedData() async {
     final prefs = await SharedPreferences.getInstance();
     _nameController.text = prefs.getString('profile_name') ?? '';
-
+    final avatar = prefs.getString('avatar_path');
+    final avatarIndex = prefs.getInt('selected_avatar_index');
     String? path = prefs.getString("profile_image");
     if (path != null && File(path).existsSync()) {
       setState(() => _profileImage = File(path));
     }
-
-    _selectedAvatarIndex = prefs.getInt("selected_avatar_index");
+    selap = avatar!;
+    selindex = avatarIndex!;
   }
 
   Future<void> _pickAndCropImage() async {
@@ -78,7 +81,6 @@ class _ProfileDialogState extends State<ProfileDialog> {
               activeControlsWidgetColor: Color(0xFF689F38),
               dimmedLayerColor: Color(0xFFFFF8E1),
               cropFrameColor: Color(0xFF689F38),
-              
             ),
             IOSUiSettings(title: 'Crop Image'),
           ],
@@ -119,6 +121,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
     // Save the selected avatar file path to SharedPreferences
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString("profile_image", file.path);
+    await prefs.setString("avatar_path", assetPath);
     await prefs.setInt("selected_avatar_index", index); // optional
 
     setState(() {
@@ -137,6 +140,8 @@ class _ProfileDialogState extends State<ProfileDialog> {
     }
   }
 
+  int selindex = 0;
+  String selap = '';
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -219,10 +224,36 @@ class _ProfileDialogState extends State<ProfileDialog> {
               children: List.generate(
                 avatarPaths.length,
                 (index) {
+                  _selectedAvatarIndex ??= widget.prevIndex;
                   final isSelected = _selectedAvatarIndex == index;
                   return GestureDetector(
                     onTap: () async {
-                      await _selectAvatarFromAssets(avatarPaths[index], index);
+                      final byteData =
+                          await rootBundle.load(avatarPaths[index]);
+                      final Uint8List bytes = byteData.buffer.asUint8List();
+
+                      final directory =
+                          await getApplicationDocumentsDirectory();
+                      final filePath =
+                          '${directory.path}/profile_avatar_$index.png';
+                      final file = File(filePath);
+
+                      // Remove old profile image file if needed
+                      if (await file.exists()) {
+                        await file.delete();
+                      }
+
+                      // Save selected avatar to file
+                      await file.writeAsBytes(bytes);
+
+                      // Save the selected avatar file path to SharedPreferences
+
+                      setState(() {
+                        _selectedAvatarIndex = index;
+                        _profileImage = file;
+                        selindex = index;
+                        selap = avatarPaths[index];
+                      });
                     },
                     child: Stack(
                       children: [
@@ -261,7 +292,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
                 },
               ),
             ),
-            const SizedBox(height: 16),
+            /* const SizedBox(height: 16),
             ElevatedButton.icon(
               icon: const Icon(Icons.image),
               label: const Text("Pick Custom Image"),
@@ -273,7 +304,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
                 ),
               ),
               onPressed: _pickAndCropImage,
-            ),
+            ), */
           ],
         ),
       ),
@@ -294,7 +325,10 @@ class _ProfileDialogState extends State<ProfileDialog> {
               borderRadius: BorderRadius.circular(12),
             ),
           ),
-          onPressed: _saveProfile,
+          onPressed: () async {
+            await _selectAvatarFromAssets(selap, selindex);
+            _saveProfile();
+          },
           child: const Text("Save"),
         ),
       ],

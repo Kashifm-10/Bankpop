@@ -1,17 +1,18 @@
 import 'dart:async';
- 
+
 import 'package:animated_flip_counter/animated_flip_counter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:lottie/lottie.dart';
 import 'package:mon/pages/home.dart';
- import 'package:mon/pages/transactions/receive.dart';
+import 'package:mon/pages/transactions/receive.dart';
 import 'package:mon/pages/transactions/transactions.dart';
- import 'package:qr_flutter/qr_flutter.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';  
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 class BankerGameScreen extends StatefulWidget {
   final double bankValue;
@@ -139,7 +140,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
         barrierDismissible: false,
         builder: (context) {
           return AlertDialog(
-            backgroundColor: Colors.yellow.shade50,
+            backgroundColor: Color(0xFFFFF8E1),
             title: const Text("New Player Request"),
             content: Column(
               mainAxisSize: MainAxisSize.min,
@@ -224,7 +225,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: Colors.yellow.shade50,
+        backgroundColor: Color(0xFFFFF8E1),
         titlePadding:
             const EdgeInsets.only(top: 10.0, left: 16.0, right: 8.0, bottom: 0),
         title: Row(
@@ -270,33 +271,87 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
     );
   }
 
+  ButtonStyle _buttonStyle() {
+    return ElevatedButton.styleFrom(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+      ),
+    );
+  }
+
+  void advancing() {
+    showDialog(
+      barrierDismissible: false,
+      context: context,
+      barrierColor: Colors.transparent,
+      builder: (BuildContext dialogContext) {
+        // Auto-close after 2 seconds
+        /*  Future.delayed(const Duration(seconds: 2), () {
+          if (Navigator.of(dialogContext).canPop()) {
+            Navigator.of(dialogContext).pop();
+          }
+        }); */
+
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          child: Center(
+            child: SizedBox(
+              width: 60.w, // Responsive width
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Lottie.asset(
+                    'assets/lottie/advancing.json',
+                    repeat: false,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildPlayerRow(BuildContext context, Player player) {
     return Container(
       height: 6.h,
-      padding: EdgeInsets.symmetric(vertical: 0.h, horizontal: 2.w),
-      margin: EdgeInsets.symmetric(vertical: 0.5.h),
+      padding: EdgeInsets.symmetric(vertical: 0.h, horizontal: 10),
+      margin: const EdgeInsets.symmetric(vertical: 1),
       decoration: BoxDecoration(
         color: player.color.withOpacity(0.2),
         borderRadius: BorderRadius.circular(2.w),
       ),
       child: Row(
         children: [
+          CircleAvatar(
+            radius: 18.sp,
+            backgroundColor:
+                Colors.transparent, // pale mint green bg for subtle pop
+            backgroundImage: AssetImage(player.avatar),
+          ),
+          const SizedBox(width: 5),
           Expanded(
-            flex: 4,
+            flex: 3,
             child: Text(
-              player.name,
+              '${player.name[0].toUpperCase()}${player.name.substring(1)}',
               style: TextStyle(
-                  fontSize: 17.sp,
-                  fontWeight: FontWeight.bold,
-                  color: player.color),
+                fontSize: 17.sp,
+                fontWeight: FontWeight.bold,
+                color: player.color,
+              ),
+              overflow: TextOverflow.ellipsis, // 👈 Truncate text with "..."
+              maxLines: 1, // 👈 Limit to one line
+              softWrap: false, // Optional: prevent wrapping
             ),
           ),
           Expanded(
-            flex: 4,
+            flex: 3,
             child: AnimatedFlipCounter(
               mainAxisAlignment: MainAxisAlignment.end,
               value: player.value,
               fractionDigits: 2,
+
               textStyle: TextStyle(
                 fontSize: 16.sp,
                 color: player.color,
@@ -304,9 +359,9 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
               duration: const Duration(milliseconds: 500), // optional
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 5),
           Expanded(
-            flex: 7,
+            flex: 5,
             child: Wrap(
               alignment: WrapAlignment.end,
               direction: Axis.horizontal, // Ensures horizontal layout
@@ -315,132 +370,567 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
               children: [
                 ElevatedButton(
                   onPressed: () async {
-                    final TextEditingController _amountController =
+                    bool isProcessing = false;
+                    final TextEditingController amountController =
                         TextEditingController();
-
-                    double? enteredAmount = await showDialog<double>(
+                    isProcessing = false;
+                    double? enteredAmount;
+                    String statusLabel = "Enter Amount"; // dynamic label
+                    enteredAmount = await showDialog<double>(
+                      barrierDismissible: false,
                       context: context,
                       builder: (context) {
-                        return AlertDialog(
-                          title: const Text('Enter Reward Amount'),
-                          content: TextField(
-                            controller: _amountController,
-                            keyboardType: const TextInputType.numberWithOptions(
-                                decimal: true),
-                            decoration:
-                                const InputDecoration(hintText: 'e.g. 200'),
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () {
-                                Navigator.of(context).pop(); // cancel
-                              },
-                              child: const Text('Cancel'),
-                            ),
-                            TextButton(
-                              onPressed: () {
-                                final value =
-                                    double.tryParse(_amountController.text);
-                                if (value != null && value > 0) {
-                                  Navigator.of(context).pop(value);
-                                } else {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                        content: Text(
-                                            'Enter a valid reward amount')),
-                                  );
-                                }
-                              },
-                              child: const Text('Reward'),
-                            ),
-                          ],
+                        return StatefulBuilder(
+                          builder: (context, setState) {
+                            return AlertDialog(
+                              backgroundColor: Colors.grey.shade500,
+                              content: SizedBox(
+                                width: 50.w, // adjust as needed
+                                //  height: 30.h, // adjust as needed
+
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Column(
+                                      children: [
+                                        const SizedBox(height: 10),
+                                        Container(
+                                          margin: const EdgeInsets.symmetric(
+                                              vertical: 0, horizontal: 10),
+                                          padding: const EdgeInsets.symmetric(
+                                              vertical: 10, horizontal: 10),
+                                          width: double.infinity,
+                                          // height: 7.h,
+                                          decoration: BoxDecoration(
+                                            color: Colors.green.shade400,
+                                            borderRadius:
+                                                BorderRadius.circular(10),
+                                          ),
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.end,
+                                            children: [
+                                              /*  Align(alignment: Alignment.topLeft,
+                                child: Text(
+                                  "Paying to ${player.name}",
+                                  style: const TextStyle(color: Colors.black),
+                                ),
+                              ), */
+                                              Text(
+                                                statusLabel,
+                                                style: TextStyle(
+                                                    color: Colors.black,
+                                                    fontSize: 16.sp),
+                                              ),
+                                              const SizedBox(height: 5),
+                                              Text(
+                                                amountController.text.isEmpty
+                                                    ? '0'
+                                                    : amountController.text,
+                                                style: TextStyle(
+                                                    color: Colors.black,
+                                                    fontSize: 16.sp),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        const SizedBox(height: 20),
+
+                                        // Row 1
+                                        GridView.count(
+                                          childAspectRatio: 2,
+                                          shrinkWrap: true,
+                                          crossAxisCount: 3,
+                                          crossAxisSpacing: 10,
+                                          mainAxisSpacing: 10,
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 10),
+                                          children: [
+                                            ElevatedButton(
+                                              onPressed: isProcessing
+                                                  ? null
+                                                  : () {
+                                                      setState(() {
+                                                        amountController.text +=
+                                                            '1';
+                                                      });
+                                                    },
+                                              style: _buttonStyle(),
+                                              child: const Text(
+                                                '1',
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.black,
+                                                  fontSize: 18,
+                                                ),
+                                              ),
+                                            ),
+                                            ElevatedButton(
+                                              onPressed: isProcessing
+                                                  ? null
+                                                  : () {
+                                                      setState(() {
+                                                        amountController.text +=
+                                                            '2';
+                                                      });
+                                                    },
+                                              style: _buttonStyle(),
+                                              child: const Text(
+                                                '2',
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.black,
+                                                  fontSize: 18,
+                                                ),
+                                              ),
+                                            ),
+                                            ElevatedButton(
+                                              onPressed: isProcessing
+                                                  ? null
+                                                  : () {
+                                                      setState(() {
+                                                        amountController.text +=
+                                                            '3';
+                                                      });
+                                                    },
+                                              style: _buttonStyle(),
+                                              child: const Text(
+                                                '3',
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.black,
+                                                  fontSize: 18,
+                                                ),
+                                              ),
+                                            ),
+                                            ElevatedButton(
+                                              onPressed: isProcessing
+                                                  ? null
+                                                  : () {
+                                                      setState(() {
+                                                        amountController.text +=
+                                                            '4';
+                                                      });
+                                                    },
+                                              style: _buttonStyle(),
+                                              child: const Text(
+                                                '4',
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.black,
+                                                  fontSize: 18,
+                                                ),
+                                              ),
+                                            ),
+                                            ElevatedButton(
+                                              onPressed: isProcessing
+                                                  ? null
+                                                  : () {
+                                                      setState(() {
+                                                        amountController.text +=
+                                                            '5';
+                                                      });
+                                                    },
+                                              style: _buttonStyle(),
+                                              child: const Text(
+                                                '5',
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.black,
+                                                  fontSize: 18,
+                                                ),
+                                              ),
+                                            ),
+                                            ElevatedButton(
+                                              onPressed: isProcessing
+                                                  ? null
+                                                  : () {
+                                                      setState(() {
+                                                        amountController.text +=
+                                                            '6';
+                                                      });
+                                                    },
+                                              style: _buttonStyle(),
+                                              child: const Text(
+                                                '6',
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.black,
+                                                  fontSize: 18,
+                                                ),
+                                              ),
+                                            ),
+                                            ElevatedButton(
+                                              onPressed: isProcessing
+                                                  ? null
+                                                  : () {
+                                                      setState(() {
+                                                        amountController.text +=
+                                                            '7';
+                                                      });
+                                                    },
+                                              style: _buttonStyle(),
+                                              child: const Text(
+                                                '7',
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.black,
+                                                  fontSize: 18,
+                                                ),
+                                              ),
+                                            ),
+                                            ElevatedButton(
+                                              onPressed: isProcessing
+                                                  ? null
+                                                  : () {
+                                                      setState(() {
+                                                        amountController.text +=
+                                                            '8';
+                                                      });
+                                                    },
+                                              style: _buttonStyle(),
+                                              child: const Text(
+                                                '8',
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.black,
+                                                  fontSize: 18,
+                                                ),
+                                              ),
+                                            ),
+                                            ElevatedButton(
+                                              onPressed: isProcessing
+                                                  ? null
+                                                  : () {
+                                                      setState(() {
+                                                        amountController.text +=
+                                                            '9';
+                                                      });
+                                                    },
+                                              style: _buttonStyle(),
+                                              child: const Text(
+                                                '9',
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.black,
+                                                  fontSize: 18,
+                                                ),
+                                              ),
+                                            ),
+                                            ElevatedButton(
+                                              onPressed: isProcessing ||
+                                                      amountController.text
+                                                          .contains('.')
+                                                  ? null
+                                                  : () {
+                                                      setState(() {
+                                                        amountController.text +=
+                                                            '.';
+                                                      });
+                                                    },
+                                              style: _buttonStyle(),
+                                              child: const Text(
+                                                '.',
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.black,
+                                                  fontSize: 18,
+                                                ),
+                                              ),
+                                            ),
+                                            ElevatedButton(
+                                              onPressed: isProcessing
+                                                  ? null
+                                                  : () {
+                                                      setState(() {
+                                                        amountController.text +=
+                                                            '0';
+                                                      });
+                                                    },
+                                              style: _buttonStyle(),
+                                              child: const Text(
+                                                '0',
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.black,
+                                                  fontSize: 18,
+                                                ),
+                                              ),
+                                            ),
+                                            ElevatedButton(
+                                              onPressed: isProcessing
+                                                  ? null
+                                                  : () {
+                                                      setState(() {
+                                                        if (amountController
+                                                            .text.isNotEmpty) {
+                                                          amountController
+                                                                  .text =
+                                                              amountController
+                                                                  .text
+                                                                  .substring(
+                                                                      0,
+                                                                      amountController
+                                                                              .text
+                                                                              .length -
+                                                                          1);
+                                                        }
+                                                      });
+                                                    },
+                                              style: _buttonStyle(),
+                                              child: const Icon(Icons.backspace,
+                                                  color: Colors.grey),
+                                            ),
+                                            ElevatedButton(
+                                              onPressed: isProcessing
+                                                  ? null
+                                                  : () {
+                                                      Navigator.of(context)
+                                                          .pop();
+                                                    },
+                                              style: ElevatedButton.styleFrom(
+                                                  shape: RoundedRectangleBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            10),
+                                                  ),
+                                                  backgroundColor: Colors.red,
+                                                  foregroundColor:
+                                                      Colors.white),
+                                              child: const Text('X'),
+                                            ),
+                                            ElevatedButton(
+                                              onPressed: isProcessing
+                                                  ? null
+                                                  : () {
+                                                      setState(() {
+                                                        amountController
+                                                            .clear();
+                                                      });
+                                                    },
+                                              style: ElevatedButton.styleFrom(
+                                                  shape: RoundedRectangleBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            10),
+                                                  ),
+                                                  backgroundColor:
+                                                      Colors.yellow,
+                                                  foregroundColor:
+                                                      Colors.black),
+                                              child: const Text('C'),
+                                            ),
+                                            ElevatedButton(
+                                              onPressed: isProcessing
+                                                  ? null
+                                                  : () async {
+                                                      final value =
+                                                          double.tryParse(
+                                                              amountController
+                                                                  .text);
+                                                      if (value != null &&
+                                                          value > 0) {
+                                                        setState(() {
+                                                          isProcessing = true;
+                                                          statusLabel =
+                                                              "Processing payment...";
+                                                        });
+
+                                                        final prefs =
+                                                            await SharedPreferences
+                                                                .getInstance();
+                                                        final payerPlayerID =
+                                                            prefs.getString(
+                                                                    'playerID') ??
+                                                                'UnknownPlayer';
+                                                        final rewardAmount =
+                                                            value;
+
+                                                        // Fetch payer wallet
+                                                        final payerResponse =
+                                                            await Supabase
+                                                                .instance.client
+                                                                .from(
+                                                                    'players_test')
+                                                                .select(
+                                                                    'wallet')
+                                                                .eq(
+                                                                    'game_id',
+                                                                    widget
+                                                                        .gameId)
+                                                                .eq('player_id',
+                                                                    payerPlayerID)
+                                                                .maybeSingle();
+
+                                                        // Fetch receiver wallet (the selected player)
+                                                        final receiverResponse =
+                                                            await Supabase
+                                                                .instance.client
+                                                                .from(
+                                                                    'players_test')
+                                                                .select(
+                                                                    'wallet')
+                                                                .eq(
+                                                                    'game_id',
+                                                                    widget
+                                                                        .gameId)
+                                                                .eq(
+                                                                    'player_id',
+                                                                    player
+                                                                        .playerID)
+                                                                .maybeSingle();
+
+                                                        if (payerResponse !=
+                                                                null &&
+                                                            receiverResponse !=
+                                                                null &&
+                                                            payerResponse[
+                                                                    'wallet'] !=
+                                                                null &&
+                                                            receiverResponse[
+                                                                    'wallet'] !=
+                                                                null) {
+                                                          double payerWallet =
+                                                              (payerResponse[
+                                                                          'wallet']
+                                                                      as num)
+                                                                  .toDouble();
+                                                          double
+                                                              receiverWallet =
+                                                              (receiverResponse[
+                                                                          'wallet']
+                                                                      as num)
+                                                                  .toDouble();
+
+                                                          if (payerWallet >=
+                                                              rewardAmount) {
+                                                            double
+                                                                newPayerWallet =
+                                                                payerWallet -
+                                                                    rewardAmount;
+                                                            double
+                                                                newReceiverWallet =
+                                                                receiverWallet +
+                                                                    rewardAmount;
+
+                                                            // Update wallets
+                                                            await Supabase
+                                                                .instance.client
+                                                                .from(
+                                                                    'players_test')
+                                                                .update({
+                                                                  'wallet':
+                                                                      newPayerWallet
+                                                                })
+                                                                .eq(
+                                                                    'game_id',
+                                                                    widget
+                                                                        .gameId)
+                                                                .eq('player_id',
+                                                                    payerPlayerID);
+
+                                                            await Supabase
+                                                                .instance.client
+                                                                .from(
+                                                                    'players_test')
+                                                                .update({
+                                                                  'wallet':
+                                                                      newReceiverWallet
+                                                                })
+                                                                .eq(
+                                                                    'game_id',
+                                                                    widget
+                                                                        .gameId)
+                                                                .eq(
+                                                                    'player_id',
+                                                                    player
+                                                                        .playerID);
+
+                                                            // Log transaction
+                                                            await Supabase
+                                                                .instance.client
+                                                                .from(
+                                                                    'transactions')
+                                                                .insert({
+                                                              'game_id':
+                                                                  widget.gameId,
+                                                              'value':
+                                                                  rewardAmount,
+                                                              'from':
+                                                                  "Bank", // or use actual name if needed
+                                                              'to': player.name,
+                                                              'code':
+                                                                  "${payerPlayerID}_${player.playerID}",
+                                                              'date': DateFormat(
+                                                                      'yyyy-MM-dd')
+                                                                  .format(DateTime
+                                                                      .now()),
+                                                              'time': DateFormat(
+                                                                      'HH:mm:ss')
+                                                                  .format(DateTime
+                                                                      .now()),
+                                                            });
+
+                                                            // Show success
+                                                            setState(() {
+                                                              statusLabel =
+                                                                  "Rewarded ₹$rewardAmount to ${player.name} ✓";
+                                                            });
+
+                                                            await Future.delayed(
+                                                                const Duration(
+                                                                    seconds:
+                                                                        2));
+                                                            if (context.mounted)
+                                                              Navigator.of(
+                                                                      context)
+                                                                  .pop();
+                                                          } else {
+                                                            setState(() {
+                                                              statusLabel =
+                                                                  "Insufficient balance X";
+                                                              isProcessing =
+                                                                  false;
+                                                            });
+                                                          }
+                                                        } else {
+                                                          setState(() {
+                                                            statusLabel =
+                                                                "Failed to fetch wallet data ⊘";
+                                                            isProcessing =
+                                                                false;
+                                                          });
+                                                        }
+                                                      } else {
+                                                        setState(() {
+                                                          statusLabel =
+                                                              "Invalid amount !!";
+                                                        });
+                                                      }
+                                                    },
+                                              style: ElevatedButton.styleFrom(
+                                                shape: RoundedRectangleBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(10),
+                                                ),
+                                                backgroundColor: Colors.green,
+                                                foregroundColor: Colors.white,
+                                              ),
+                                              child: const Icon(
+                                                  Icons.keyboard_arrow_right),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
                         );
                       },
                     );
-
-                    if (enteredAmount == null)
-                      return; // user cancelled or invalid input
-
-                    final prefs = await SharedPreferences.getInstance();
-                    final payerPlayerID =
-                        prefs.getString('playerID') ?? 'UnknownPlayer';
-                    double rewardAmount = enteredAmount;
-
-                    final payerResponse = await Supabase.instance.client
-                        .from('players_test')
-                        .select('wallet')
-                        .eq('game_id', widget.gameId)
-                        .eq('player_id', payerPlayerID)
-                        .maybeSingle();
-
-                    final receiverResponse = await Supabase.instance.client
-                        .from('players_test')
-                        .select('wallet')
-                        .eq('game_id', widget.gameId)
-                        .eq('player_id', player.playerID)
-                        .maybeSingle();
-
-                    if (payerResponse != null &&
-                        receiverResponse != null &&
-                        payerResponse['wallet'] != null &&
-                        receiverResponse['wallet'] != null) {
-                      double payerWallet =
-                          (payerResponse['wallet'] as num).toDouble();
-                      double receiverWallet =
-                          (receiverResponse['wallet'] as num).toDouble();
-
-                      if (payerWallet >= rewardAmount) {
-                        double newPayerWallet = payerWallet - rewardAmount;
-                        double newReceiverWallet =
-                            receiverWallet + rewardAmount;
-
-                        await Supabase.instance.client
-                            .from('players_test')
-                            .update({'wallet': newPayerWallet})
-                            .eq('game_id', widget.gameId)
-                            .eq('player_id', payerPlayerID);
-
-                        await Supabase.instance.client
-                            .from('players_test')
-                            .update({'wallet': newReceiverWallet})
-                            .eq('game_id', widget.gameId)
-                            .eq('player_id', player.playerID);
-                        await Supabase.instance.client
-                            .from('transactions')
-                            .insert({
-                          'game_id': widget.gameId,
-                          'value': rewardAmount,
-                          'from': "Bank",
-                          'to': player.name,
-                          'code': "${payerPlayerID}_${player.playerID}",
-                          'date':
-                              DateFormat('yyyy-MM-dd').format(DateTime.now()),
-                          'time': DateFormat('HH:mm:ss').format(DateTime.now()),
-                        });
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                                content: Text(
-                                    'Rewarded ₹$rewardAmount to ${player.name}')),
-                          );
-                        }
-                      } else {
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                                content: Text(
-                                    'Insufficient balance to reward ₹$rewardAmount')),
-                          );
-                        }
-                      }
-                    } else {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                              content: Text('Failed to fetch wallet data')),
-                        );
-                      }
-                    }
                   },
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.all(5), // Remove internal padding
@@ -459,14 +949,16 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                     width: 23
                         .sp, // Use MediaQuery or a fixed size if sp is undefined
                     height: 23.sp,
-                    color: player.color, // Apply red color
+
+                    color: Color(0xFF689F38), // Apply red color
                     colorBlendMode:
                         BlendMode.srcIn, // Ensures image is tinted red
                   ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 5),
                 ElevatedButton(
                   onPressed: () async {
+                    advancing();
                     final prefs = await SharedPreferences.getInstance();
                     final payerPlayerID =
                         prefs.getString('playerID') ?? 'UnknownPlayer';
@@ -518,6 +1010,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                             .eq('player_id', player.playerID);
 
                         if (context.mounted) {
+                          Navigator.of(context).pop();
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                                 content: Text(
@@ -538,6 +1031,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                           });
                         }
                       } else {
+                        Navigator.of(context).pop();
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
@@ -548,6 +1042,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                       }
                     } else {
                       if (context.mounted) {
+                        Navigator.of(context).pop();
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                               content: Text('Failed to fetch wallet data')),
@@ -560,7 +1055,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                     padding: const EdgeInsets.all(5), // Remove internal padding
                     fixedSize: Size(25.sp,
                         20.sp), // 👈 Set button size here                    elevation: 0,
-                    foregroundColor: player.color,
+                    foregroundColor: Colors.red,
                     backgroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10),
@@ -571,7 +1066,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                     width: 23.sp,
                     height: 23.sp,
                     fit: BoxFit.contain,
-                    color: player.color,
+                    color: Colors.red,
                     colorBlendMode: BlendMode.srcIn,
                   ),
                 ),
@@ -589,6 +1084,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
+          backgroundColor: Color(0xFFFFF8E1),
           title: const Text("Leave Game"),
           content: const Text("Are you sure you want to leave the game?"),
           actions: <Widget>[
@@ -619,8 +1115,9 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
           backgroundColor: Colors.yellow.shade50,
           automaticallyImplyLeading: false,
           title: const Text(
-            'Leaderboard',
-            style: TextStyle(fontWeight: FontWeight.bold),
+            'Bankpop',
+            style: TextStyle(
+                fontWeight: FontWeight.bold, color: Color(0xFF689F38)),
           ),
           actions: [
             IconButton(
@@ -664,61 +1161,65 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
             const SizedBox(width: 5),
           ],
         ),
-        body: Padding(
-          padding: EdgeInsets.symmetric(horizontal: 3.w, vertical: 2.h),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(20),
-                margin: const EdgeInsets.symmetric(horizontal: 5, vertical: 5),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
-                  gradient: LinearGradient(
-                    colors: [Colors.white, Colors.blue.shade50],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  border: Border.all(color: Colors.blue.shade100),
-                ),
+        body: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Card(
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20)),
+              color: const Color(0xFFFFF9C4), // soft pastel yellow
+              elevation: 3,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Icon(
-                              FontAwesomeIcons.buildingColumns,
-                              color: Colors.blueGrey.shade700,
-                              size: 22.sp,
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Icon(
+                                  FontAwesomeIcons.buildingColumns,
+                                  color: Colors.blueGrey.shade700,
+                                  size: 22.sp,
+                                ),
+                                const SizedBox(width: 10),
+                                Text(
+                                  'Bankpop Union',
+                                  style: TextStyle(
+                                    fontSize: 18.sp,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.blueGrey.shade800,
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: 10),
-                            Text(
-                              'Bank Holdings',
-                              style: TextStyle(
-                                fontSize: 18.sp,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.blueGrey.shade800,
+                            const SizedBox(height: 10),
+                            AnimatedFlipCounter(
+                              value: value,
+                              fractionDigits: 2,
+                              textStyle: TextStyle(
+                                fontSize: 28.sp,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black87,
                               ),
+                              duration: const Duration(
+                                  milliseconds:
+                                      500), // optional: animation speed
                             ),
                           ],
                         ),
+                        SizedBox(
+                          height: 42.sp,
+                          child: Lottie.asset('assets/lottie/coin.json'),
+                        ),
                       ],
-                    ),
-                    const SizedBox(height: 10),
-                    AnimatedFlipCounter(
-                      value: value,
-                      fractionDigits: 2,
-                      textStyle: TextStyle(
-                        fontSize: 28.sp,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black87,
-                      ),
-                      duration: const Duration(
-                          milliseconds: 500), // optional: animation speed
                     ),
                     const SizedBox(height: 10),
                     if (payOption == 'ScanPay')
@@ -727,7 +1228,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                         children: [
                           ReceiveButton(),
                           SizedBox(width: 0),
-/*                           ElevatedButton.icon(
+                          /*                           ElevatedButton.icon(
                             onPressed: () {
                               Navigator.push(
                                 context,
@@ -752,27 +1253,31 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                                   ),
                                 ),
                           ),
- */
+                         */
                         ],
                       ),
                   ],
                 ),
               ),
-              SizedBox(height: 2.h),
-              isLoading
-                  ? const Center(
-                      child: CircularProgressIndicator(
-                      color: Colors.white,
-                    ))
-                  : Expanded(
-                      child: ListView.builder(
-                        itemCount: players.length,
-                        itemBuilder: (context, index) =>
-                            _buildPlayerRow(context, players[index]),
+            ),
+            const SizedBox(
+              height: 5,
+            ),
+            isLoading
+                ? const Center(
+                    child: CircularProgressIndicator(color: Color(0xFF689F38)),
+                  )
+                : Expanded(
+                    child: ListView.builder(
+                      itemCount: players.length,
+                      itemBuilder: (context, index) => Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16.0, vertical: 5),
+                        child: _buildPlayerRow(context, players[index]),
                       ),
                     ),
-            ],
-          ),
+                  ),
+          ],
         ),
       ),
     );
@@ -780,24 +1285,25 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
 }
 
 class Player {
-  final String name;
   final String playerID;
+  final String name;
   final double value;
   final Color color;
+  final String avatar;
 
   Player(
-      {required this.name,
-      required this.playerID,
+      {required this.playerID,
+      required this.name,
       required this.value,
-      required this.color});
+      required this.color,
+      required this.avatar});
 
   factory Player.fromMap(Map<String, dynamic> map) {
     return Player(
-      name: map['name'],
-      value: map['wallet'].toDouble(),
-      playerID: map['player_id'],
-      color: Colors.primaries[(map['name'].hashCode) %
-          Colors.primaries.length], // Assign color based on name hash
-    );
+        playerID: map['player_id'],
+        name: map['name'],
+        value: double.tryParse(map['wallet'].toString()) ?? 0.0,
+        color: Colors.primaries[map['name'].hashCode % Colors.primaries.length],
+        avatar: map['avatar'] ?? "assets/avatars/boy1.jpg");
   }
 }

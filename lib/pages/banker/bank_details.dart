@@ -359,6 +359,7 @@ class _BankValueScreenState extends State<BankValueScreen> {
                             height: 24,
                             width: 24,
                             child: CircularProgressIndicator(
+                              color: Color(0xFF689F38),
                               valueColor:
                                   AlwaysStoppedAnimation<Color>(Colors.white),
                               strokeWidth: 2,

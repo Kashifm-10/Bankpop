@@ -11,12 +11,16 @@ class Transaction {
   final String to;
   final double value;
   final String dateTime;
+  final String payer;
+  final String receiver;
 
   Transaction({
     required this.from,
     required this.to,
     required this.value,
     required this.dateTime,
+    required this.payer,
+    required this.receiver,
   });
 
   factory Transaction.fromMap(Map<String, dynamic> map) {
@@ -25,6 +29,8 @@ class Transaction {
       to: map['to']?.toString() ?? '',
       value: (map['value'] as num?)?.toDouble() ?? 0.0,
       dateTime: "${map['date'] ?? ''} ${map['time'] ?? ''}",
+      payer: map['payerId']?.toString() ?? '',
+      receiver: map['receiverId']?.toString() ?? '',
     );
   }
 }
@@ -46,6 +52,7 @@ class TransactionHistoryPage extends StatefulWidget {
 class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
   late Future<List<Transaction>> _transactionsFuture;
   String? playerName;
+  String? playerID;
   @override
   void initState() {
     super.initState();
@@ -54,7 +61,8 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
 
   Future<List<Transaction>> fetchTransactions() async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
-    playerName = prefs.getString('name');
+    playerName = prefs.getString('profile_name');
+    playerID = prefs.getString('playerID');
 
     final response = await Supabase.instance.client
         .from('transactions')
@@ -65,7 +73,21 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
         .order('time', ascending: false);
 
     final data = response as List;
-    return data.map((e) => Transaction.fromMap(e)).toList();
+
+    return data.map((e) {
+      // Safely extract payer and receiver from the code
+      final code = e['code'] as String;
+      final parts = code.split('_');
+      final payerId = parts.length > 1 ? parts[0] : '';
+      final receiverId = parts.length > 1 ? parts[1] : '';
+
+      // Pass to the Transaction model (you'll need to update it to accept these)
+      return Transaction.fromMap({
+        ...e,
+        'payerId': payerId,
+        'receiverId': receiverId,
+      });
+    }).toList();
   }
 
   Widget _buildHeaderRow() {
@@ -109,9 +131,9 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
         decoration: BoxDecoration(
-          color: Colors.yellow.shade50,
+          color: Colors.white,
           border:
-              Border.all(color: Colors.grey, width: 1), // Border on all sides
+              Border.all(color: Colors.white, width: 1), // Border on all sides
           borderRadius: const BorderRadius.all(
               Radius.circular(12)), // Rounded corners on all sides
         ),
@@ -121,7 +143,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
             Expanded(
               flex: 4,
               child: Text(
-                txn.from,
+                "${txn.from[0].toUpperCase()}${txn.from.substring(1)}",
                 style: TextStyle(
                   fontSize: 14.sp,
                   fontWeight: FontWeight.w500,
@@ -146,7 +168,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
             Expanded(
               flex: 3,
               child: Text(
-                txn.to,
+                "${txn.to[0].toUpperCase()}${txn.to.substring(1)}",
                 style: TextStyle(
                   fontSize: 14.sp,
                   fontWeight: FontWeight.w500,
@@ -163,7 +185,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
                 style: TextStyle(
                   fontSize: 14.sp,
                   fontWeight: FontWeight.bold,
-                  color: playerName == txn.from ? Colors.red : Colors.green,
+                  color: playerID == txn.payer ? Colors.red : Colors.green,
                 ),
                 textAlign: TextAlign.right,
               ),
@@ -192,8 +214,13 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
     return Scaffold(
       backgroundColor: Colors.yellow.shade50,
       appBar: AppBar(
+        surfaceTintColor: Colors.transparent,
         automaticallyImplyLeading: false,
-        title: const Text("Transaction History"),
+        title: const Text(
+          "Transaction History",
+          style:
+              TextStyle(color: Color(0xFF689F38), fontWeight: FontWeight.bold),
+        ),
         backgroundColor: Colors.yellow.shade50,
         actions: [
           IconButton(
@@ -208,97 +235,94 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
           const SizedBox(width: 10),
         ],
       ),
-      body: SizedBox(
-        height: 90.h,
-        child: Column(
-          children: [
-            // Header row
-            Padding(
-              padding:
-                  const EdgeInsets.symmetric(vertical: 0.0, horizontal: 10),
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(vertical: 0, horizontal: 10),
-                decoration: BoxDecoration(
-                  color: Colors.yellow.shade50,
-                  //   border: Border.all(color: Colors.grey, width: 1),
-                  borderRadius: const BorderRadius.all(Radius.circular(12)),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      flex: 4,
-                      child: Text(
-                        "From",
-                        style: TextStyle(
-                            fontSize: 14.sp, fontWeight: FontWeight.w500),
-                        overflow: TextOverflow.ellipsis,
+      body: Column(
+        children: [
+          SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 0.0, horizontal: 10),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+              decoration: BoxDecoration(
+                color: Colors.yellow.shade50,
+                //   border: Border.all(color: Colors.grey, width: 1),
+                borderRadius: const BorderRadius.all(Radius.circular(12)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    flex: 4,
+                    child: Text(
+                      "From",
+                      style: TextStyle(
+                          fontSize: 14.sp, fontWeight: FontWeight.bold),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Expanded(
+                    flex: 3,
+                    child: Text(
+                      "To",
+                      style: TextStyle(
+                          fontSize: 14.sp, fontWeight: FontWeight.bold),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Expanded(
+                    flex: 2,
+                    child: Text(
+                      "Value",
+                      style: TextStyle(
+                        fontSize: 14.sp,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black,
+                      ),
+                      textAlign: TextAlign.right,
+                    ),
+                  ),
+                  Expanded(
+                    flex: 3,
+                    child: Text(
+                      "Time",
+                      textAlign: TextAlign.right,
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14.sp,
+                        color: Colors.black,
                       ),
                     ),
-                    Expanded(
-                      flex: 3,
-                      child: Text(
-                        "To",
-                        style: TextStyle(
-                            fontSize: 14.sp, fontWeight: FontWeight.w500),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    Expanded(
-                      flex: 2,
-                      child: Text(
-                        "Value",
-                        style: TextStyle(
-                          fontSize: 14.sp,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black,
-                        ),
-                        textAlign: TextAlign.right,
-                      ),
-                    ),
-                    Expanded(
-                      flex: 3,
-                      child: Text(
-                        "Time",
-                        textAlign: TextAlign.right,
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14.sp,
-                          color: Colors.black,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
-
-            // Transactions list
-            Expanded(
-              child: FutureBuilder<List<Transaction>>(
-                future: _transactionsFuture,
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  } else if (snapshot.hasError) {
-                    return Center(child: Text('Error: ${snapshot.error}'));
-                  } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                    return const Center(child: Text("No transactions yet."));
-                  }
-
-                  final transactions = snapshot.data!;
-                  return ListView.builder(
-                    padding: const EdgeInsets.all(10),
-                    itemCount: transactions.length,
-                    itemBuilder: (context, index) {
-                      return _buildTransactionRow(transactions[index]);
-                    },
+          ),
+         const Divider(color: Color(0xFF689F38)),
+          // Transactions list
+          Expanded(
+            child: FutureBuilder<List<Transaction>>(
+              future: _transactionsFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(
+                    child: CircularProgressIndicator(color: Color(0xFF689F38)),
                   );
-                },
-              ),
+                } else if (snapshot.hasError) {
+                  return Center(child: Text('Error: ${snapshot.error}'));
+                } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                  return const Center(child: Text("No transactions yet."));
+                }
+
+                final transactions = snapshot.data!;
+                return ListView.builder(
+                  padding: const EdgeInsets.all(10),
+                  itemCount: transactions.length,
+                  itemBuilder: (context, index) {
+                    return _buildTransactionRow(transactions[index]);
+                  },
+                );
+              },
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

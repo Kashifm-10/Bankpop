@@ -58,6 +58,7 @@ class _WelcomePageState extends State<WelcomePage> {
           onWillPop: () async => false, // disables back button
           child: const ProfileDialog(
             first: true,
+            prevIndex: 0,
           ),
         ),
       );
@@ -166,9 +167,8 @@ class _WelcomePageState extends State<WelcomePage> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const CircularProgressIndicator(
-                  color: Colors.black,
-                ),
+                                const CircularProgressIndicator(color: Color(0xFF689F38)),
+
                 const SizedBox(width: 20),
                 Flexible(
                   child: Text(
@@ -584,6 +584,7 @@ class _WelcomePageState extends State<WelcomePage> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
+          backgroundColor: Color(0xFFFFF8E1),
           title: const Text('Exit the Game'),
           content: const Text('Are you sure you want to exit?'),
           actions: <Widget>[

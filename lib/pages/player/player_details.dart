@@ -6,11 +6,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class PlayerQRScannerScreen extends StatefulWidget {
-   final bool scan;
+  final bool scan;
 
   const PlayerQRScannerScreen({
     super.key,
-     required this.scan,
+    required this.scan,
   });
 
   @override
@@ -23,7 +23,7 @@ class _PlayerQRScannerScreenState extends State<PlayerQRScannerScreen> {
   Timer? _approvalCheckTimer;
   bool _approved = false;
   final MobileScannerController cameraController = MobileScannerController();
-  final TextEditingController nameController = TextEditingController();
+  //final TextEditingController nameController = TextEditingController();
   bool _scanned = false;
   BarcodeCapture? _lastCapture;
   @override
@@ -39,7 +39,7 @@ class _PlayerQRScannerScreenState extends State<PlayerQRScannerScreen> {
     super.dispose();
   }
 
-  void _showJoinDialog(BuildContext context) {
+/*   void _showJoinDialog(BuildContext context) {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -78,10 +78,12 @@ class _PlayerQRScannerScreenState extends State<PlayerQRScannerScreen> {
       },
     );
   }
-
+ */
   Future<void> _onDetect(BarcodeCapture capture) async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     final String? playerID = prefs.getString('playerID');
+    final String playerName =
+        prefs.getString('profile_name') ?? 'player${playerID!.substring(0, 3)}';
 
     final barcodes = capture.barcodes;
     if (barcodes.isEmpty) return;
@@ -107,16 +109,23 @@ class _PlayerQRScannerScreenState extends State<PlayerQRScannerScreen> {
       try {
         await supabase.from('request_test').insert({
           'game_id': gameId,
-          'name': nameController.text,
+          'name': playerName, //nameController.text,
           'wallet': 0,
           'role': 'player',
           'player_id': playerID
         });
-        await prefs.setString('name', nameController.text);
+        await prefs.setString(
+            'profile_name', playerName /* nameController.text */);
       } catch (e) {
         debugPrint('Error inserting request: $e');
         return;
       }
+    } else if (existingPlayerData.isNotEmpty) {
+      await Supabase.instance.client
+          .from('players_test')
+          .update({'name': playerName})
+          .eq('game_id', gameId)
+          .eq('player_id', playerID!);
     }
 
     // ignore: use_build_context_synchronously
@@ -180,13 +189,12 @@ class _PlayerQRScannerScreenState extends State<PlayerQRScannerScreen> {
           builder: (BuildContext context, StateSetter stateSetter) {
             setState = stateSetter;
             return AlertDialog(
-                          backgroundColor: Colors.yellow.shade50,
-
+              backgroundColor: Color(0xFFFFF8E1),
               title: const Text("Waiting for Approval"),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const CircularProgressIndicator(),
+                  const CircularProgressIndicator(color: Color(0xFF689F38)),
                   const SizedBox(height: 16),
                   const Text(
                       "Waiting for host to approve your join request..."),
@@ -208,8 +216,7 @@ class _PlayerQRScannerScreenState extends State<PlayerQRScannerScreen> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-                    backgroundColor: Colors.yellow.shade50,
-
+        backgroundColor: Color(0xFFFFF8E1),
         title: const Text("Unable to Join"),
         content: const Text("Approval not received within 1 minute."),
         actions: [
@@ -229,7 +236,12 @@ class _PlayerQRScannerScreenState extends State<PlayerQRScannerScreen> {
       backgroundColor: Colors.yellow.shade50,
       appBar: AppBar(
         backgroundColor: Colors.yellow.shade50,
-        title: const Text('Scan Game QR'),
+        title: const Text(
+          'Scan Game QR',
+          style: TextStyle(
+            color: Color(0xFF689F38), // deep green icon
+          ),
+        ),
         centerTitle: true,
         actions: [
           IconButton(
@@ -245,7 +257,8 @@ class _PlayerQRScannerScreenState extends State<PlayerQRScannerScreen> {
           _scanned = true;
           _lastCapture = capture;
           cameraController.stop();
-          _showJoinDialog(context);
+          //_showJoinDialog(context);
+          _onDetect(_lastCapture!);
         },
       ),
     );

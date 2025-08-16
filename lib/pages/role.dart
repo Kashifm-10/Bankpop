@@ -67,6 +67,7 @@ class SelectRoleScreen extends StatelessWidget {
     return showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: Color(0xFFFFF8E1),
         title: const Text('Join Game'),
         content: const Text(
             'Do you want to scan a QR code or enter the Game ID manually?'),
@@ -101,6 +102,7 @@ class SelectRoleScreen extends StatelessWidget {
       builder: (context) {
         String input = '';
         return AlertDialog(
+          backgroundColor: Color(0xFFFFF8E1),
           title: const Text('Enter Game ID'),
           content: TextField(
             autofocus: true,
@@ -161,15 +163,18 @@ class SelectRoleScreen extends StatelessWidget {
     // Step 2: Show the Enter Name dialog
     final nameController = TextEditingController();
     // ignore: use_build_context_synchronously
-    String? playerName = await _showEnterNameDialog(context, nameController);
+    /*  String? playerName = await _showEnterNameDialog(context, nameController);
     if (playerName == null || playerName.isEmpty) {
       return null; // If no name entered, return null
-    }
+    } */
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? playerName =
+        prefs.getString('profile_name') ?? 'player${playerID.substring(0, 3)}';
 
     // Step 3: Check if player exists and try to join
     // ignore: use_build_context_synchronously
     final Map<String, dynamic>? playerData = await _checkPlayerAndJoin(
-        context, gameId, playerID, nameController.text);
+        context, gameId, playerID, playerName /* nameController.text */);
     return playerData;
   }
 
@@ -188,8 +193,7 @@ class SelectRoleScreen extends StatelessWidget {
       barrierDismissible: false,
       builder: (BuildContext context) {
         return AlertDialog(
-          backgroundColor: Colors.yellow.shade50,
-          title: const Text('Enter your name'),
+backgroundColor: Color(0xFFFFF8E1),          title: const Text('Enter your name'),
           content: TextField(
             controller: nameController,
             decoration: const InputDecoration(
@@ -304,12 +308,11 @@ class SelectRoleScreen extends StatelessWidget {
           builder: (BuildContext context, StateSetter stateSetter) {
             setState = stateSetter;
             return AlertDialog(
-              backgroundColor: Colors.yellow.shade50,
-              title: const Text("Waiting for Approval"),
+backgroundColor: Color(0xFFFFF8E1),              title: const Text("Waiting for Approval"),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const CircularProgressIndicator(),
+                  const CircularProgressIndicator(color: Color(0xFF689F38)),
                   const SizedBox(height: 16),
                   const Text(
                       "Waiting for host to approve your join request..."),
@@ -331,8 +334,7 @@ class SelectRoleScreen extends StatelessWidget {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: Colors.yellow.shade50,
-        title: const Text("Unable to Join"),
+backgroundColor: Color(0xFFFFF8E1),        title: const Text("Unable to Join"),
         content: const Text("Approval not received within 1 minute."),
         actions: [
           TextButton(
@@ -357,7 +359,7 @@ class SelectRoleScreen extends StatelessWidget {
             icon: Icon(
               CupertinoIcons.chevron_back,
               size: 22.sp,
-              color:Color(0xFF689F38),
+              color: Color(0xFF689F38),
             )),
         title: const Text(
           "Choose Role",
