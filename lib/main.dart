@@ -23,10 +23,8 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Supabase.initialize(
-    url:
-        'https://ldfzcbvbgkfmwkywctfh.supabase.co', // Replace with your Supabase URL
-    anonKey:
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxkZnpjYnZiZ2tmbXdreXdjdGZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc1MDk1ODksImV4cCI6MjA2MzA4NTU4OX0.T4PscSKy__BRNptpTkrK5RQDgqdUuy8iW-qFwAIU4rw', // Replace with your Supabase anon key
+   url: 'https://dgalohswapxuaayftwlj.supabase.co',
+   anonKey: 'sb_publishable_4ynd9Wt_Hhi7bkD6O7IwsA_ns7MEK6b',
   );
   await _initPlayerID();
   SystemChrome.setEnabledSystemUIMode(
