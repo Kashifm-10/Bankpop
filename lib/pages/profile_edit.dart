@@ -159,7 +159,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
         child: Column(
           children: [
             GestureDetector(
-              onTap: _pickAndCropImage,
+             // onTap: _pickAndCropImage,
               child: CircleAvatar(
                 radius: 40,
                 backgroundImage:
