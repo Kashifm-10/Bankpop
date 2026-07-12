@@ -16,20 +16,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.38.5"
           channel: stable
           cache: true
 
       - name: Build Flutter APK
+        run: flutter pub get && flutter build apk --release --target-platform=android-arm64
+
+      - name: Check APK exists
         run: |
-          flutter pub get --enforce-lockfile
-          flutter build apk --release --target-platform=android-arm64
+          ls -lh build/app/outputs/flutter-apk/
 
       - name: Upload APK to Supabase
         env:
@@ -37,11 +37,11 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           BUCKET: apk_releases
           FILE_PATH: build/app/outputs/flutter-apk/app-release.apk
-          REMOTE_NAME: release-apk.apk
+          REMOTE_NAME: bankpop.apk
 
         run: |
-          curl -X POST "${SUPABASE_URL}/storage/v1/object/${BUCKET}/${REMOTE_NAME}" \
-            -H "Authorization: Bearer ${SUPABASE_KEY}" \
+          curl -X POST "${{ env.SUPABASE_URL }}/storage/v1/object/${{ env.BUCKET }}/${{ env.REMOTE_NAME }}" \
+            -H "Authorization: Bearer ${{ env.SUPABASE_KEY }}" \
             -H "x-upsert: true" \
-            -F "file=@${FILE_PATH};type=application/vnd.android.package-archive" \
+            -F "file=@${{ env.FILE_PATH }};type=application/vnd.android.package-archive" \
             --fail
