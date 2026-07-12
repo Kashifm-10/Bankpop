@@ -1,0 +1,43 @@
+name: Build Release APK
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  release_apk:
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Flutter APK
+        run: flutter build apk --release --target-platform=android-arm64
+
+      - name: Upload APK to Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          BUCKET: apk_releases
+          FILE_PATH: build/app/outputs/flutter-apk/app-release.apk
+          REMOTE_NAME: release-apk.apk
+
+        run: |
+          curl -X POST "${SUPABASE_URL}/storage/v1/object/${BUCKET}/${REMOTE_NAME}" \
+            -H "Authorization: Bearer ${SUPABASE_KEY}" \
+            -H "x-upsert: true" \
+            -F "file=@${FILE_PATH};type=application/vnd.android.package-archive" \
+            --fail
