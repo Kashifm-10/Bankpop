@@ -130,11 +130,12 @@ extension SchemeToColorScheme on MaterialScheme {
       onTertiaryContainer: onTertiaryContainer,
       error: error,
       onError: onError,
-      background: background,
-      onBackground: onBackground,
+      // `background`/`onBackground` are deprecated aliases of surface/onSurface,
+      // which are set from their own fields just below.
       surface: surface,
       onSurface: onSurface,
-      surfaceVariant: surfaceVariant,
+      // `surfaceVariant` was renamed; the colour is unchanged.
+      surfaceContainerHighest: surfaceVariant,
       onSurfaceVariant: onSurfaceVariant,
       outline: outline,
       shadow: shadow,

@@ -80,6 +80,8 @@ class _BankValueScreenState extends State<BankValueScreen> {
       'SP/IP': _selectedOption
     });
     await prefs.setString('name', 'banker');
+    await prefs.setString('role', 'banker');
+    await prefs.setString('display_name', 'Bank');
     await prefs.setString('gameID', gameId);
 
     // Proceed to next screen
@@ -229,7 +231,7 @@ class _BankValueScreenState extends State<BankValueScreen> {
                             side: BorderSide(
                               color: _selectedOption == 'ScanPay'
                                   ? Color(0xFF689F38)
-                                      .withOpacity(0.4) // medium green
+                                      .withValues(alpha: 0.4) // medium green
                                   : Colors.grey.shade300,
                               width: 2,
                             ),
@@ -279,7 +281,7 @@ class _BankValueScreenState extends State<BankValueScreen> {
                           shape: RoundedRectangleBorder(
                             side: BorderSide(
                               color: _selectedOption == 'InstantPay'
-                                  ? Color(0xFF689F38).withOpacity(0.4)
+                                  ? Color(0xFF689F38).withValues(alpha: 0.4)
                                   : Colors.grey.shade300,
                               width: 2,
                             ),

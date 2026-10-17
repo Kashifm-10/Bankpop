@@ -12,8 +12,20 @@ class ReceiveButton extends StatelessWidget {
   Future<void> _showValueDialog(BuildContext context) async {
     final prefs = await SharedPreferences.getInstance();
     final playerID = prefs.getString('playerID') ?? 'UnknownPlayer';
-    final name = prefs.getString('profile_name') ?? 'Bank';
 
+    // Name shown in the QR must match the roster:
+    //  - banker row is stored in the DB as 'Bank'
+    //  - player row is stored as their profile_name
+    // Both are mirrored into prefs at game start / join, so no DB read here.
+    final name = prefs.getString('display_name') ??
+        prefs.getString('profile_name') ??
+        'Bank';
+
+    // Which side of the payment this device is on. Baked into the QR so the
+    // scanner can call transfer_money with the correct toRole.
+    final role = prefs.getString('role') ?? 'player';
+
+    if (!context.mounted) return;
     final TextEditingController controller = TextEditingController();
 
     // ignore: use_build_context_synchronously
@@ -40,7 +52,7 @@ class ReceiveButton extends StatelessWidget {
                 final value = controller.text.trim();
                 if (value.isNotEmpty) {
                   Navigator.of(context).pop(); // Close dialog
-                  _showQrCode(context, playerID, name, value);
+                  _showQrCode(context, playerID, name, value, role);
                 }
               },
               child: const Text('OK'),
@@ -51,12 +63,13 @@ class ReceiveButton extends StatelessWidget {
     );
   }
 
-  void _showQrCode(
-      BuildContext context, String playerID, String name, String value) {
+  void _showQrCode(BuildContext context, String playerID, String name,
+      String value, String role) {
     final qrData = jsonEncode({
       'playerID': playerID,
       'name': name,
       'value': value,
+      'role': role,
     });
 
     showDialog(

@@ -1,15 +1,13 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 import 'package:animated_flip_counter/animated_flip_counter.dart';
 import 'package:awesome_snackbar_content/awesome_snackbar_content.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:lottie/lottie.dart';
 import 'package:mon/pages/transactions/pay.dart';
+import 'package:mon/services/wallet_transfer.dart';
 import 'package:mon/pages/transactions/receive.dart';
 import 'package:mon/pages/transactions/transactions.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
@@ -40,6 +38,21 @@ class Player {
         color: Colors.primaries[map['name'].hashCode % Colors.primaries.length],
         avatar: map['avatar'] ?? "assets/avatars/boy1.jpg");
   }
+
+  /// Value equality, so `listEquals` in the screens can tell "the roster did not
+  /// change" apart from "the wallet moved" and skip the rebuild. `color` is
+  /// derived from `name`, so it does not take part.
+  @override
+  bool operator ==(Object other) {
+    return other is Player &&
+        other.playerID == playerID &&
+        other.name == name &&
+        other.value == value &&
+        other.avatar == avatar;
+  }
+
+  @override
+  int get hashCode => Object.hash(playerID, name, value, avatar);
 }
 
 class PlayersScreen extends StatefulWidget {
@@ -68,37 +81,194 @@ class _PlayersScreenState extends State<PlayersScreen> {
   String positionStatus = 'none';
   String payOption = 'InstantPay';
 
-  File? _profileImage;
+  bool _isFetching = false; // One poll in flight at a time
+  StreamSubscription<List<Map<String, dynamic>>>? _rosterUpdates;
+
+  /// Digits of this device's id, padded so the wallet-card slices below can
+  /// never throw: the old code called `substring(0, 4)` directly, which blew up
+  /// on any id with fewer than four digits and blanked the whole screen.
+  String get _cardDigits =>
+      (playerID ?? '').replaceAll(RegExp(r'\D'), '').padLeft(4, '0');
+
+  /// Cardholder name, safe to render before prefs have loaded and for an empty
+  /// name (the old code indexed `[0]` and threw).
+  String get _cardName {
+    final String? raw = currentPlayerName;
+    if (raw == null || raw.isEmpty) return '';
+    return '${raw[0].toUpperCase()}${raw.substring(1)}';
+  }
+
+  String get _cardNameLowered {
+    final String? raw = currentPlayerName;
+    if (raw == null || raw.isEmpty) return '';
+    return '${raw[0].toUpperCase()}${raw.substring(1).toLowerCase()}';
+  }
 
   @override
   void initState() {
     super.initState();
     value = widget.bankValue;
     fetchCurrentPlayerName();
-    fetchPlayers();
-    startPolling();
+    _refreshRoster(); // Initial load
+    _subscribeToRoster(); // Live updates
+    startPolling(); // Reconciliation, in case Realtime is unavailable
     setAvatar();
   }
 
   @override
   void dispose() {
+    _rosterUpdates?.cancel();
     pollingTimer?.cancel();
     super.dispose();
   }
 
+  /// Live roster for this game. Supabase Realtime pushes a change the moment a
+  /// wallet moves, so the screen no longer has to ask for one. If the socket is
+  /// unavailable the stream reports the error and the reconciliation timer
+  /// below keeps the screen correct anyway.
+  void _subscribeToRoster() {
+    try {
+      _rosterUpdates = Supabase.instance.client
+          .from('players_test')
+          .stream(primaryKey: const ['id'])
+          .eq('game_id', widget.gameId)
+          .listen(
+            _applyRosterRows,
+            onError: (Object error) =>
+                debugPrint('Roster stream error, still polling: $error'),
+          );
+    } catch (e) {
+      debugPrint('Could not subscribe to roster updates: $e');
+    }
+  }
+
   void startPolling() {
-    pollingTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
-      fetchPlayers();
-      fetchMyPlayer();
+    // Reconciliation only: live changes arrive over the socket, so this is a
+    // safety net rather than the way the screen stays up to date.
+    pollingTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _refreshRoster();
     });
+  }
+
+  /// One request at a time, so a slow tick cannot stack up requests.
+  Future<void> _refreshRoster() async {
+    if (_isFetching) return; // Skip this tick instead of stacking requests
+    _isFetching = true;
+    try {
+      // No server-side sort: the roster is a handful of rows and sorting them
+      // here means the indexed (game_id, role) lookup is all the backend does.
+      final response = await Supabase.instance.client
+          .from('players_test')
+          .select()
+          .eq('game_id', widget.gameId)
+          .eq('role', 'player');
+
+      _applyRosterRows(
+          (response as List<dynamic>).cast<Map<String, dynamic>>());
+    } catch (e) {
+      debugPrint('Error fetching players: $e');
+    } finally {
+      _isFetching = false;
+    }
+  }
+
+  /// The single place roster rows become screen state. Both the Realtime stream
+  /// and the reconciliation poll land here, so a live update and a polled one
+  /// can never produce a different screen.
+  void _applyRosterRows(List<Map<String, dynamic>> rows) {
+    if (!mounted) return;
+
+    final List<Map<String, dynamic>> roster = rows
+        .where((Map<String, dynamic> row) => row['role'] == 'player')
+        .toList()
+      ..sort((Map<String, dynamic> a, Map<String, dynamic> b) =>
+          ((b['wallet'] as num?) ?? 0).compareTo((a['wallet'] as num?) ?? 0));
+
+    final List<Player> updatedPlayers =
+        roster.map((Map<String, dynamic> row) => Player.fromMap(row)).toList();
+
+    // `isLoading` has to clear even when the roster is unchanged, otherwise an
+    // empty game would spin on the loading indicator forever.
+    if (isLoading || !listEquals(players, updatedPlayers)) {
+      setState(() {
+        players = updatedPlayers;
+        isLoading = false;
+      });
+    }
+
+    _applyMyPlayer(roster);
+  }
+
+  /// Derives this device's wallet, rank and pay option from the roster that was
+  /// just received, instead of asking the backend for them separately.
+  void _applyMyPlayer(List<Map<String, dynamic>> roster) {
+    final String? id = playerID;
+    if (id == null) return;
+
+    final int index =
+        roster.indexWhere((Map<String, dynamic> row) => row['player_id'] == id);
+    if (index == -1) {
+      debugPrint('Current player not found in the list.');
+      return;
+    }
+
+    final Map<String, dynamic> currentPlayer = roster[index];
+    final num wallet = (currentPlayer['wallet'] as num?) ?? 0;
+    final int position = index + 1; // 1-based position
+    final int totalPlayers = roster.length;
+
+    // Determine position label
+    String positionLabel;
+    if (position == 1) {
+      positionLabel = 'first';
+    } else if (position == 2) {
+      positionLabel = 'second';
+    } else if (position == totalPlayers) {
+      positionLabel = 'last';
+    } else if (position == totalPlayers - 1) {
+      positionLabel = 'almostlast';
+    } else {
+      positionLabel = ''; // Optional: handle other positions if needed
+    }
+
+    setState(() {
+      // The wallet card renders this name, so fall back to the roster's copy
+      // when this device has no profile name stored yet.
+      currentPlayerName ??= currentPlayer['name'] as String?;
+      value = double.parse(wallet.toStringAsFixed(2));
+      playerPosition = position; // Requires defining this state variable
+      positionStatus = positionLabel; // Requires defining this too
+      payOption = (currentPlayer['SP/IP'] as String?) ?? payOption;
+    });
+
+    // Show SnackBar only if there's a change
+    if (previousWallet != null) {
+      if (wallet > previousWallet!) {
+        notification('received', (wallet - previousWallet!).toStringAsFixed(2));
+      } else if (wallet < previousWallet! && payOption == 'ScanPay') {
+        notification('paid', (previousWallet! - wallet).toStringAsFixed(2));
+      }
+    }
+
+    previousWallet = wallet.toDouble();
   }
 
   Future<void> fetchCurrentPlayerName() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('gameID', widget.gameId);
 
+    // This device is playing as a player in this game. Store the role and the
+    // display name in prefs so the QR generator (receive.dart) can build the
+    // correct payload without a database round-trip.
+    final profileName = prefs.getString('profile_name');
+    await prefs.setString('role', 'player');
+    await prefs.setString('display_name', profileName ?? 'Player');
+
+    if (!mounted) return;
     setState(() {
-      currentPlayerName = prefs.getString('profile_name');
+      // Read once at startup instead of on every tick.
+      playerID ??= prefs.getString('playerID');
+      currentPlayerName ??= profileName;
     });
   }
 
@@ -106,82 +276,30 @@ class _PlayersScreenState extends State<PlayersScreen> {
     final prefs = await SharedPreferences.getInstance();
     final avatar = prefs.getString('avatar_path');
     playerID = prefs.getString('playerID');
+    if (playerID == null) return;
 
-    await Supabase.instance.client
-        .from('players_test')
-        .update({'avatar': avatar})
-        .eq('game_id', widget.gameId)
-        .eq('player_id', playerID!);
-  }
-
-  Future<void> fetchPlayers() async {
     final supabase = Supabase.instance.client;
     try {
-      final response = await supabase
+      // This runs on every screen open, and the stored avatar is almost always
+      // already current. One write per open also invalidates every other device
+      // in the game, so compare first and write only on a real change.
+      final existing = await supabase
           .from('players_test')
-          .select()
+          .select('avatar')
           .eq('game_id', widget.gameId)
-          .eq('role', 'player')
-          .order('wallet', ascending: false); // Sort by wallet descending
+          .eq('player_id', playerID!)
+          .maybeSingle();
 
-      final data = response as List<dynamic>;
-      final updatedPlayers = data.map((e) => Player.fromMap(e)).toList();
+      if (existing != null && existing['avatar'] == avatar) return;
 
-      if (!listEquals(players, updatedPlayers)) {
-        setState(() {
-          players = updatedPlayers;
-          isLoading = false;
-        });
-      }
+      await supabase
+          .from('players_test')
+          .update({'avatar': avatar})
+          .eq('game_id', widget.gameId)
+          .eq('player_id', playerID!);
     } catch (e) {
-      debugPrint('Error fetching players: $e');
+      debugPrint('Error updating avatar: $e');
     }
-  }
-
-  void notify(String message, String value) {
-    showDialog(
-      barrierDismissible: false,
-      context: context,
-      barrierColor: Colors.transparent,
-      builder: (BuildContext dialogContext) {
-        // Auto-close after 2 seconds
-        Future.delayed(const Duration(seconds: 2), () {
-          if (Navigator.of(dialogContext).canPop()) {
-            Navigator.of(dialogContext).pop();
-          }
-        });
-
-        return Dialog(
-          backgroundColor: Colors.transparent,
-          child: Center(
-            child: SizedBox(
-              width: 60.w, // Responsive width
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Lottie.asset(
-                    message == 'paid'
-                        ? 'assets/lottie/paid.json'
-                        : message == 'failed'
-                            ? 'assets/lottie/failed.json'
-                            : message == 'received'
-                                ? 'assets/lottie/received.json'
-                                : 'assets/lottie/paid.json',
-                    repeat: false,
-                  ),
-                  Text(
-                    "${message[0].toUpperCase()}${message.substring(1)} $value",
-                    style:
-                        TextStyle(fontWeight: FontWeight.bold, fontSize: 16.sp),
-                    textAlign: TextAlign.center,
-                  )
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
   }
 
   void notification(String message, String value) {
@@ -236,132 +354,6 @@ class _PlayersScreenState extends State<PlayersScreen> {
       default:
         return 'Notice';
     }
-  }
-
-/*   Future<void> fetchMyPlayer() async {
-    final prefs = await SharedPreferences.getInstance();
-    final name = prefs.getString('name');
-    if (name == null) return;
-
-    final supabase = Supabase.instance.client;
-    try {
-      final response = await supabase
-          .from('players_test')
-          .select()
-          .eq('game_id', widget.gameId)
-          .eq('name', name)
-          .single();
-
-      final data = response as Map<String, dynamic>;
-      final wallet = data['wallet'] as num;
-      setState(() {
-        value = double.parse(wallet.toStringAsFixed(2));
-      });
-      // Show SnackBar only if there's a change
-      if (previousWallet != null) {
-        if (wallet > previousWallet!) {
-          showSnackBar('Received');
-        } else if (wallet < previousWallet!) {
-          showSnackBar('Deducted');
-        }
-      }
-
-      previousWallet = wallet.toDouble();
-    } catch (e) {
-      debugPrint('Error fetching current player: $e');
-    }
-  }
- */
-
-  Future<void> fetchMyPlayer() async {
-    final prefs = await SharedPreferences.getInstance();
-    final name = prefs.getString('profile_name');
-    playerID = prefs.getString('playerID');
-
-    if (name == null) return;
-
-    final supabase = Supabase.instance.client;
-    try {
-      // Fetch all players in the game
-      final allPlayersResponse = await supabase
-          .from('players_test')
-          .select()
-          .eq('role', 'player')
-          .eq('game_id', widget.gameId);
-
-      final allPlayers = allPlayersResponse as List<dynamic>;
-
-      // Sort players by wallet in descending order
-      allPlayers
-          .sort((a, b) => (b['wallet'] as num).compareTo(a['wallet'] as num));
-
-      // Find the current player's data and position
-      final currentPlayerIndex =
-          allPlayers.indexWhere((player) => player['player_id'] == playerID);
-      if (currentPlayerIndex == -1) {
-        debugPrint('Current player not found in the list.');
-        return;
-      }
-
-      final currentPlayer = allPlayers[currentPlayerIndex];
-      final wallet = currentPlayer['wallet'] as num;
-      final playerId = playerID;
-      final option = currentPlayer['SP/IP'];
-
-      final position = currentPlayerIndex + 1; // 1-based position
-      final totalPlayers = allPlayers.length;
-
-      // Determine position label
-      String positionLabel;
-      if (position == 1) {
-        positionLabel = 'first';
-      } else if (position == 2) {
-        positionLabel = 'second';
-      } else if (position == totalPlayers) {
-        positionLabel = 'last';
-      } else if (position == totalPlayers - 1) {
-        positionLabel = 'almostlast';
-      } else {
-        positionLabel = ''; // Optional: handle other positions if needed
-      }
-
-      setState(() {
-        playerID = playerId;
-        value = double.parse(wallet.toStringAsFixed(2));
-        playerPosition = position; // Requires defining this state variable
-        positionStatus = positionLabel; // Requires defining this too
-        payOption = option;
-      });
-
-      // Show SnackBar only if there's a change
-      if (previousWallet != null) {
-        if (wallet > previousWallet!) {
-          //notify('received', (wallet - previousWallet!).toStringAsFixed(2));
-          notification(
-              'received', (wallet - previousWallet!).toStringAsFixed(2));
-          // showSnackBar('Received');
-        } else if (wallet < previousWallet! && payOption == 'ScanPay') {
-          //notify('paid', (previousWallet! - wallet).toStringAsFixed(2));
-          notification('paid', (previousWallet! - wallet).toStringAsFixed(2));
-
-          // showSnackBar('Deducted');
-        }
-      }
-
-      previousWallet = wallet.toDouble();
-    } catch (e) {
-      debugPrint('Error fetching current player or rankings: $e');
-    }
-  }
-
-  void showSnackBar(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        duration: const Duration(seconds: 1),
-      ),
-    );
   }
 
   Future<void> payPlayer(Player player) async {
@@ -425,7 +417,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                         Row(
                                           children: [
                                             Text(
-                                              '${currentPlayerName![0].toUpperCase()}${currentPlayerName!.substring(1).toLowerCase()}',
+                                              _cardNameLowered,
                                               style: TextStyle(
                                                 fontSize: 18.sp,
                                                 fontWeight: FontWeight.bold,
@@ -437,7 +429,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                         const SizedBox(height: 5),
                                         // Dummy credit card number
                                         Text(
-                                          '**** **** **** ${playerID!.replaceAll(RegExp(r'\D'), '').substring(0, 4)}', // Extracts first 4 digits from UUID
+                                          '**** **** **** ${_cardDigits.substring(0, 4)}', // First 4 digits of this device's id
                                           style: TextStyle(
                                             fontSize: 22.sp,
                                             fontWeight: FontWeight.w600,
@@ -474,7 +466,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                       textStyle: TextStyle(
                                         fontSize: 28.sp,
                                         fontWeight: FontWeight.bold,
-                                        color: Colors.white.withOpacity(0.9),
+                                        color:
+                                            Colors.white.withValues(alpha: 0.9),
                                       ),
                                       duration:
                                           const Duration(milliseconds: 500),
@@ -495,7 +488,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                                 style: TextStyle(
                                                   fontSize: 12.sp,
                                                   color: Colors.white
-                                                      .withOpacity(0.7),
+                                                      .withValues(alpha: 0.7),
                                                 ),
                                               ),
                                               const SizedBox(height: 5),
@@ -521,7 +514,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                                 style: TextStyle(
                                                   fontSize: 12.sp,
                                                   color: Colors.white
-                                                      .withOpacity(0.7),
+                                                      .withValues(alpha: 0.7),
                                                 ),
                                               ),
                                               const SizedBox(height: 5),
@@ -917,42 +910,35 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                                   (payerResponse['wallet']
                                                           as num)
                                                       .toDouble();
-                                              double receiverWallet =
-                                                  (receiverResponse['wallet']
-                                                          as num)
-                                                      .toDouble();
-
                                               if (payerWallet >=
                                                   enteredAmount!) {
-                                                // Update wallet balances
-                                                double newPayerWallet =
-                                                    payerWallet -
-                                                        enteredAmount!;
-                                                double newReceiverWallet =
-                                                    receiverWallet +
-                                                        enteredAmount!;
+                                                // One atomic call: the database
+                                                // locks both rows, re-checks the
+                                                // funds and writes both wallets,
+                                                // so a payment landing at the same
+                                                // moment can no longer lose this
+                                                // one.
+                                                final TransferOutcome transfer =
+                                                    await WalletTransfer.pay(
+                                                  gameId: widget.gameId,
+                                                  fromId: payerPlayerID,
+                                                  fromRole:
+                                                      WalletTransfer.playerRole,
+                                                  toId: player.playerID,
+                                                  toRole:
+                                                      WalletTransfer.playerRole,
+                                                  amount: enteredAmount!,
+                                                );
 
-                                                // Update Supabase records
-                                                await Supabase.instance.client
-                                                    .from('players_test')
-                                                    .update({
-                                                      'wallet': newPayerWallet
-                                                    })
-                                                    .eq('game_id',
-                                                        widget.gameId)
-                                                    .eq('player_id',
-                                                        payerPlayerID);
-
-                                                await Supabase.instance.client
-                                                    .from('players_test')
-                                                    .update({
-                                                      'wallet':
-                                                          newReceiverWallet
-                                                    })
-                                                    .eq('game_id',
-                                                        widget.gameId)
-                                                    .eq('player_id',
-                                                        player.playerID);
+                                                if (!transfer.ok) {
+                                                  setState(() {
+                                                    statusLabel =
+                                                        "Insufficient balance X";
+                                                    isProcessing =
+                                                        false; // Allow retry
+                                                  });
+                                                  return;
+                                                }
                                                 await Supabase.instance.client
                                                     .from('transactions')
                                                     .insert({
@@ -1039,7 +1025,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
       padding: EdgeInsets.symmetric(vertical: 0.h, horizontal: 10),
       margin: const EdgeInsets.symmetric(vertical: 1),
       decoration: BoxDecoration(
-        color: player.color.withOpacity(0.2),
+        color: player.color.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(2.w),
       ),
       child: Row(
@@ -1048,7 +1034,9 @@ class _PlayersScreenState extends State<PlayersScreen> {
             radius: 18.sp,
             backgroundColor:
                 Colors.transparent, // pale mint green bg for subtle pop
-            backgroundImage: AssetImage(player.avatar),
+            // Decoded at 144px: the source avatars are 500-1200px, so a 36.sp
+            // circle was pulling a multi-megabyte bitmap into memory per player.
+            backgroundImage: ResizeImage(AssetImage(player.avatar), width: 144),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -1256,7 +1244,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                         Row(
                                           children: [
                                             Text(
-                                              '${currentPlayerName![0].toUpperCase()}${currentPlayerName!.substring(1)}',
+                                              _cardName,
                                               style: TextStyle(
                                                 fontSize: 18.sp,
                                                 fontWeight: FontWeight.bold,
@@ -1268,7 +1256,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                         const SizedBox(height: 5),
                                         // Dummy credit card number
                                         Text(
-                                          '**** **** **** ${playerID!.replaceAll(RegExp(r'\D'), '').substring(0, 4)}', // Extracts first 4 digits from UUID
+                                          '**** **** **** ${_cardDigits.substring(0, 4)}', // First 4 digits of this device's id
                                           style: TextStyle(
                                             fontSize: 22.sp,
                                             fontWeight: FontWeight.w600,
@@ -1305,7 +1293,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                       textStyle: TextStyle(
                                         fontSize: 28.sp,
                                         fontWeight: FontWeight.bold,
-                                        color: Colors.white.withOpacity(0.9),
+                                        color:
+                                            Colors.white.withValues(alpha: 0.9),
                                       ),
                                       duration:
                                           const Duration(milliseconds: 500),
@@ -1326,7 +1315,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                                 style: TextStyle(
                                                   fontSize: 12.sp,
                                                   color: Colors.white
-                                                      .withOpacity(0.7),
+                                                      .withValues(alpha: 0.7),
                                                 ),
                                               ),
                                               const SizedBox(height: 5),
@@ -1352,19 +1341,13 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                                 style: TextStyle(
                                                   fontSize: 12.sp,
                                                   color: Colors.white
-                                                      .withOpacity(0.7),
+                                                      .withValues(alpha: 0.7),
                                                 ),
                                               ),
                                               const SizedBox(height: 5),
                                               Text(
-                                                playerID!
-                                                    .replaceAll(
-                                                        RegExp(r'\D'), '')
-                                                    .substring(playerID!
-                                                            .replaceAll(
-                                                                RegExp(r'\D'),
-                                                                '')
-                                                            .length -
+                                                _cardDigits.substring(
+                                                    _cardDigits.length -
                                                         3), // Dummy CVV
                                                 style: TextStyle(
                                                   fontSize: 16.sp,
@@ -1757,41 +1740,38 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                                   (payerResponse['wallet']
                                                           as num)
                                                       .toDouble();
-                                              double receiverWallet =
-                                                  (receiverResponse['wallet']
-                                                          as num)
-                                                      .toDouble();
 
                                               if (payerWallet >=
                                                   enteredAmount!) {
-                                                // Update wallet balances
-                                                double newPayerWallet =
-                                                    payerWallet -
-                                                        enteredAmount!;
-                                                double newReceiverWallet =
-                                                    receiverWallet +
-                                                        enteredAmount!;
+                                                // One atomic call: the database
+                                                // locks both rows, re-checks the
+                                                // funds and writes both wallets,
+                                                // so a payment landing at the same
+                                                // moment can no longer lose this
+                                                // one.
+                                                final TransferOutcome transfer =
+                                                    await WalletTransfer.pay(
+                                                  gameId: widget.gameId,
+                                                  fromId: payerPlayerID,
+                                                  fromRole:
+                                                      WalletTransfer.playerRole,
+                                                  toId: receiverResponse[
+                                                          'player_id']
+                                                      .toString(),
+                                                  toRole:
+                                                      WalletTransfer.bankerRole,
+                                                  amount: enteredAmount!,
+                                                );
 
-                                                // Update Supabase records
-                                                await Supabase.instance.client
-                                                    .from('players_test')
-                                                    .update({
-                                                      'wallet': newPayerWallet
-                                                    })
-                                                    .eq('game_id',
-                                                        widget.gameId)
-                                                    .eq('player_id',
-                                                        payerPlayerID);
-
-                                                await Supabase.instance.client
-                                                    .from('players_test')
-                                                    .update({
-                                                      'wallet':
-                                                          newReceiverWallet
-                                                    })
-                                                    .eq('game_id',
-                                                        widget.gameId)
-                                                    .eq('role', "banker");
+                                                if (!transfer.ok) {
+                                                  setState(() {
+                                                    statusLabel =
+                                                        "Insufficient balance X";
+                                                    isProcessing =
+                                                        false; // Allow retry
+                                                  });
+                                                  return;
+                                                }
 
                                                 // Log the transaction
                                                 await Supabase.instance.client
@@ -1884,20 +1864,16 @@ class _PlayersScreenState extends State<PlayersScreen> {
     );
   }
 
-  void showLoadingDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      barrierDismissible: false, // Disable dismissing by tapping outside
-      builder: (BuildContext context) {
-        return Dialog(child: Lottie.asset('assets/lottie/first.json'));
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: _onWillPop,
+    return PopScope(
+      canPop: false,
+      // Intercept the back press and show the confirmation instead.
+      onPopInvokedWithResult: (bool didPop, Object? result) async {
+        if (didPop) return;
+        final bool shouldLeave = await _onWillPop();
+        if (shouldLeave && mounted) Navigator.of(context).pop();
+      },
       child: Scaffold(
         backgroundColor: const Color(0xFFFFF8E1),
         appBar: AppBar(
@@ -1924,7 +1900,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
                     ),
                   );
                 },
-                icon: const Icon(FontAwesomeIcons.history)),
+                icon: const Icon(FontAwesomeIcons.clockRotateLeft)),
             const SizedBox(width: 5),
             IconButton(
                 onPressed: () async {
@@ -1943,11 +1919,13 @@ class _PlayersScreenState extends State<PlayersScreen> {
                     ); // or your custom logic to leave the game
                   }
                 },
-                icon: const Icon(FontAwesomeIcons.signOutAlt)),
+                icon: const Icon(FontAwesomeIcons.rightFromBracket)),
             const SizedBox(width: 5),
           ],
         ),
-        body: isLoading
+        // playerID comes from local prefs, so this gate clears within a frame or
+        // two; it just keeps the card from being built before it exists.
+        body: isLoading || playerID == null
             ? const Center(
                 child: CircularProgressIndicator(color: Color(0xFF689F38)),
               )
@@ -1999,7 +1977,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                             Row(
                                               children: [
                                                 Text(
-                                                  '${currentPlayerName![0].toUpperCase()}${currentPlayerName!.substring(1)}',
+                                                  _cardName,
                                                   style: TextStyle(
                                                     fontSize: 20.sp,
                                                     fontWeight: FontWeight.bold,
@@ -2011,7 +1989,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                             const SizedBox(height: 5),
                                             // Dummy credit card number
                                             Text(
-                                              '**** **** **** ${playerID!.replaceAll(RegExp(r'\D'), '').substring(0, 4)}', // Extracts first 4 digits from UUID
+                                              '**** **** **** ${_cardDigits.substring(0, 4)}', // First 4 digits of this device's id
                                               style: TextStyle(
                                                 fontSize: 22.sp,
                                                 fontWeight: FontWeight.w600,
@@ -2049,8 +2027,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                           textStyle: TextStyle(
                                             fontSize: 28.sp,
                                             fontWeight: FontWeight.bold,
-                                            color:
-                                                Colors.white.withOpacity(0.9),
+                                            color: Colors.white
+                                                .withValues(alpha: 0.9),
                                           ),
                                           duration:
                                               const Duration(milliseconds: 500),
@@ -2071,7 +2049,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                                     style: TextStyle(
                                                       fontSize: 12.sp,
                                                       color: Colors.white
-                                                          .withOpacity(0.7),
+                                                          .withValues(
+                                                              alpha: 0.7),
                                                     ),
                                                   ),
                                                   const SizedBox(height: 5),
@@ -2098,20 +2077,14 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                                     style: TextStyle(
                                                       fontSize: 12.sp,
                                                       color: Colors.white
-                                                          .withOpacity(0.7),
+                                                          .withValues(
+                                                              alpha: 0.7),
                                                     ),
                                                   ),
                                                   const SizedBox(height: 5),
                                                   Text(
-                                                    playerID!
-                                                        .replaceAll(
-                                                            RegExp(r'\D'), '')
-                                                        .substring(playerID!
-                                                                .replaceAll(
-                                                                    RegExp(
-                                                                        r'\D'),
-                                                                    '')
-                                                                .length -
+                                                    _cardDigits.substring(
+                                                        _cardDigits.length -
                                                             3), // Dummy CVV
                                                     style: TextStyle(
                                                       fontSize: 16.sp,

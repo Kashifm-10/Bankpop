@@ -2,10 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:lottie/lottie.dart';
 import 'package:mon/pages/banker/bank_details.dart';
-import 'package:mon/main.dart';
 import 'package:mon/pages/player/player_details.dart';
 import 'package:mon/pages/player/player_screen.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
@@ -23,7 +21,6 @@ class SelectRoleScreen extends StatelessWidget {
   }
 
   void _goToPlayer(BuildContext context) async {
-    final supabase = Supabase.instance.client;
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     final String? playerID = prefs.getString('playerID');
 
@@ -160,21 +157,15 @@ class SelectRoleScreen extends StatelessWidget {
       return null;
     }
 
-    // Step 2: Show the Enter Name dialog
-    final nameController = TextEditingController();
-    // ignore: use_build_context_synchronously
-    /*  String? playerName = await _showEnterNameDialog(context, nameController);
-    if (playerName == null || playerName.isEmpty) {
-      return null; // If no name entered, return null
-    } */
+    // The name now comes from the profile saved on this device.
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     String? playerName =
         prefs.getString('profile_name') ?? 'player${playerID.substring(0, 3)}';
 
     // Step 3: Check if player exists and try to join
     // ignore: use_build_context_synchronously
-    final Map<String, dynamic>? playerData = await _checkPlayerAndJoin(
-        context, gameId, playerID, playerName /* nameController.text */);
+    final Map<String, dynamic>? playerData =
+        await _checkPlayerAndJoin(context, gameId, playerID, playerName);
     return playerData;
   }
 
@@ -186,41 +177,6 @@ class SelectRoleScreen extends StatelessWidget {
   }
 
 // Refactored to avoid BuildContext across async operations
-  Future<String?> _showEnterNameDialog(
-      BuildContext context, TextEditingController nameController) async {
-    return showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return AlertDialog(
-backgroundColor: Color(0xFFFFF8E1),          title: const Text('Enter your name'),
-          content: TextField(
-            controller: nameController,
-            decoration: const InputDecoration(
-              labelText: 'Name',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.of(context)
-                    .pop(nameController.text); // Close dialog and return name
-              },
-              child: const Text('Join'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
 // Extracted method to check player and attempt to join game
   Future<Map<String, dynamic>?> _checkPlayerAndJoin(BuildContext context,
       String gameId, String? playerID, String name) async {
@@ -261,22 +217,63 @@ backgroundColor: Color(0xFFFFF8E1),          title: const Text('Enter your name'
 
     Map<String, dynamic>? approvedPlayer;
 
-    while (stopwatch.elapsed < maxWait) {
-      final response = await supabase
+    // Realtime first: approval inserts this player's row, so the waiting dialog
+    // can close the moment it lands. The loop below still asks the backend
+    // directly, which is what keeps joining working if the socket is down.
+    final Completer<Map<String, dynamic>> approved =
+        Completer<Map<String, dynamic>>();
+    StreamSubscription<List<Map<String, dynamic>>>? approvalUpdates;
+    try {
+      approvalUpdates = supabase
           .from('players_test')
-          .select()
+          .stream(primaryKey: const ['id'])
           .eq('game_id', gameId)
-          .eq('player_id', playerID)
-          .eq('role', 'player')
-          .limit(1);
+          .listen(
+        (List<Map<String, dynamic>> rows) {
+          if (approved.isCompleted) return;
+          for (final Map<String, dynamic> row in rows) {
+            if (row['role'] == 'player' && row['player_id'] == playerID) {
+              approved.complete(row);
+              return;
+            }
+          }
+        },
+        onError: (Object error) =>
+            debugPrint('Approval stream error, still polling: $error'),
+      );
+    } catch (e) {
+      debugPrint('Could not subscribe to approval updates: $e');
+    }
 
-      final data = response;
-      if (data.isNotEmpty) {
-        approvedPlayer = data.first;
-        break;
+    try {
+      while (stopwatch.elapsed < maxWait && !approved.isCompleted) {
+        final response = await supabase
+            .from('players_test')
+            .select()
+            .eq('game_id', gameId)
+            .eq('player_id', playerID)
+            .eq('role', 'player')
+            .limit(1);
+
+        final data = response;
+        if (data.isNotEmpty) {
+          approvedPlayer = data.first;
+          break;
+        }
+
+        // Wake up as soon as the socket delivers the approval instead of always
+        // waiting out the full poll interval.
+        await Future.any<void>(<Future<void>>[
+          Future<void>.delayed(pollInterval),
+          approved.future,
+        ]);
       }
 
-      await Future.delayed(pollInterval);
+      if (approvedPlayer == null && approved.isCompleted) {
+        approvedPlayer = await approved.future;
+      }
+    } finally {
+      await approvalUpdates?.cancel();
     }
 
     // ignore: use_build_context_synchronously
@@ -509,58 +506,6 @@ backgroundColor: Color(0xFFFFF8E1),        title: const Text("Unable to Join"),
     );
   }
 
-  Widget _buildRoleButton(
-    BuildContext context, {
-    required String title,
-    required IconData icon,
-    required Color color,
-    required List<Color> colors,
-    required VoidCallback onTap,
-  }) {
-    return SizedBox(
-      width: 70.w,
-      height: 7.h,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: onTap,
-        child: Container(
-          decoration: BoxDecoration(
-            color: color,
-            /*  gradient: LinearGradient(
-              colors: colors,
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ), */
-            /*   boxShadow: [
-              BoxShadow(
-                color: color.withOpacity(0.6),
-                blurRadius: 5,
-                offset: const Offset(3, 3),
-              ),
-            ], */
-            border: Border.all(color: color.withOpacity(.6)),
-            borderRadius: BorderRadius.circular(18),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, color: Colors.white, size: 22.sp),
-              const SizedBox(width: 20),
-              Text(
-                title,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 18.sp,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.7,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 class RoleButtonCard extends StatelessWidget {

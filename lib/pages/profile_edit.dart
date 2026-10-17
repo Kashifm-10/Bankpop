@@ -1,12 +1,8 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:image_cropper/image_cropper.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 class ProfileDialog extends StatefulWidget {
   final bool first;
@@ -56,50 +52,10 @@ class _ProfileDialogState extends State<ProfileDialog> {
     if (path != null && File(path).existsSync()) {
       setState(() => _profileImage = File(path));
     }
-    selap = avatar!;
-    selindex = avatarIndex!;
-  }
-
-  Future<void> _pickAndCropImage() async {
-    // Request permissions
-
-    try {
-      final picker = ImagePicker();
-      final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-
-      if (pickedFile != null) {
-        final cropped = await ImageCropper().cropImage(
-          sourcePath: pickedFile.path,
-          aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
-          compressQuality: 90,
-          uiSettings: [
-            AndroidUiSettings(
-              toolbarTitle: 'Crop Image',
-              toolbarColor: Color(0xFF689F38),
-              toolbarWidgetColor: Colors.white,
-              backgroundColor: Color(0xFFFFF8E1),
-              activeControlsWidgetColor: Color(0xFF689F38),
-              dimmedLayerColor: Color(0xFFFFF8E1),
-              cropFrameColor: Color(0xFF689F38),
-            ),
-            IOSUiSettings(title: 'Crop Image'),
-          ],
-        );
-
-        if (cropped != null) {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString("profile_image", cropped.path);
-          setState(() {
-            _profileImage = File(cropped.path);
-            _selectedAvatarIndex = null; // Clear avatar selection
-          });
-        }
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e')),
-      );
-    }
+    // First launch has neither key saved yet: keep the defaults instead of
+    // asserting on prefs that do not exist (this used to blank the dialog).
+    selap = avatar ?? selap;
+    selindex = avatarIndex ?? selindex;
   }
 
   Future<void> _selectAvatarFromAssets(String assetPath, int index) async {
@@ -326,8 +282,12 @@ class _ProfileDialogState extends State<ProfileDialog> {
             ),
           ),
           onPressed: () async {
-            await _selectAvatarFromAssets(selap, selindex);
-            _saveProfile();
+            // `selap` is empty until an avatar has actually been picked; loading
+            // "" as an asset would throw and the name would never be saved.
+            if (selap.isNotEmpty) {
+              await _selectAvatarFromAssets(selap, selindex);
+            }
+            await _saveProfile();
           },
           child: const Text("Save"),
         ),

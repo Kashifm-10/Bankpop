@@ -21,7 +21,6 @@ class _PlayerQRScannerScreenState extends State<PlayerQRScannerScreen> {
   // bool _scanned = false;
   // late final MobileScannerController cameraController;
   Timer? _approvalCheckTimer;
-  bool _approved = false;
   final MobileScannerController cameraController = MobileScannerController();
   //final TextEditingController nameController = TextEditingController();
   bool _scanned = false;
@@ -125,7 +124,7 @@ class _PlayerQRScannerScreenState extends State<PlayerQRScannerScreen> {
           .from('players_test')
           .update({'name': playerName})
           .eq('game_id', gameId)
-          .eq('player_id', playerID!);
+          .eq('player_id', playerID);
     }
 
     // ignore: use_build_context_synchronously
@@ -137,23 +136,63 @@ class _PlayerQRScannerScreenState extends State<PlayerQRScannerScreen> {
 
     Map<String, dynamic>? approvedPlayer;
 
-    while (stopwatch.elapsed < maxWait) {
-      final response = await supabase
+    // Realtime first: approval inserts this player's row, so the waiting dialog
+    // can close the moment it lands. The loop below still asks the backend
+    // directly, which is what keeps joining working if the socket is down.
+    final Completer<Map<String, dynamic>> approved =
+        Completer<Map<String, dynamic>>();
+    StreamSubscription<List<Map<String, dynamic>>>? approvalUpdates;
+    try {
+      approvalUpdates = supabase
           .from('players_test')
-          .select()
+          .stream(primaryKey: const ['id'])
           .eq('game_id', gameId)
-          .eq('player_id', playerID)
-          .eq('role', 'player')
-          //.eq('name', nameController.text)
-          .limit(1);
+          .listen(
+        (List<Map<String, dynamic>> rows) {
+          if (approved.isCompleted) return;
+          for (final Map<String, dynamic> row in rows) {
+            if (row['role'] == 'player' && row['player_id'] == playerID) {
+              approved.complete(row);
+              return;
+            }
+          }
+        },
+        onError: (Object error) =>
+            debugPrint('Approval stream error, still polling: $error'),
+      );
+    } catch (e) {
+      debugPrint('Could not subscribe to approval updates: $e');
+    }
 
-      final data = response;
-      if (data.isNotEmpty) {
-        approvedPlayer = data.first;
-        break;
+    try {
+      while (stopwatch.elapsed < maxWait && !approved.isCompleted) {
+        final response = await supabase
+            .from('players_test')
+            .select()
+            .eq('game_id', gameId)
+            .eq('player_id', playerID)
+            .eq('role', 'player')
+            .limit(1);
+
+        final data = response;
+        if (data.isNotEmpty) {
+          approvedPlayer = data.first;
+          break;
+        }
+
+        // Wake up as soon as the socket delivers the approval instead of always
+        // waiting out the full poll interval.
+        await Future.any<void>(<Future<void>>[
+          Future<void>.delayed(pollInterval),
+          approved.future,
+        ]);
       }
 
-      await Future.delayed(pollInterval);
+      if (approvedPlayer == null && approved.isCompleted) {
+        approvedPlayer = await approved.future;
+      }
+    } finally {
+      await approvalUpdates?.cancel();
     }
 
     Navigator.of(context).pop(); // Close waiting dialog
