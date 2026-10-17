@@ -215,7 +215,13 @@ class _ProfileDialogState extends State<ProfileDialog> {
                       children: [
                         CircleAvatar(
                           radius: 25,
-                          backgroundImage: AssetImage(avatarPaths[index]),
+                          // 14 avatars are on screen at once and the sources are
+                          // 520-1200 px square (up to 5.5 MB decoded each), for
+                          // a 50 px circle. Decoding at 144px is the difference
+                          // between ~40 MB and ~1 MB of bitmap memory here.
+                          backgroundImage: ResizeImage(
+                              AssetImage(avatarPaths[index]),
+                              width: 144),
                           backgroundColor: Colors.grey[200],
                         ),
                         if (isSelected)

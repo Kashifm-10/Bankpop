@@ -231,15 +231,31 @@ class _PlayersScreenState extends State<PlayersScreen> {
       positionLabel = ''; // Optional: handle other positions if needed
     }
 
-    setState(() {
-      // The wallet card renders this name, so fall back to the roster's copy
-      // when this device has no profile name stored yet.
-      currentPlayerName ??= currentPlayer['name'] as String?;
-      value = double.parse(wallet.toStringAsFixed(2));
-      playerPosition = position; // Requires defining this state variable
-      positionStatus = positionLabel; // Requires defining this too
-      payOption = (currentPlayer['SP/IP'] as String?) ?? payOption;
-    });
+    // The wallet card renders this name, so fall back to the roster's copy when
+    // this device has no profile name stored yet.
+    final String? name = currentPlayerName ?? currentPlayer['name'] as String?;
+    final double newValue = double.parse(wallet.toStringAsFixed(2));
+    final String newPayOption =
+        (currentPlayer['SP/IP'] as String?) ?? payOption;
+
+    // `_applyRosterRows` above skips its setState when the roster is unchanged,
+    // but a setState here would mark the screen dirty anyway - and this runs on
+    // every roster event and every reconciliation tick, so an idle game was
+    // still rebuilding the whole screen every 5 seconds. Compare before
+    // rebuilding, the way the banker screen already does for its bank header.
+    if (currentPlayerName != name ||
+        value != newValue ||
+        playerPosition != position ||
+        positionStatus != positionLabel ||
+        payOption != newPayOption) {
+      setState(() {
+        currentPlayerName = name;
+        value = newValue;
+        playerPosition = position;
+        positionStatus = positionLabel;
+        payOption = newPayOption;
+      });
+    }
 
     // Show SnackBar only if there's a change
     if (previousWallet != null) {
@@ -391,6 +407,11 @@ class _PlayersScreenState extends State<PlayersScreen> {
                             child: Image.asset(
                               'assets/images/c_logo.png',
                               fit: BoxFit.contain,
+                              // Decoded at 160px wide. The source is 2456x1612,
+                              // so drawing it at 23.sp used to hold 15 MB of
+                              // bitmap and pay the full decode for a logo this
+                              // size. 160 leaves room for wide phones.
+                              cacheWidth: 160,
 
                               width: 23
                                   .sp, // Use MediaQuery or a fixed size if sp is undefined
@@ -1218,6 +1239,11 @@ class _PlayersScreenState extends State<PlayersScreen> {
                             child: Image.asset(
                               'assets/images/c_logo.png',
                               fit: BoxFit.contain,
+                              // Decoded at 160px wide. The source is 2456x1612,
+                              // so drawing it at 23.sp used to hold 15 MB of
+                              // bitmap and pay the full decode for a logo this
+                              // size. 160 leaves room for wide phones.
+                              cacheWidth: 160,
 
                               width: 23
                                   .sp, // Use MediaQuery or a fixed size if sp is undefined
@@ -1952,6 +1978,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                 child: Image.asset(
                                   'assets/images/c_logo.png',
                                   fit: BoxFit.contain,
+                                  cacheWidth: 160, // see the note on the other two
                                   width: 23
                                       .sp, // Use MediaQuery or a fixed size if sp is undefined
                                   height: 23.sp,

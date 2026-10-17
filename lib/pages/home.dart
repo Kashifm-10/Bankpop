@@ -456,11 +456,15 @@ class _WelcomePageState extends State<WelcomePage> {
                                   child: CircleAvatar(
                                     radius: 26.sp,
                                     backgroundColor: Colors.white,
+                                    // Both sources are ~700-1200 px; the avatar
+                                    // is drawn at 52.sp, so decode it at 156px.
                                     backgroundImage: _profileImage != null
-                                        ? FileImage(_profileImage!)
-                                        : const AssetImage(
-                                                'assets/images/play_icon.jpg')
-                                            as ImageProvider,
+                                        ? ResizeImage(FileImage(_profileImage!),
+                                            width: 156)
+                                        : ResizeImage(
+                                            const AssetImage(
+                                                'assets/images/play_icon.jpg'),
+                                            width: 156),
                                   ),
                                 ),
                               ),

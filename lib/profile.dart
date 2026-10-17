@@ -228,10 +228,13 @@ class _ProfilePageState extends State<ProfilePage> {
                       radius: 60,
                       backgroundColor: const Color(
                           0xFFC8E6C9), // pale mint green bg for subtle pop
+                      // Drawn at radius 60, so decode whatever the source is
+                      // (the packaged icon is 736x736) down to 360px.
                       backgroundImage: _profileImage != null
-                          ? FileImage(_profileImage!)
-                          : const AssetImage('assets/images/play_icon.jpg')
-                              as ImageProvider,
+                          ? ResizeImage(FileImage(_profileImage!), width: 360)
+                          : ResizeImage(
+                              const AssetImage('assets/images/play_icon.jpg'),
+                              width: 360),
                     ),
                     Positioned(
                       bottom: 0,

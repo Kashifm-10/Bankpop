@@ -52,12 +52,25 @@ create index if not exists transactions_game_code_idx
 -- delivers nothing, and the screens quietly fall back to a 5-second
 -- reconciliation poll — so the app keeps working, just without live updates.
 
-alter publication supabase_realtime add table public.players_test;
-alter publication supabase_realtime add table public.request_test;
-alter publication supabase_realtime add table public.transactions;
+-- Guarded so the whole file stays re-runnable: a bare `add table` errors with
+-- "table is already member of publication" on the second run and would abort the
+-- rest of the script.
+do $$
+declare t text;
+begin
+  foreach t in array array['players_test','request_test','transactions'] loop
+    if not exists (
+      select 1 from pg_publication_tables
+       where pubname = 'supabase_realtime'
+         and schemaname = 'public'
+         and tablename = t
+    ) then
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    end if;
+  end loop;
+end $$;
 
--- Check membership (use this instead of re-running the three lines above; they
--- error with "table is already member of publication" the second time):
+-- Check membership:
 --
 --   select tablename
 --   from pg_publication_tables
@@ -279,6 +292,37 @@ $$;
 
 alter table public.transactions add column if not exists payer_id text;
 alter table public.transactions add column if not exists receiver_id text;
+
+-- The two columns have to be filled in by the database, not by the app: every
+-- client insert (five of them: ScanPay, the two roster pay paths, and the bank's
+-- advance) writes only `code` and knows nothing about these columns. Without
+-- this trigger the one-time backfill below would fill in today's rows and every
+-- payment recorded from then on would be born NULL - and because the app takes
+-- the indexed path as soon as the columns exist, those new payments would be
+-- invisible in the history screen. The trigger keeps both paths correct without
+-- touching a single insert site, present or future.
+create or replace function public.transactions_fill_ids()
+returns trigger
+language plpgsql
+as $$
+begin
+  -- `code` is always "<payerId>_<payeeId>" and player ids are v4 UUIDs, so the
+  -- first underscore is the separator. The columns are derived, never stored
+  -- independently: a writer that sets them directly must keep `code` in step
+  -- (or this trigger removed). A code with no second part leaves receiver_id
+  -- NULL rather than empty.
+  if new.code is not null then
+    new.payer_id := nullif(split_part(new.code, '_', 1), '');
+    new.receiver_id := nullif(split_part(new.code, '_', 2), '');
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists transactions_fill_ids on public.transactions;
+create trigger transactions_fill_ids
+  before insert or update of code on public.transactions
+  for each row execute function public.transactions_fill_ids();
 
 -- One-time backfill: only touches rows that have not been filled in yet.
 update public.transactions
