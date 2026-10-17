@@ -1,0 +1,448 @@
+{
+  "spaces": [
+    {
+      "index": 0,
+      "name": "GO",
+      "type": "Special"
+    },
+    {
+      "index": 1,
+      "name": "Beggar's Alley",
+      "type": "Property",
+      "price": 60,
+      "rent": [2, 10, 30, 90, 160, 250],
+      "color": "Brown",
+      "houseCost": 50,
+      "hotelCost": 50,
+      "houses": 4,
+      "hotels": 1
+    },
+    {
+      "index": 2,
+      "name": "Community Chest",
+      "type": "Special"
+    },
+    {
+      "index": 3,
+      "name": "Peasant Lane",
+      "type": "Property",
+      "price": 60,
+      "rent": [4, 20, 60, 180, 320, 450],
+      "color": "Brown",
+      "houseCost": 50,
+      "hotelCost": 50,
+      "houses": 4,
+      "hotels": 1
+    },
+    {
+      "index": 4,
+      "name": "Income Tax",
+      "type": "Special"
+    },
+    {
+      "index": 5,
+      "name": "North Star Station",
+      "type": "Property",
+      "price": 200,
+      "rent": [25, 50, 100, 200],
+      "color": "Station",
+      "houseCost": null,
+      "hotelCost": null,
+      "houses": null,
+      "hotels": null
+    },
+    {
+      "index": 6,
+      "name": "Harbor View",
+      "type": "Property",
+      "price": 100,
+      "rent": [6, 30, 90, 270, 400, 550],
+      "color": "Light Blue",
+      "houseCost": 50,
+      "hotelCost": 50,
+      "houses": 4,
+      "hotels": 1
+    },
+    {
+      "index": 7,
+      "name": "Chance",
+      "type": "Special"
+    },
+    {
+      "index": 8,
+      "name": "River Walk",
+      "type": "Property",
+      "price": 100,
+      "rent": [6, 30, 90, 270, 400, 550],
+      "color": "Light Blue",
+      "houseCost": 50,
+      "hotelCost": 50,
+      "houses": 4,
+      "hotels": 1
+    },
+    {
+      "index": 9,
+      "name": "Bridge Street",
+      "type": "Property",
+      "price": 120,
+      "rent": [8, 40, 100, 300, 450, 600],
+      "color": "Light Blue",
+      "houseCost": 50,
+      "hotelCost": 50,
+      "houses": 4,
+      "hotels": 1
+    },
+    {
+      "index": 10,
+      "name": "Jail",
+      "type": "Special"
+    },
+    {
+      "index": 11,
+      "name": "Royal Avenue",
+      "type": "Property",
+      "price": 140,
+      "rent": [10, 50, 150, 450, 625, 750],
+      "color": "Pink",
+      "houseCost": 100,
+      "hotelCost": 100,
+      "houses": 4,
+      "hotels": 1
+    },
+    {
+      "index": 12,
+      "name": "Power Plant",
+      "type": "Property",
+      "price": 150,
+      "rent": [4, 10],
+      "color": "Utility",
+      "houseCost": null,
+      "hotelCost": null,
+      "houses": null,
+      "hotels": null
+    },
+    {
+      "index": 13,
+      "name": "Civic Plaza",
+      "type": "Property",
+      "price": 140,
+      "rent": [10, 50, 150, 450, 625, 750],
+      "color": "Pink",
+      "houseCost": 100,
+      "hotelCost": 100,
+      "houses": 4,
+      "hotels": 1
+    },
+    {
+      "index": 14,
+      "name": "Monument Way",
+      "type": "Property",
+      "price": 160,
+      "rent": [12, 60, 180, 500, 700, 900],
+      "color": "Pink",
+      "houseCost": 100,
+      "hotelCost": 100,
+      "houses": 4,
+      "hotels": 1
+    },
+    {
+      "index": 15,
+      "name": "Central Transit",
+      "type": "Property",
+      "price": 200,
+      "rent": [25, 50, 100, 200],
+      "color": "Station",
+      "houseCost": null,
+      "hotelCost": null,
+      "houses": null,
+      "hotels": null
+    },
+    {
+      "index": 16,
+      "name": "Market Square",
+      "type": "Property",
+      "price": 180,
+      "rent": [14, 70, 200, 550, 750, 950],
+      "color": "Orange",
+      "houseCost": 100,
+      "hotelCost": 100,
+      "houses": 4,
+      "hotels": 1
+    },
+    {
+      "index": 17,
+      "name": "Community Chest",
+      "type": "Special"
+    },
+    {
+      "index": 18,
+      "name": "Merchant Road",
+      "type": "Property",
+      "price": 180,
+      "rent": [14, 70, 200, 550, 750, 950],
+      "color": "Orange",
+      "houseCost": 100,
+      "hotelCost": 100,
+      "houses": 4,
+      "hotels": 1
+    },
+    {
+      "index": 19,
+      "name": "Trade Avenue",
+      "type": "Property",
+      "price": 200,
+      "rent": [16, 80, 220, 600, 800, 1000],
+      "color": "Orange",
+      "houseCost": 100,
+      "hotelCost": 100,
+      "houses": 4,
+      "hotels": 1
+    },
+    {
+      "index": 20,
+      "name": "Free Parking",
+      "type": "Special"
+    },
+    {
+      "index": 21,
+      "name": "Festival Walk",
+      "type": "Property",
+      "price": 220,
+      "rent": [18, 90, 250, 700, 875, 1050],
+      "color": "Red",
+      "houseCost": 150,
+      "hotelCost": 150,
+      "houses": 4,
+      "hotels": 1
+    },
+    {
+      "index": 22,
+      "name": "Chance",
+      "type": "Special"
+    },
+    {
+      "index": 23,
+      "name": "Press Boulevard",
+      "type": "Property",
+      "price": 220,
+      "rent": [18, 90, 250, 700, 875, 1050],
+      "color": "Red",
+      "houseCost": 150,
+      "hotelCost": 150,
+      "houses": 4,
+      "hotels": 1
+    },
+    {
+      "index": 24,
+      "name": "Victory Square",
+      "type": "Property",
+      "price": 240,
+      "rent": [20, 100, 300, 750, 925, 1100],
+      "color": "Red",
+      "houseCost": 150,
+      "hotelCost": 150,
+      "houses": 4,
+      "hotels": 1
+    },
+    {
+      "index": 25,
+      "name": "South Harbor Station",
+      "type": "Property",
+      "price": 200,
+      "rent": [25, 50, 100, 200],
+      "color": "Station",
+      "houseCost": null,
+      "hotelCost": null,
+      "houses": null,
+      "hotels": null
+    },
+    {
+      "index": 26,
+      "name": "Cinema Row",
+      "type": "Property",
+      "price": 260,
+      "rent": [22, 110, 330, 800, 975, 1150],
+      "color": "Yellow",
+      "houseCost": 150,
+      "hotelCost": 150,
+      "houses": 4,
+      "hotels": 1
+    },
+    {
+      "index": 27,
+      "name": "Theater Lane",
+      "type": "Property",
+      "price": 260,
+      "rent": [22, 110, 330, 800, 975, 1150],
+      "color": "Yellow",
+      "houseCost": 150,
+      "hotelCost": 150,
+      "houses": 4,
+      "hotels": 1
+    },
+    {
+      "index": 28,
+      "name": "City Water",
+      "type": "Property",
+      "price": 150,
+      "rent": [4, 10],
+      "color": "Utility",
+      "houseCost": null,
+      "hotelCost": null,
+      "houses": null,
+      "hotels": null
+    },
+    {
+      "index": 29,
+      "name": "Grand Circus",
+      "type": "Property",
+      "price": 280,
+      "rent": [24, 120, 360, 850, 1025, 1200],
+      "color": "Yellow",
+      "houseCost": 150,
+      "hotelCost": 150,
+      "houses": 4,
+      "hotels": 1
+    },
+    {
+      "index": 30,
+      "name": "Go To Jail",
+      "type": "Special"
+    },
+    {
+      "index": 31,
+      "name": "Crown Street",
+      "type": "Property",
+      "price": 300,
+      "rent": [26, 130, 390, 900, 1100, 1275],
+      "color": "Green",
+      "houseCost": 200,
+      "hotelCost": 200,
+      "houses": 4,
+      "hotels": 1
+    },
+    {
+      "index": 32,
+      "name": "Shopping Parade",
+      "type": "Property",
+      "price": 300,
+      "rent": [26, 130, 390, 900, 1100, 1275],
+      "color": "Green",
+      "houseCost": 200,
+      "hotelCost": 200,
+      "houses": 4,
+      "hotels": 1
+    },
+    {
+      "index": 33,
+      "name": "Community Chest",
+      "type": "Special"
+    },
+    {
+      "index": 34,
+      "name": "Luxury Lane",
+      "type": "Property",
+      "price": 320,
+      "rent": [28, 150, 450, 1000, 1200, 1400],
+      "color": "Green",
+      "houseCost": 200,
+      "hotelCost": 200,
+      "houses": 4,
+      "hotels": 1
+    },
+    {
+      "index": 35,
+      "name": "East Metro Station",
+      "type": "Property",
+      "price": 200,
+      "rent": [25, 50, 100, 200],
+      "color": "Station",
+      "houseCost": null,
+      "hotelCost": null,
+      "houses": null,
+      "hotels": null
+    },
+    {
+      "index": 36,
+      "name": "Chance",
+      "type": "Special"
+    },
+    {
+      "index": 37,
+      "name": "Billionaire's Row",
+      "type": "Property",
+      "price": 350,
+      "rent": [35, 175, 500, 1100, 1300, 1500],
+      "color": "Dark Blue",
+      "houseCost": 200,
+      "hotelCost": 200,
+      "houses": 4,
+      "hotels": 1
+    },
+    {
+      "index": 38,
+      "name": "Super Tax",
+      "type": "Special"
+    },
+    {
+      "index": 39,
+      "name": "Platinum Heights",
+      "type": "Property",
+      "price": 400,
+      "rent": [50, 200, 600, 1400, 1700, 2000],
+      "color": "Dark Blue",
+      "houseCost": 200,
+      "hotelCost": 200,
+      "houses": 4,
+      "hotels": 1
+    }
+  ],
+  "cards": {
+    "chanceOptions": [
+      "Advance to Go (Collect £200)",
+      "Advance to Victory Square",
+      "Advance to Royal Avenue",
+      "Advance to Platinum Heights",
+      "Go back 3 spaces",
+      "Take a trip to North Star Station",
+      "Get out of Jail Free",
+      "Make general repairs on all your properties",
+      "Pay school fees of £150",
+      "You have won a crossword competition (£100)",
+      "Bank pays you dividend of £50",
+      "Your building loan matures (Collect £150)",
+      "You have won a competition (£25)",
+      "Go to Jail (Do not pass Go, do not collect £200)",
+      "Drunk in charge - Fine £20",
+      "Speeding fine - £15",
+      "Street repairs - £40 per house, £115 per hotel",
+      "Income tax refund - £20",
+      "Pay hospital £100",
+      "Pay doctor's fee - £50",
+      "Receive interest on 7% preference shares - £25",
+      "It is your birthday! Collect £10 from each player"
+    ],
+    "communityChest": [
+      "Advance to Go (Collect £200)",
+      "Bank error in your favor - Collect £200",
+      "Doctor's fee - Pay £50",
+      "Get out of Jail Free",
+      "Go to Jail (Do not pass Go, do not collect £200)",
+      "It is your birthday! Collect £10 from each player",
+      "Grand Opera Night - Collect £50 from every player",
+      "Income tax refund - Collect £20",
+      "Life insurance matures - Collect £100",
+      "Pay hospital £100",
+      "Pay school fees of £150",
+      "Receive £25 consultancy fee",
+      "You are assessed for street repairs - £40 per house, £115 per hotel",
+      "You have won second prize in a beauty contest - Collect £10",
+      "You inherit £100",
+      "From sale of stock you get £50",
+      "Holiday fund matures - Receive £100",
+      "Christmas fund matures - Receive £100",
+      "Bank pays you dividend of £50",
+      "You have won a crossword competition - Collect £100"
+    ]
+  }
+}

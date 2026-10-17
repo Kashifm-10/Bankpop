@@ -9,6 +9,7 @@ import 'package:mon/pages/player/player_screen.dart';
 import 'package:mon/pages/profile_edit.dart';
 import 'package:mon/pages/role.dart';
 import 'package:mon/profile.dart';
+import 'package:mon/widgets/bankpop_board_popup.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -164,8 +165,7 @@ class _WelcomePageState extends State<WelcomePage> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                                const CircularProgressIndicator(color: Color(0xFF689F38)),
-
+                const CircularProgressIndicator(color: Color(0xFF689F38)),
                 const SizedBox(width: 20),
                 Flexible(
                   child: Text(
@@ -381,18 +381,30 @@ class _WelcomePageState extends State<WelcomePage> {
                             letterSpacing: 1.2,
                           ),
                         ),
-                        GestureDetector(
-                          onTap: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content:
-                                      Text('Only an idiot would press this.')),
-                            );
-                          },
-                          child: const Icon(
-                            CupertinoIcons.info_circle_fill,
-                            color: Color(0xFF33691E),
-                          ),
+                        Row(
+                          children: [
+                            GestureDetector(
+                              onTap: () => showDialog(
+                                context: context,
+                                builder: (_) => const BankpopBoardPopup(),
+                              ),
+                              child: const Icon(Icons.grid_on),
+                            ),
+                            SizedBox(width: 15),
+                            GestureDetector(
+                              onTap: () {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                      content: Text(
+                                          'Only an idiot would press this.')),
+                                );
+                              },
+                              child: const Icon(
+                                CupertinoIcons.info_circle_fill,
+                                color: Color(0xFF33691E),
+                              ),
+                            ),
+                          ],
                         )
                       ],
                     ),
