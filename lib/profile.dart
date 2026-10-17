@@ -1,16 +1,12 @@
 import 'dart:io';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:image_cropper/image_cropper.dart';
 import 'package:mon/pages/home.dart';
 import 'package:mon/pages/profile_edit.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:provider/provider.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'theme_provider.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -74,33 +70,6 @@ class _ProfilePageState extends State<ProfilePage> {
     String? path = prefs.getString('profile_image');
     if (path != null && File(path).existsSync()) {
       setState(() => _profileImage = File(path));
-    }
-  }
-
-  Future<void> _pickAndCropImage() async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-
-    if (pickedFile != null) {
-      final cropped = await ImageCropper().cropImage(
-        sourcePath: pickedFile.path,
-        aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
-        compressQuality: 90,
-        uiSettings: [
-          AndroidUiSettings(
-            toolbarTitle: 'Crop Image',
-            toolbarColor: Colors.deepPurple,
-            toolbarWidgetColor: Colors.white,
-          ),
-          IOSUiSettings(title: 'Crop Image'),
-        ],
-      );
-
-      if (cropped != null) {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString("profile_image", cropped.path);
-        setState(() => _profileImage = File(cropped.path));
-      }
     }
   }
 
@@ -207,11 +176,13 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
-    final themeProvider = Provider.of<ThemeProvider>(context);
-    ThemeMode currentMode = themeProvider.themeMode;
-
-    return WillPopScope(
-      onWillPop: () => _onWillPop(context),
+    return PopScope(
+      canPop: false,
+      // _onWillPop navigates itself and always reports that it handled it.
+      onPopInvokedWithResult: (bool didPop, Object? result) async {
+        if (didPop) return;
+        await _onWillPop(context);
+      },
       child: Scaffold(
         appBar: AppBar(
           leading: IconButton(
@@ -268,15 +239,17 @@ class _ProfilePageState extends State<ProfilePage> {
                       child: InkWell(
                         onTap: () async {
                           final prefs = await SharedPreferences.getInstance();
-                          int? Index = prefs.getInt("selected_avatar_index");
+                          final int? avatarIndex =
+                              prefs.getInt("selected_avatar_index");
 
                           //await _pickAndCropImage();
                           // Add a small bounce animation or ripple effect here if you want
-                          bool? updated = await showDialog(
+                          await showDialog(
                             context: context,
                             builder: (context) => ProfileDialog(
                               first: false,
-                              prevIndex: Index!,
+                              // Nothing saved yet on a first open.
+                              prevIndex: avatarIndex ?? 0,
                             ),
                           );
 
@@ -302,7 +275,7 @@ class _ProfilePageState extends State<ProfilePage> {
                             ),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.green.withOpacity(0.4),
+                                color: Colors.green.withValues(alpha: 0.4),
                                 blurRadius: 8,
                                 offset: const Offset(0, 3),
                               ),

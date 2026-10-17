@@ -1,0 +1,15 @@
+# Normalise line endings in the repository, so `flutter pub get` rewriting the
+# generated plugin registrants stops showing up as a diff.
+* text=auto eol=lf
+
+# Binary assets must never be line-ending converted.
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.gif binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.jar binary
+*.keystore binary
+*.zip binary

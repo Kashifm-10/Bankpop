@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:lottie/lottie.dart';
 import 'package:mon/pages/home.dart';
 import 'package:mon/pages/transactions/receive.dart';
+import 'package:mon/services/wallet_transfer.dart';
 import 'package:mon/pages/transactions/transactions.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
@@ -29,68 +30,140 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
   List<Player> players = [];
   bool isLoading = true;
   Timer? _pollingTimer;
-  bool _dialogShown = false; // Track if a dialog is already shown
   double value = 0;
   String payOption = 'InstantPay';
   String ID = '';
+  bool _isFetching = false; // One fetch in flight at a time
+  bool? _isAlsoPlayer; // Cached: does this device also hold a player row?
+  StreamSubscription<List<Map<String, dynamic>>>? _rosterUpdates;
+  StreamSubscription<List<Map<String, dynamic>>>? _requestUpdates;
+
   @override
   void initState() {
     super.initState();
     value = widget.bankValue;
     fetchPlayers(); // Initial load
-    startPolling(); // Start periodic fetching every 1 second
+    _subscribeToRoster(); // Live roster and bank header
+    _subscribeToRequests(); // Live join requests
+    startPolling(); // Reconciliation, in case Realtime is unavailable
   }
 
   @override
   void dispose() {
+    _rosterUpdates?.cancel();
+    _requestUpdates?.cancel();
     _pollingTimer?.cancel(); // Clean up timer
     super.dispose();
   }
 
+  /// Live feed of this game's rows. Realtime pushes a change the moment it
+  /// happens; the reconciliation timer below covers a device where the socket
+  /// cannot connect, so the screen is never left stale either way.
+  void _subscribeToRoster() {
+    try {
+      _rosterUpdates = Supabase.instance.client
+          .from('players_test')
+          .stream(primaryKey: const ['id'])
+          .eq('game_id', widget.gameId)
+          .listen(
+        _applyGameRows,
+        onError: (Object error) =>
+            debugPrint('Roster stream error, still polling: $error'),
+      );
+    } catch (e) {
+      debugPrint('Could not subscribe to roster updates: $e');
+    }
+  }
+
+  void _subscribeToRequests() {
+    try {
+      _requestUpdates = Supabase.instance.client
+          .from('request_test')
+          .stream(primaryKey: const ['id'])
+          .eq('game_id', widget.gameId)
+          .listen(
+        _onRequestRows,
+        onError: (Object error) =>
+            debugPrint('Request stream error, still polling: $error'),
+      );
+    } catch (e) {
+      debugPrint('Could not subscribe to join requests: $e');
+    }
+  }
+
   void startPolling() {
-    _pollingTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
-      fetchPlayers(); // Fetch every 1 second
+    // Reconciliation only. Live changes arrive over the socket, so this just
+    // repairs anything a missed event could have left behind.
+    _pollingTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      fetchPlayers();
     });
   }
 
   Future<void> fetchPlayers() async {
+    if (_isFetching) return; // Skip this tick instead of stacking requests
+    _isFetching = true;
     final supabase = Supabase.instance.client;
     try {
-      // Fetch players
+      // One query for the whole game instead of two: the same rows carry the
+      // roster and the bank header. Sorting a handful of rows here also spares
+      // the database a sort on every tick.
       final response = await supabase
           .from('players_test')
           .select()
-          .eq('game_id', widget.gameId)
-          .eq('role', 'player')
-          .order('wallet', ascending: false); // Sort by wallet descending
+          .eq('game_id', widget.gameId);
 
-      final data = response as List<dynamic>;
-      final updatedPlayers =
-          data.map((e) => Player.fromMap(e as Map<String, dynamic>)).toList();
+      _applyGameRows((response as List<dynamic>).cast<Map<String, dynamic>>());
 
-      if (!listEquals(players, updatedPlayers)) {
-        setState(() {
-          players = updatedPlayers;
-          isLoading = false;
-        });
-      }
-      final response2 = await supabase
-          .from('players_test')
-          .select()
-          .eq('game_id', widget.gameId)
-          .eq('role', 'banker');
-
-      final data2 = response2.first["wallet"];
-      final option = response2.first['SP/IP'];
-      setState(() {
-        value = double.parse(data2.toStringAsFixed(2));
-        payOption = option;
-      });
-      print(data2);
       // Check for new requests
       await checkForRequests();
     } catch (e) {
       debugPrint('Error fetching players: $e');
+    } finally {
+      _isFetching = false;
+    }
+  }
+
+  /// The single place game rows become screen state, so a live update and a
+  /// polled one can never produce a different screen.
+  void _applyGameRows(List<Map<String, dynamic>> rows) {
+    if (!mounted) return;
+
+    final List<Map<String, dynamic>> roster = rows
+        .where((Map<String, dynamic> row) => row['role'] == 'player')
+        .toList()
+      ..sort((Map<String, dynamic> a, Map<String, dynamic> b) =>
+          ((b['wallet'] as num?) ?? 0).compareTo((a['wallet'] as num?) ?? 0));
+
+    final List<Player> updatedPlayers =
+        roster.map((Map<String, dynamic> row) => Player.fromMap(row)).toList();
+
+    // `isLoading` has to clear even when nothing changed, otherwise a game whose
+    // roster is empty would spin on the loading indicator forever.
+    if (isLoading || !listEquals(players, updatedPlayers)) {
+      setState(() {
+        players = updatedPlayers;
+        isLoading = false;
+      });
+    }
+
+    Map<String, dynamic>? bankRow;
+    for (final Map<String, dynamic> row in rows) {
+      if (row['role'] == 'banker') {
+        bankRow = row;
+        break;
+      }
+    }
+    if (bankRow == null) return;
+
+    final double bankWallet =
+        double.parse((bankRow['wallet'] as num).toStringAsFixed(2));
+    final String bankPayOption = (bankRow['SP/IP'] as String?) ?? payOption;
+    // Only rebuild when the bank state actually moved.
+    if (bankWallet != value || bankPayOption != payOption) {
+      setState(() {
+        value = bankWallet;
+        payOption = bankPayOption;
+      });
     }
   }
 
@@ -100,33 +173,64 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
     if (_isProcessingRequest) return; // Prevent concurrent calls
     _isProcessingRequest = true;
 
-    final supabase = Supabase.instance.client;
-
     try {
-      final requests = await supabase
+      final requests = await Supabase.instance.client
           .from('request_test')
           .select()
           .eq('game_id', widget.gameId);
 
-      final prefs = await SharedPreferences.getInstance();
-      final playerID = prefs.getString('playerID');
-
-      final playerExists = await supabase
-          .from('players_test')
-          .select()
-          .eq('role', 'player')
-          .eq('player_id', playerID!)
-          .eq('game_id', widget.gameId)
-          .maybeSingle();
-
-      if (requests.isNotEmpty && playerExists == null) {
-        await _processRequestsSequentially(requests);
-      }
+      await _processPending(requests.cast<Map<String, dynamic>>());
     } catch (e) {
       debugPrint('Error checking requests: $e');
     } finally {
       _isProcessingRequest = false;
     }
+  }
+
+  /// Realtime entry point: the request stream hands over the pending rows, so a
+  /// join request prompts straight away instead of on the next tick.
+  Future<void> _onRequestRows(List<Map<String, dynamic>> requests) async {
+    if (_isProcessingRequest) return; // A request dialog is already on screen
+    _isProcessingRequest = true;
+    try {
+      await _processPending(requests);
+    } catch (e) {
+      debugPrint('Error handling requests: $e');
+    } finally {
+      _isProcessingRequest = false;
+    }
+  }
+
+  /// Shared body, so a request is handled the same way whether it arrived over
+  /// the socket or in a poll.
+  Future<void> _processPending(List<Map<String, dynamic>> requests) async {
+    // No pending requests is the common case: skip the identity lookup too.
+    if (requests.isEmpty) return;
+
+    _isAlsoPlayer ??= await _holdsPlayerRow(Supabase.instance.client);
+
+    if (!_isAlsoPlayer!) {
+      await _processRequestsSequentially(requests);
+    }
+  }
+
+  /// Whether this device also holds a player row in this game. It cannot change
+  /// while the screen is open, so it is resolved at most once per session
+  /// instead of on every poll.
+  Future<bool> _holdsPlayerRow(SupabaseClient supabase) async {
+    final prefs = await SharedPreferences.getInstance();
+    final playerID = prefs.getString('playerID');
+    if (playerID == null) return true; // Keep the previous no-prompt path
+
+    final playerExists = await supabase
+        .from('players_test')
+        .select()
+        .eq('role', 'player')
+        .eq('player_id', playerID)
+        .eq('game_id', widget.gameId)
+        .maybeSingle();
+
+    return playerExists != null;
   }
 
   Future<void> _processRequestsSequentially(List<dynamic> requests) async {
@@ -166,45 +270,40 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                   SharedPreferences prefs =
                       await SharedPreferences.getInstance();
 
-                  double playerValue = prefs.getDouble('playerValue')!;
+                  final double? playerValue =
+                      prefs.getDouble('playerValue');
 
-                  // Accept logic
-                  await supabase.from('players_test').insert({
-                    'name': request['name'],
-                    'wallet': playerValue,
-                    'game_id': widget.gameId,
-                    'role': 'player',
-                    'player_id': request['player_id'],
-                    'SP/IP': payOption
-                  });
-
-                  await supabase
-                      .from('request_test')
-                      .delete()
-                      .eq('id', request['id']);
-
-                  // Update banker's wallet
-                  final banker = await supabase
-                      .from('players_test')
-                      .select()
-                      .eq('game_id', widget.gameId)
-                      .eq('role', 'banker')
-                      .maybeSingle();
-
-                  if (banker != null) {
-                    final updatedWallet = banker['wallet'] - playerValue;
-
-                    await supabase.from('players_test').update({
-                      'wallet': updatedWallet,
-                    }).eq('id', banker['id']);
-
-                    setState(() {
-                      value = updatedWallet.toDouble();
-                      ID = banker['player_id'];
-                    });
+                  if (playerValue == null) {
+                    Navigator.of(context).pop();
+                    return;
                   }
 
-                  accepted = true;
+                  // One call seats the player, moves the stake off the bank
+                  // (which is allowed to go negative) and clears the request.
+                  final StakeOutcome stake = await WalletTransfer.stake(
+                    gameId: widget.gameId,
+                    playerId: '${request['player_id']}',
+                    playerName: '${request['name']}',
+                    amount: playerValue,
+                    paymentOption: payOption,
+                    requestId: '${request['id']}',
+                  );
+
+                  if (stake.ok) {
+                    accepted = true;
+                    setState(() {
+                      value = stake.bankerWallet!;
+                      ID = stake.bankerPlayerId ?? ID;
+                    });
+                  } else if (mounted) {
+                    ScaffoldMessenger.of(this.context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                            'Could not accept ${request['name']} - try again'),
+                      ),
+                    );
+                  }
+
                   Navigator.of(context).pop();
                 },
                 child: const Text("Accept"),
@@ -319,7 +418,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
       padding: EdgeInsets.symmetric(vertical: 0.h, horizontal: 10),
       margin: const EdgeInsets.symmetric(vertical: 1),
       decoration: BoxDecoration(
-        color: player.color.withOpacity(0.2),
+        color: player.color.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(2.w),
       ),
       child: Row(
@@ -328,7 +427,10 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
             radius: 18.sp,
             backgroundColor:
                 Colors.transparent, // pale mint green bg for subtle pop
-            backgroundImage: AssetImage(player.avatar),
+            // Decoded at 144px: the source avatars are 500-1200px, so a 36.sp
+            // circle was pulling a multi-megabyte bitmap into memory per player.
+            backgroundImage:
+                ResizeImage(AssetImage(player.avatar), width: 144),
           ),
           const SizedBox(width: 5),
           Expanded(
@@ -374,9 +476,8 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                     final TextEditingController amountController =
                         TextEditingController();
                     isProcessing = false;
-                    double? enteredAmount;
                     String statusLabel = "Enter Amount"; // dynamic label
-                    enteredAmount = await showDialog<double>(
+                    await showDialog<double>(
                       barrierDismissible: false,
                       context: context,
                       builder: (context) {
@@ -795,56 +896,36 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                                                                           'wallet']
                                                                       as num)
                                                                   .toDouble();
-                                                          double
-                                                              receiverWallet =
-                                                              (receiverResponse[
-                                                                          'wallet']
-                                                                      as num)
-                                                                  .toDouble();
-
                                                           if (payerWallet >=
                                                               rewardAmount) {
-                                                            double
-                                                                newPayerWallet =
-                                                                payerWallet -
-                                                                    rewardAmount;
-                                                            double
-                                                                newReceiverWallet =
-                                                                receiverWallet +
-                                                                    rewardAmount;
+                                                            // One atomic call: the database locks
+                                                            // both rows, re-checks the funds and
+                                                            // writes both wallets, so a payment
+                                                            // landing at the same moment can no
+                                                            // longer lose this one.
+                                                            final TransferOutcome
+                                                                transfer =
+                                                                await WalletTransfer
+                                                                    .pay(
+                                                              gameId: widget.gameId,
+                                                              fromId: payerPlayerID,
+                                                              fromRole: WalletTransfer
+                                                                  .bankerRole,
+                                                              toId: player.playerID,
+                                                              toRole: WalletTransfer
+                                                                  .playerRole,
+                                                              amount: rewardAmount,
+                                                            );
 
-                                                            // Update wallets
-                                                            await Supabase
-                                                                .instance.client
-                                                                .from(
-                                                                    'players_test')
-                                                                .update({
-                                                                  'wallet':
-                                                                      newPayerWallet
-                                                                })
-                                                                .eq(
-                                                                    'game_id',
-                                                                    widget
-                                                                        .gameId)
-                                                                .eq('player_id',
-                                                                    payerPlayerID);
-
-                                                            await Supabase
-                                                                .instance.client
-                                                                .from(
-                                                                    'players_test')
-                                                                .update({
-                                                                  'wallet':
-                                                                      newReceiverWallet
-                                                                })
-                                                                .eq(
-                                                                    'game_id',
-                                                                    widget
-                                                                        .gameId)
-                                                                .eq(
-                                                                    'player_id',
-                                                                    player
-                                                                        .playerID);
+                                                            if (!transfer.ok) {
+                                                              setState(() {
+                                                                statusLabel =
+                                                                    "Insufficient balance X";
+                                                                isProcessing =
+                                                                    false;
+                                                              });
+                                                              return;
+                                                            }
 
                                                             // Log transaction
                                                             await Supabase
@@ -938,7 +1019,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
 
                     elevation: 0,
                     foregroundColor: player.color,
-                    backgroundColor: Colors.white.withOpacity(1),
+                    backgroundColor: Colors.white.withValues(alpha: 1),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10),
                     ),
@@ -987,27 +1068,32 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                         receiverResponse['wallet'] != null) {
                       double payerWallet =
                           (payerResponse['wallet'] as num).toDouble();
-                      double receiverWallet =
-                          (receiverResponse['wallet'] as num).toDouble();
-
                       if (payerWallet >= advanceAmount) {
-                        double newPayerWallet = payerWallet - advanceAmount;
-                        double newReceiverWallet =
-                            receiverWallet + advanceAmount;
+                        // One atomic call: the database locks both rows,
+                        // re-checks the funds and writes both wallets, so a
+                        // payment landing at the same moment cannot lose this
+                        // one.
+                        final TransferOutcome transfer =
+                            await WalletTransfer.pay(
+                          gameId: widget.gameId,
+                          fromId: payerPlayerID,
+                          fromRole: WalletTransfer.bankerRole,
+                          toId: player.playerID,
+                          toRole: WalletTransfer.playerRole,
+                          amount: advanceAmount,
+                        );
 
-                        // Update payer
-                        await Supabase.instance.client
-                            .from('players_test')
-                            .update({'wallet': newPayerWallet})
-                            .eq('game_id', widget.gameId)
-                            .eq('player_id', payerPlayerID);
-
-                        // Update receiver
-                        await Supabase.instance.client
-                            .from('players_test')
-                            .update({'wallet': newReceiverWallet})
-                            .eq('game_id', widget.gameId)
-                            .eq('player_id', player.playerID);
+                        if (!transfer.ok) {
+                          Navigator.of(context).pop();
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content: Text(
+                                      'Insufficient balance to advance ₹200')),
+                            );
+                          }
+                          return;
+                        }
 
                         if (context.mounted) {
                           Navigator.of(context).pop();
@@ -1107,8 +1193,14 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: _onWillPop, // Intercept the back press and show confirmation
+    return PopScope(
+      canPop: false,
+      // Intercept the back press and show the confirmation instead.
+      onPopInvokedWithResult: (bool didPop, Object? result) async {
+        if (didPop) return;
+        final bool shouldLeave = await _onWillPop();
+        if (shouldLeave && mounted) Navigator.of(context).pop();
+      },
       child: Scaffold(
         backgroundColor: Colors.yellow.shade50,
         appBar: AppBar(
@@ -1127,12 +1219,12 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                     MaterialPageRoute(
                       builder: (_) => TransactionHistoryPage(
                         gameId: widget.gameId,
-                        playerId: ID ?? '-',
+                        playerId: ID,
                       ),
                     ),
                   );
                 },
-                icon: const Icon(FontAwesomeIcons.history)),
+                icon: const Icon(FontAwesomeIcons.clockRotateLeft)),
             const SizedBox(width: 10),
             IconButton(
               onPressed: () => _showQRDialog(context),
@@ -1157,7 +1249,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                     );
                   }
                 },
-                icon: const Icon(FontAwesomeIcons.signOutAlt)),
+                icon: const Icon(FontAwesomeIcons.rightFromBracket)),
             const SizedBox(width: 5),
           ],
         ),
@@ -1306,4 +1398,19 @@ class Player {
         color: Colors.primaries[map['name'].hashCode % Colors.primaries.length],
         avatar: map['avatar'] ?? "assets/avatars/boy1.jpg");
   }
+
+  /// Value equality, so `listEquals` in the screen can tell an unchanged roster
+  /// apart from one whose wallets moved. Without it every poll rebuilt the whole
+  /// list; `color` is derived from `name`, so it stays out of the comparison.
+  @override
+  bool operator ==(Object other) {
+    return other is Player &&
+        other.playerID == playerID &&
+        other.name == name &&
+        other.value == value &&
+        other.avatar == avatar;
+  }
+
+  @override
+  int get hashCode => Object.hash(playerID, name, value, avatar);
 }

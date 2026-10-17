@@ -4,4 +4,8 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Debug builds talk to the local mock backend in tool/ over plain HTTP,
+         which Android blocks by default since API 28. Debug only: release
+         builds keep cleartext disabled. -->
+    <application android:usesCleartextTraffic="true" />
 </manifest>

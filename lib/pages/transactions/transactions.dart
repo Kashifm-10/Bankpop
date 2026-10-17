@@ -1,4 +1,3 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
@@ -53,10 +52,48 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
   late Future<List<Transaction>> _transactionsFuture;
   String? playerName;
   String? playerID;
+
+  /// Whether `transactions` has the payer_id/receiver_id columns (section 4.2 of
+  /// supabase/hardening.sql). Probed once per app run, so the walkthrough only
+  /// costs an extra request the first time the history is opened.
+  ///
+  /// In memory only: deploying the SQL mid-session is not picked up until the
+  /// app restarts, which is fine - schemas are not expected to change under a
+  /// running app.
+  static bool? _hasIndexedColumns;
+
   @override
   void initState() {
     super.initState();
     _transactionsFuture = fetchTransactions();
+  }
+
+  /// This player's newest rows in this game, capped at 200. The indexed filter
+  /// matches the two id columns; the fallback matches them inside `code`, which
+  /// cannot use an index (a leading wildcard never can).
+  Future<List<dynamic>> _fetchRows({required bool indexed}) {
+    final builder = Supabase.instance.client
+        .from('transactions')
+        .select()
+        .eq('game_id', widget.gameId);
+
+    final filtered = indexed
+        ? builder.or('payer_id.eq.${widget.playerId},'
+            'receiver_id.eq.${widget.playerId}')
+        : builder.like('code', '%${widget.playerId}%');
+
+    return filtered
+        .order('date', ascending: false)
+        .order('time', ascending: false)
+        .limit(200);
+  }
+
+  static bool _columnsMissing(PostgrestException error) {
+    // 42703 is "undefined column"; PGRST204 is the same fact reported from a
+    // stale PostgREST schema cache, so both have to fall back.
+    if (error.code == '42703' || error.code == 'PGRST204') return true;
+    return error.message.contains('payer_id') ||
+        error.message.contains('receiver_id');
   }
 
   Future<List<Transaction>> fetchTransactions() async {
@@ -64,15 +101,22 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
     playerName = prefs.getString('profile_name');
     playerID = prefs.getString('playerID');
 
-    final response = await Supabase.instance.client
-        .from('transactions')
-        .select()
-        .eq('game_id', widget.gameId)
-        .like('code', '%${widget.playerId}%')
-        .order('date', ascending: false)
-        .order('time', ascending: false);
-
-    final data = response as List;
+    List<dynamic> data;
+    if (_hasIndexedColumns ?? true) {
+      try {
+        data = await _fetchRows(indexed: true);
+        _hasIndexedColumns = true;
+      } on PostgrestException catch (error) {
+        if (!_columnsMissing(error)) rethrow;
+        debugPrint('transactions.payer_id/receiver_id do not exist yet - run '
+            'supabase/hardening.sql section 4.2. Using the code filter until '
+            'then.');
+        _hasIndexedColumns = false;
+        data = await _fetchRows(indexed: false);
+      }
+    } else {
+      data = await _fetchRows(indexed: false);
+    }
 
     return data.map((e) {
       // Safely extract payer and receiver from the code
@@ -90,39 +134,18 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
     }).toList();
   }
 
-  Widget _buildHeaderRow() {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
-      color: Colors.blue.shade100,
-      child: Row(
-        children: [
-          Expanded(
-              flex: 2,
-              child: Icon(
-                CupertinoIcons.arrow_down,
-                size: 20.sp,
-              )),
-          Expanded(
-              flex: 2,
-              child: Icon(
-                CupertinoIcons.arrow_up,
-                size: 20.sp,
-              )),
-          Expanded(
-              flex: 1,
-              child: Icon(
-                FontAwesomeIcons.moneyBillWave,
-                size: 20.sp,
-              )),
-          Expanded(
-              flex: 2,
-              child: Icon(
-                FontAwesomeIcons.clock,
-                size: 20.sp,
-              )),
-        ],
-      ),
-    );
+  /// "ameen" -> "Ameen". Tolerates the empty strings a malformed history row
+  /// can produce; the old code indexed `[0]` and threw.
+  String _displayName(String value) {
+    if (value.isEmpty) return '';
+    return '${value[0].toUpperCase()}${value.substring(1)}';
+  }
+
+  /// `timeago` throws on an unparseable date, which used to take the whole
+  /// history screen down with it. Fall back to the raw string instead.
+  String _relativeTime(String raw) {
+    final DateTime? parsed = DateTime.tryParse(raw.trim());
+    return parsed == null ? raw.trim() : timeago.format(parsed);
   }
 
   Widget _buildTransactionRow(Transaction txn) {
@@ -143,7 +166,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
             Expanded(
               flex: 4,
               child: Text(
-                "${txn.from[0].toUpperCase()}${txn.from.substring(1)}",
+                _displayName(txn.from),
                 style: TextStyle(
                   fontSize: 14.sp,
                   fontWeight: FontWeight.w500,
@@ -168,7 +191,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
             Expanded(
               flex: 3,
               child: Text(
-                "${txn.to[0].toUpperCase()}${txn.to.substring(1)}",
+                _displayName(txn.to),
                 style: TextStyle(
                   fontSize: 14.sp,
                   fontWeight: FontWeight.w500,
@@ -195,7 +218,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
             Expanded(
               flex: 3,
               child: Text(
-                timeago.format(DateTime.parse(txn.dateTime)),
+                _relativeTime(txn.dateTime),
                 textAlign: TextAlign.right,
                 style: TextStyle(
                   fontSize: 12.sp,
@@ -228,7 +251,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
               Navigator.of(context).pop(); // Exit logic
             },
             icon: Icon(
-              FontAwesomeIcons.close,
+              FontAwesomeIcons.xmark,
               size: 20.sp,
             ),
           ),

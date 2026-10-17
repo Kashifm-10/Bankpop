@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 import 'package:mon/pages/home.dart';
-import 'package:mon/pages/role.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -13,15 +12,26 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
+  Timer? _timer;
+
   @override
   void initState() {
     super.initState();
-    Timer(const Duration(seconds: 3), () {
+    _timer = Timer(const Duration(seconds: 3), () {
+      // A hot reload (or a very fast back gesture) can tear this screen down
+      // before the timer fires; navigating from a disposed state throws.
+      if (!mounted) return;
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (context) => const WelcomePage()),
       );
     });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
   }
 
   @override

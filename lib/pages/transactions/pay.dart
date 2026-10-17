@@ -3,7 +3,8 @@ import 'dart:convert';
 import 'package:intl/intl.dart';
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
-import 'package:qr_code_scanner/qr_code_scanner.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:mon/services/wallet_transfer.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -17,146 +18,168 @@ class QRPayScanner extends StatefulWidget {
 }
 
 class _QRPayScannerState extends State<QRPayScanner> {
-  final GlobalKey qrKey = GlobalKey(debugLabel: 'QR');
-  QRViewController? controller;
+  final MobileScannerController _controller = MobileScannerController();
   bool _scanned = false;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text("Scan QR to Pay")),
-      body: QRView(
-        key: qrKey,
-        onQRViewCreated: _onQRViewCreated,
-        overlay: QrScannerOverlayShape(
-          borderColor: Colors.red,
-          borderWidth: 10,
-          borderLength: 30,
-          borderRadius: 10,
-          cutOutSize: 250.w,
-        ),
+      body: Stack(
+        children: [
+          MobileScanner(
+            controller: _controller,
+            onDetect: _onDetect,
+          ),
+          // The scan frame the old scanner drew. MobileScanner has no overlay
+          // API, so it is a plain red border over the same 250.w window.
+          Center(
+            child: IgnorePointer(
+              child: Container(
+                width: 250.w,
+                height: 250.w,
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.red, width: 10),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  void _onQRViewCreated(QRViewController controller) {
-    this.controller = controller;
+  Future<void> _onDetect(BarcodeCapture capture) async {
+    if (_scanned) return;
+    final List<Barcode> barcodes = capture.barcodes;
+    if (barcodes.isEmpty) return;
+    final String? scannedCode = barcodes.first.rawValue;
+    if (scannedCode == null || scannedCode.isEmpty) return;
 
-    controller.scannedDataStream.listen((scanData) async {
-      if (_scanned) return;
-      _scanned = true;
+    _scanned = true;
+    // Stop the camera while the confirmation dialog is up.
+    await _controller.stop();
 
-      controller.pauseCamera();
+    try {
+      final Map<String, dynamic> data = jsonDecode(scannedCode);
 
-      try {
-        final Map<String, dynamic> data = jsonDecode(scanData.code ?? '');
+      final playerID = data['playerID'];
+      final value = data['value'];
+      final name = data['name'];
+      final receiverRole = data['role']?.toString() ?? 'player';
 
-        final playerID = data['playerID'];
-        final value = data['value'];
-        final name = data['name'];
+      if (playerID == null || value == null) {
+        _showError('Invalid QR Code data');
+        return;
+      }
 
-        if (playerID == null || value == null) {
-          _showError('Invalid QR Code data');
-          return;
-        }
+      final confirmed =
+          await _showConfirmDialog(context, name, value.toString());
 
-        final confirmed =
-            await _showConfirmDialog(context, name, value.toString());
+      if (!confirmed) {
+        Navigator.pop(context);
+        return;
+      }
 
-        if (!confirmed) {
-          Navigator.pop(context);
-          return;
-        }
+      final prefs = await SharedPreferences.getInstance();
+      final payerPlayerID = prefs.getString('playerID') ?? 'UnknownPlayer';
 
-        final prefs = await SharedPreferences.getInstance();
-        final payerPlayerID = prefs.getString('playerID') ?? 'UnknownPlayer';
+      // Step 1: Check payer's balance first
+      final payerResponse = await Supabase.instance.client
+          .from('players_test')
+          .select('wallet, name')
+          .eq('game_id', widget.gameId)
+          .eq('role', 'player')
+          .eq('player_id', payerPlayerID)
+          .maybeSingle();
 
-        // Step 1: Check payer's balance first
-        final payerResponse = await Supabase.instance.client
-            .from('players_test')
-            .select('wallet, name')
-            .eq('game_id', widget.gameId)
-            .eq('player_id', payerPlayerID)
-            .maybeSingle();
+      double addedValue = double.tryParse(value.toString()) ?? 0;
 
-        double addedValue = double.tryParse(value.toString()) ?? 0;
+      if (payerResponse == null || payerResponse['wallet'] == null) {
+        _showError('Payer not found');
+        return;
+      }
 
-        if (payerResponse == null || payerResponse['wallet'] == null) {
-          _showError('Payer not found');
-          return;
-        }
+      double payerWallet = (payerResponse['wallet'] as num).toDouble();
 
-        double payerWallet = (payerResponse['wallet'] as num).toDouble();
-
-        if (payerWallet < addedValue) {
-          if (context.mounted) {
-            Navigator.pop(context); // Close scanner
-            notify('failed');
-            /*   ScaffoldMessenger.of(context).showSnackBar(
+      if (payerWallet < addedValue) {
+        if (context.mounted) {
+          Navigator.pop(context); // Close scanner
+          notify('failed');
+          /*   ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text('Insufficient balance')),
             ); */
-          }
-          return;
         }
+        return;
+      }
 
-        // Step 2: Update receiver's wallet
-        final receiverResponse = await Supabase.instance.client
-            .from('players_test')
-            .select('wallet, name')
-            .eq('game_id', widget.gameId)
-            .eq('player_id', playerID)
-            .maybeSingle();
+      // Step 2: read the payee, whose name goes into the history row.
+      final receiverResponse = await Supabase.instance.client
+          .from('players_test')
+          .select('wallet, name')
+          .eq('game_id', widget.gameId)
+          .eq('player_id', playerID)
+          .maybeSingle();
 
-        if (receiverResponse != null && receiverResponse['wallet'] != null) {
-          double receiverWallet =
-              (receiverResponse['wallet'] as num).toDouble();
-          double newReceiverWallet = receiverWallet + addedValue;
+      // Step 3: move the money. One atomic call: the database locks both rows,
+      // re-checks the funds and writes both wallets, so a payment that lands
+      // while this one is in flight can no longer overwrite it. A payee that
+      // does not exist now fails instead of quietly taking the payer's money.
+      final TransferOutcome transfer = await WalletTransfer.pay(
+        gameId: widget.gameId,
+        fromId: payerPlayerID,
+        fromRole: WalletTransfer.playerRole,
+        toId: playerID.toString(),
+        toRole: receiverRole,
+        amount: addedValue,
+      );
 
-          await Supabase.instance.client
-              .from('players_test')
-              .update({'wallet': newReceiverWallet})
-              .eq('game_id', widget.gameId)
-              .eq('player_id', playerID);
-        }
-
-        // Step 3: Deduct from payer's wallet
-        double newPayerWallet = payerWallet - addedValue;
-
-        await Supabase.instance.client
-            .from('players_test')
-            .update({'wallet': newPayerWallet})
-            .eq('game_id', widget.gameId)
-            .eq('player_id', payerPlayerID);
-
+      if (!transfer.ok) {
         if (context.mounted) {
-          Navigator.pop(context);
-          await Supabase.instance.client.from('transactions').insert({
-            'game_id': widget.gameId,
-            'value': double.parse(value),
-            'from': payerResponse['name'],
-            'to': receiverResponse!['name'],
-            'code': "${payerPlayerID}_$playerID",
-            'date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
-            'time': DateFormat('HH:mm:ss').format(DateTime.now()),
-          });
-          //   notify('paid'); // close scanner
-          /*  ScaffoldMessenger.of(context).showSnackBar(
+          Navigator.pop(context); // Close scanner
+          notify(
+            'failed',
+            detail: transfer.failure == TransferFailure.insufficientFunds
+                ? 'Insufficient balance'
+                : transfer.failure == TransferFailure.notFound
+                    ? 'Player not found in this game'
+                    : 'Please try again',
+          );
+        }
+        return;
+      }
+
+      if (context.mounted) {
+        Navigator.pop(context);
+        await Supabase.instance.client.from('transactions').insert({
+          'game_id': widget.gameId,
+          'value': double.parse(value),
+          'from': payerResponse['name'],
+          'to': receiverResponse!['name'],
+          'code': "${payerPlayerID}_$playerID",
+          'date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
+          'time': DateFormat('HH:mm:ss').format(DateTime.now()),
+        });
+        //   notify('paid'); // close scanner
+        /*  ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Payment of $value completed.')),
           ); */
-        }
-      } catch (e) {
-        _showError('Failed to process QR data');
       }
-    });
+    } catch (e) {
+      _showError('Failed to process QR data');
+    }
   }
 
-  void notify(String message) {
+  void notify(String message, {String? detail}) {
+    final title = message == 'failed' ? 'Payment Failed' : 'Payment Successful';
+    final body = detail ?? (message == 'failed' ? 'Please try again' : '');
+
     showDialog(
       barrierDismissible: false,
       context: context,
       barrierColor: Colors.transparent,
       builder: (BuildContext context) {
-        // Schedule dialog auto-close
         Future.delayed(const Duration(seconds: 2), () {
           if (Navigator.of(context).canPop()) {
             Navigator.of(context).pop();
@@ -167,26 +190,23 @@ class _QRPayScannerState extends State<QRPayScanner> {
           backgroundColor: Colors.transparent,
           child: Center(
             child: SizedBox(
-              width: 60.w, // Responsive width
-              height: 50.w, // Responsive height
+              width: 60.w,
+              height: 50.w,
               child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Lottie.asset(
-                    message == 'paid'
-                        ? 'assets/lottie/paid.json'
-                        : message == 'failed'
-                            ? 'assets/lottie/failed.json'
-                            : message == 'received'
-                                ? 'assets/lottie/received.json'
-                                : 'assets/lottie/paid.json',
+                    message == 'failed'
+                        ? 'assets/lottie/failed.json'
+                        : 'assets/lottie/paid.json',
                     repeat: false,
                   ),
                   Text(
-                    "Payment Failed\nInsufficient Balance",
+                    body.isEmpty ? title : "$title\n$body",
                     style:
                         TextStyle(fontWeight: FontWeight.bold, fontSize: 16.sp),
                     textAlign: TextAlign.center,
-                  )
+                  ),
                 ],
               ),
             ),
@@ -228,7 +248,7 @@ class _QRPayScannerState extends State<QRPayScanner> {
 
   @override
   void dispose() {
-    controller?.dispose();
+    _controller.dispose();
     super.dispose();
   }
 }

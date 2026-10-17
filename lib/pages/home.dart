@@ -4,7 +4,6 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:lottie/lottie.dart';
 import 'package:mon/pages/player/player_screen.dart';
 import 'package:mon/pages/profile_edit.dart';
@@ -54,8 +53,9 @@ class _WelcomePageState extends State<WelcomePage> {
       bool? updated = await showDialog(
         context: context,
         barrierDismissible: false, // disables tap outside to dismiss
-        builder: (context) => WillPopScope(
-          onWillPop: () async => false, // disables back button
+        builder: (context) => PopScope(
+          // Back button disabled: the profile has to be completed first.
+          canPop: false,
           child: const ProfileDialog(
             first: true,
             prevIndex: 0,
@@ -98,23 +98,20 @@ class _WelcomePageState extends State<WelcomePage> {
     final String? gameID = prefs.getString('gameID');
 
     try {
+      // One round trip instead of two sequential ones: read this device's rows
+      // once and pick the role locally, with banker taking precedence.
       final response = await supabase
           .from('players_test')
           .select()
           .eq('game_id', gameID!)
           .eq('player_id', playerID!)
-          .eq('role', 'banker')
-          .limit(1);
+          .limit(10);
 
-      final response2 = await supabase
-          .from('players_test')
-          .select()
-          .eq('game_id', gameID)
-          .eq('player_id', playerID)
-          .eq('role', 'player')
-          .limit(1);
+      final rows = response as List<dynamic>;
+      final isBanker = rows.any((row) => row['role'] == 'banker');
+      final isPlayer = rows.any((row) => row['role'] == 'player');
 
-      if (response.isNotEmpty) {
+      if (isBanker) {
         // ignore: use_build_context_synchronously
         Navigator.pop(context);
         // Delay navigation slightly to avoid context issues
@@ -129,7 +126,7 @@ class _WelcomePageState extends State<WelcomePage> {
             ),
           );
         });
-      } else if (response2.isNotEmpty) {
+      } else if (isPlayer) {
         // ignore: use_build_context_synchronously
         Navigator.pop(context);
         // Delay navigation slightly to avoid context issues
@@ -148,7 +145,7 @@ class _WelcomePageState extends State<WelcomePage> {
     } catch (e) {
       Navigator.pop(context);
       if (kDebugMode) {
-        print('Error fetching player: $e');
+        debugPrint('Error fetching player: $e');
       }
     }
   }

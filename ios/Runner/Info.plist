@@ -43,6 +43,10 @@
     </array>
     <key>CADisableMinimumFrameDurationOnPhone</key>
     <true/>
+    <!-- Required by mobile_scanner: without it, opening the join or pay scanner
+         on iOS terminates the app instead of asking for the camera. -->
+    <key>NSCameraUsageDescription</key>
+    <string>Scan a game QR code to join a game or pay another player.</string>
     <key>UIApplicationSupportsIndirectInputEvents</key>
     <true/>
   </dict>
