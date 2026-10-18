@@ -91,10 +91,22 @@ flutter:
   # To add assets to your application, add an assets section, like this:
   assets:
     - assets/images/play_icon.jpg
-    - assets/images/background.jpeg
     - assets/images/advance.png
     - assets/images/pay.png
     - assets/images/c_logo.png
+    - assets/images/Go.png
+    - assets/images/Jail.png
+    - assets/images/Free_Parking.png
+    - assets/images/Go_To_Jail.png
+    - assets/images/Chance.png
+    - assets/images/Community_Chest.png
+    - assets/images/Station.png
+    - assets/images/Station_nbg.png
+    - assets/images/Electric.png
+    - assets/images/Electric_nbg.png
+    - assets/images/Water.png
+    - assets/images/Water_nbg.png
+    - assets/images/Tax.png
     - assets/lottie/splash.json
     - assets/lottie/first.json
     - assets/lottie/second.json
@@ -131,6 +143,7 @@ flutter:
     - assets/avatars/boy5.jpg
     - assets/avatars/boy6.jpg
     - assets/avatars/boy7.jpg
+    - assets/JSON/bankpop.json
   #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see
