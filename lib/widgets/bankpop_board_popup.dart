@@ -1,19 +1,32 @@
 import 'package:flutter/material.dart';
 import 'package:mon/models/bankpop_board.dart';
+import 'package:mon/services/player_cards.dart';
 import 'package:mon/widgets/bankpop_deck_sheet.dart';
 import 'package:mon/widgets/bankpop_space_card.dart';
 import 'package:mon/widgets/bankpop_tile.dart';
+import 'package:mon/widgets/card_owner_badge.dart';
 
 class BankpopBoardPopup extends StatefulWidget {
-  /// Cards game: tapping a property closes the board and hands that space back
-  /// to the caller instead of opening its deed.
+  /// Cards game: tapping an unsold property closes the board and hands that
+  /// space back to the caller instead of opening its deed. A property that has
+  /// already been sold opens its deed with the owner on it, in either mode, so
+  /// there is nothing to sell.
   ///
   /// Read it with `showDialog<BankpopSpace>(...)`: the board pops with the
   /// tapped space, so the caller decides what selling it means (a ScanPay QR, or
   /// an InstantPay assignment) without this widget knowing about games.
   final bool isCardMode;
 
-  const BankpopBoardPopup({super.key, this.isCardMode = false});
+  /// This game's id. It is only used to find out who owns which card: an owned
+  /// tile shows the owner's name, and tapping it shows their profile. Empty when
+  /// the board is opened outside a game, where no card can have been sold.
+  final String gameId;
+
+  const BankpopBoardPopup({
+    super.key,
+    this.isCardMode = false,
+    this.gameId = '',
+  });
 
   @override
   State<BankpopBoardPopup> createState() => _BankpopBoardPopupState();
@@ -21,11 +34,13 @@ class BankpopBoardPopup extends StatefulWidget {
 
 class _BankpopBoardPopupState extends State<BankpopBoardPopup> {
   late Future<BankpopBoard> _future;
+  late Future<Map<int, CardOwner>> _owners;
 
   @override
   void initState() {
     super.initState();
     _future = BankpopBoard.loadFromAsset('assets/JSON/bankpop.json');
+    _owners = PlayerCards.owners(widget.gameId);
   }
 
   @override
@@ -50,10 +65,19 @@ class _BankpopBoardPopupState extends State<BankpopBoardPopup> {
               return Center(
                   child: Text('Could not load board: ${snap.error}'));
             }
-            return _Board(
-              board: snap.data!,
-              size: size,
-              isCardMode: widget.isCardMode,
+            return FutureBuilder<Map<int, CardOwner>>(
+              future: _owners,
+              builder: (context, ownersSnap) {
+                if (ownersSnap.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                return _Board(
+                  board: snap.data!,
+                  size: size,
+                  isCardMode: widget.isCardMode,
+                  owners: ownersSnap.data ?? const <int, CardOwner>{},
+                );
+              },
             );
           },
         ),
@@ -66,11 +90,13 @@ class _Board extends StatelessWidget {
   final BankpopBoard board;
   final double size;
   final bool isCardMode;
+  final Map<int, CardOwner> owners;
 
   const _Board({
     required this.board,
     required this.size,
     required this.isCardMode,
+    required this.owners,
   });
 
   static const int _cornerFlex = 14;
@@ -197,6 +223,9 @@ class _Board extends StatelessWidget {
             side: side,
             width: constraints.maxWidth,
             height: constraints.maxHeight,
+            ownerName: owners[space.index]?.name,
+            houses: owners[space.index]?.houses ?? 0,
+            hotels: owners[space.index]?.hotels ?? 0,
             onTap: () => _onTap(context, space),
           );
         },
@@ -215,6 +244,21 @@ class _Board extends StatelessWidget {
         return;
       }
       showBankpopSpecialInfo(context, space.name);
+      return;
+    }
+    // A sold card belongs to someone. Its deed is the same deed as an unsold
+    // one, with the owner's face and name where the sell action would be - which
+    // in a cards game also keeps the banker from offering a property that has
+    // already gone.
+    final CardOwner? owner = owners[space.index];
+    if (owner != null) {
+      showBankpopSpaceCard(
+        context,
+        space,
+        actionWidget: CardOwnerBadge(owner: owner),
+        houses: owner.houses,
+        hotels: owner.hotels,
+      );
       return;
     }
     if (isCardMode) {

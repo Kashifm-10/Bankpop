@@ -8,10 +8,16 @@ import 'package:intl/intl.dart';
 import 'package:lottie/lottie.dart';
 import 'package:mon/models/bankpop_board.dart';
 import 'package:mon/pages/transactions/pay.dart';
+import 'package:mon/services/building_rules.dart';
+import 'package:mon/services/card_requests.dart';
 import 'package:mon/services/player_cards.dart';
 import 'package:mon/services/wallet_transfer.dart';
 import 'package:mon/pages/transactions/receive.dart';
 import 'package:mon/pages/transactions/transactions.dart';
+import 'package:mon/widgets/app_message.dart';
+import 'package:mon/widgets/bankpop_board_popup.dart';
+import 'package:mon/widgets/card_owner_badge.dart';
+import 'package:mon/widgets/bankpop_space_card.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -57,6 +63,15 @@ class Player {
   int get hashCode => Object.hash(playerID, name, value, avatar);
 }
 
+/// One colour group of this player's cards, in board order, as the My Cards
+/// sheet draws them.
+class _CardGroup {
+  const _CardGroup(this.colour, this.cards);
+
+  final String? colour;
+  final List<PlayerCard> cards;
+}
+
 class PlayersScreen extends StatefulWidget {
   final String gameId;
   final double bankValue;
@@ -82,6 +97,11 @@ class _PlayersScreenState extends State<PlayersScreen> {
   int playerPosition = 1;
   String positionStatus = 'none';
   String payOption = 'InstantPay';
+
+  /// Cards game, read from the bank row of this game. The banker flips the
+  /// switch once at game start; until then, and in a game started before the
+  /// flag existed, this stays false and the card buttons stay hidden.
+  bool _playWithCards = false;
 
   bool _isFetching = false; // One poll in flight at a time
   StreamSubscription<List<Map<String, dynamic>>>? _rosterUpdates;
@@ -159,11 +179,11 @@ class _PlayersScreenState extends State<PlayersScreen> {
     try {
       // No server-side sort: the roster is a handful of rows and sorting them
       // here means the indexed (game_id, role) lookup is all the backend does.
+      // The bank row comes along too, because it carries the cards flag.
       final response = await Supabase.instance.client
           .from('players_test')
           .select()
-          .eq('game_id', widget.gameId)
-          .eq('role', 'player');
+          .eq('game_id', widget.gameId);
 
       _applyRosterRows(
           (response as List<dynamic>).cast<Map<String, dynamic>>());
@@ -196,6 +216,18 @@ class _PlayersScreenState extends State<PlayersScreen> {
         players = updatedPlayers;
         isLoading = false;
       });
+    }
+
+    // The banker's cards switch, as written on the bank row at game start.
+    bool cardsMode = _playWithCards;
+    for (final Map<String, dynamic> row in rows) {
+      if (row['role'] == 'banker' && row.containsKey('play_with_cards')) {
+        cardsMode = row['play_with_cards'] == true;
+        break;
+      }
+    }
+    if (cardsMode != _playWithCards) {
+      setState(() => _playWithCards = cardsMode);
     }
 
     _applyMyPlayer(roster);
@@ -320,6 +352,15 @@ class _PlayersScreenState extends State<PlayersScreen> {
     }
   }
 
+  /// The board as a reference, opened from the app bar: an owned tile carries
+  /// its owner's name, and its deed carries the owner in place of any action.
+  void _showBoard() {
+    showDialog<void>(
+      context: context,
+      builder: (_) => BankpopBoardPopup(gameId: widget.gameId),
+    );
+  }
+
   /// The properties this player has bought, newest first.
   ///
   /// The table stores the board index, so the name and group colour are looked
@@ -331,7 +372,6 @@ class _PlayersScreenState extends State<PlayersScreen> {
     if (id.isEmpty) return;
 
     if (!mounted) return;
-    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
 
     final List<PlayerCard> cards;
     try {
@@ -339,15 +379,18 @@ class _PlayersScreenState extends State<PlayersScreen> {
           await PlayerCards.forPlayer(gameId: widget.gameId, playerId: id);
     } catch (error) {
       debugPrint('Could not load cards: $error');
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Could not load your cards')),
-      );
+      if (!mounted) return;
+      showMessage(context, 'Could not load your cards');
       return;
     }
     final Map<int, BankpopSpace> spaces = await PlayerCards.spaces();
     if (!mounted) return;
 
-    showModalBottomSheet<void>(
+    // The sheet keeps its own mutable copy so a house that has just been
+    // approved changes the mini card's rent in place, without reopening.
+    final List<PlayerCard> mine = List<PlayerCard>.of(cards);
+
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.yellow.shade50,
@@ -355,59 +398,81 @@ class _PlayersScreenState extends State<PlayersScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (BuildContext sheetContext) {
-        return DraggableScrollableSheet(
-          expand: false,
-          initialChildSize: 0.6,
-          minChildSize: 0.3,
-          maxChildSize: 0.9,
-          builder: (BuildContext context, ScrollController controller) {
-            return Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 8, 6),
-                  child: Row(
-                    children: [
-                      Text(
-                        'My Cards',
-                        style: TextStyle(
-                          fontSize: 18.sp,
-                          fontWeight: FontWeight.bold,
-                          color: const Color(0xFF689F38),
-                        ),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        onPressed: () => Navigator.of(sheetContext).pop(),
-                        icon: const Icon(Icons.close),
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: cards.isEmpty
-                      ? Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(24),
-                            child: Text(
-                              'You do not own any cards yet.\nThe bank sells '
-                              'properties during the game.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 15.sp,
-                                color: Colors.black54,
-                              ),
+        return StatefulBuilder(
+          builder: (BuildContext context, void Function(void Function())
+              setSheetState) {
+            return DraggableScrollableSheet(
+              expand: false,
+              initialChildSize: 0.6,
+              minChildSize: 0.3,
+              maxChildSize: 0.9,
+              builder: (BuildContext context, ScrollController controller) {
+                final List<_CardGroup> groups = _groupCards(mine, spaces);
+                return Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 14, 8, 6),
+                      child: Row(
+                        children: [
+                          Text(
+                            'My Cards',
+                            style: TextStyle(
+                              fontSize: 18.sp,
+                              fontWeight: FontWeight.bold,
+                              color: const Color(0xFF689F38),
                             ),
                           ),
-                        )
-                      : ListView.builder(
-                          controller: controller,
-                          padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
-                          itemCount: cards.length,
-                          itemBuilder: (BuildContext context, int index) =>
-                              _buildCardTile(cards[index], spaces),
-                        ),
-                ),
-              ],
+                          const Spacer(),
+                          IconButton(
+                            onPressed: () => Navigator.of(sheetContext).pop(),
+                            icon: const Icon(Icons.close),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: groups.isEmpty
+                          ? Center(
+                              child: Padding(
+                                padding: const EdgeInsets.all(24),
+                                child: Text(
+                                  'You do not own any cards yet.\nThe bank '
+                                  'sells properties during the game.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: 15.sp,
+                                    color: Colors.black54,
+                                  ),
+                                ),
+                              ),
+                            )
+                          : ListView(
+                              controller: controller,
+                              padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+                              children: <Widget>[
+                                for (final _CardGroup group in groups) ...[
+                                  _groupHeader(group),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: <Widget>[
+                                      for (final PlayerCard card in group.cards)
+                                        _miniCard(
+                                          card: card,
+                                          space: spaces[card.cardIndex]!,
+                                          myCards: mine,
+                                          setSheetState: setSheetState,
+                                        ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 14),
+                                ],
+                              ],
+                            ),
+                    ),
+                  ],
+                );
+              },
             );
           },
         );
@@ -415,61 +480,360 @@ class _PlayersScreenState extends State<PlayersScreen> {
     );
   }
 
-  Widget _buildCardTile(PlayerCard card, Map<int, BankpopSpace> spaces) {
-    final BankpopSpace? space = spaces[card.cardIndex];
-    final String name = space?.name ?? 'Card #${card.cardIndex}';
-    final Color groupColor = space == null
-        ? Colors.grey
-        : Color(BankpopBoard.colorForGroup(space.color));
-    final DateTime? acquired = card.acquiredAt;
+  /// The player's cards, laid out by colour group: a mini card each, showing the
+  /// name and the rent that is due on it right now.
+  static List<_CardGroup> _groupCards(
+    List<PlayerCard> mine,
+    Map<int, BankpopSpace> spaces,
+  ) {
+    final Map<String?, List<PlayerCard>> byColour = <String?, List<PlayerCard>>{};
+    final Map<String?, int> order = <String?, int>{};
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-      ),
+    // Board order, so the groups come out as they do on the board itself.
+    final List<BankpopSpace> ordered = spaces.values.toList()
+      ..sort((BankpopSpace a, BankpopSpace b) => a.index.compareTo(b.index));
+    final Map<int, PlayerCard> mineByIndex = <int, PlayerCard>{
+      for (final PlayerCard card in mine) card.cardIndex: card,
+    };
+
+    for (final BankpopSpace space in ordered) {
+      final PlayerCard? card = mineByIndex[space.index];
+      if (card == null) continue;
+      final String? colour = space.color;
+      order[colour] = order.length;
+      (byColour[colour] ??= <PlayerCard>[]).add(card);
+    }
+
+    final List<_CardGroup> groups = <_CardGroup>[];
+    byColour.forEach((String? colour, List<PlayerCard> cards) {
+      groups.add(_CardGroup(colour, cards));
+    });
+    groups.sort((a, b) => order[a.colour]!.compareTo(order[b.colour]!));
+    return groups;
+  }
+
+  /// The colour header above one group, so a set reads as a set.
+  Widget _groupHeader(_CardGroup group) {
+    final String? colour = group.colour;
+    final String label = (colour == null || colour.isEmpty)
+        ? 'Other'
+        : colour[0].toUpperCase() + colour.substring(1);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 8),
       child: Row(
         children: [
           Container(
-            width: 10,
-            height: 42,
+            width: 14,
+            height: 14,
             decoration: BoxDecoration(
-              color: groupColor,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  name,
-                  style: TextStyle(
-                    fontSize: 15.sp,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  card.from == card.to
-                      ? 'Owned by ${card.to}'
-                      : '${card.from} \u2192 ${card.to}',
-                  style: TextStyle(fontSize: 12.sp, color: Colors.black54),
-                ),
-              ],
+              shape: BoxShape.circle,
+              color: Color(BankpopBoard.colorForGroup(colour)),
             ),
           ),
           const SizedBox(width: 8),
           Text(
-            acquired == null ? card.date : DateFormat('d MMM').format(acquired),
-            style: TextStyle(fontSize: 12.sp, color: Colors.grey[600]),
+            label,
+            style: TextStyle(
+              fontSize: 14.sp,
+              fontWeight: FontWeight.bold,
+              color: const Color(0xFF33691E),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '${group.cards.length}',
+            style: TextStyle(fontSize: 12.sp, color: Colors.black45),
           ),
         ],
       ),
     );
+  }
+
+  /// The mini card in the sheet: name, what is built on it, and the rent it
+  /// currently pays. Tapping opens the full deed for that card.
+  Widget _miniCard({
+    required PlayerCard card,
+    required BankpopSpace space,
+    required List<PlayerCard> myCards,
+    required void Function(void Function()) setSheetState,
+  }) {
+    final Color groupColor = Color(BankpopBoard.colorForGroup(space.color));
+
+    return SizedBox(
+      width: 154,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => _openCardDetail(
+          space: space,
+          card: card,
+          myCards: myCards,
+          onBuilt: () => setSheetState(() {}),
+        ),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: groupColor, width: 2),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                space.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13.sp,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  if (card.hasHotel)
+                    Container(
+                      width: 7,
+                      height: 7,
+                      margin: const EdgeInsets.only(right: 3),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.red.shade700,
+                      ),
+                    )
+                  else
+                    for (int i = 0; i < card.houses; i++)
+                      Container(
+                        width: 7,
+                        height: 7,
+                        margin: const EdgeInsets.only(right: 3),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.green.shade800,
+                        ),
+                      ),
+                  const Spacer(),
+                  Text(
+                    'Rent £${_currentRent(space, card)}',
+                    style: TextStyle(
+                      fontSize: 12.sp,
+                      fontWeight: FontWeight.w600,
+                      color: const Color(0xFF33691E),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The rent this card is due right now: base rent while it is bare, the house
+  /// level while it has 1-4, and the hotel line once it has one.
+  static int _currentRent(BankpopSpace space, PlayerCard card) {
+    final List<int>? rent = space.rent;
+    if (rent == null || rent.isEmpty) return 0;
+    if (card.hasHotel) return rent[rent.length > 5 ? 5 : rent.length - 1];
+    if (card.houses > 0) {
+      return rent[card.houses.clamp(0, rent.length - 1)];
+    }
+    return rent[0];
+  }
+
+  /// Opens the full deed for one of this player's cards, with what is built on
+  /// it and a plus beside the level that could be bought next.
+  ///
+  /// The deed holds its own counts, so an approval turns that plus into a tick in
+  /// place; this closes the loop with the sheet as well, so the mini card shows
+  /// the new rent without being reopened.
+  Future<void> _openCardDetail({
+    required BankpopSpace space,
+    required PlayerCard card,
+    required List<PlayerCard> myCards,
+    required VoidCallback onBuilt,
+  }) async {
+    await showBankpopSpaceCard(
+      context,
+      space,
+      actionWidget: CardOwnerBadge(
+        owner: CardOwner(
+          name: card.to,
+          playerId: playerID,
+          houses: card.houses,
+          hotels: card.hotels,
+        ),
+      ),
+      houses: card.houses,
+      hotels: card.hotels,
+      onBuild: (int step) async {
+        final int index =
+            myCards.indexWhere((PlayerCard c) => c.cardIndex == card.cardIndex);
+        final PlayerCard live = index == -1 ? card : myCards[index];
+        final bool approved = await _buyBuilding(
+          space: space,
+          card: live,
+          myCards: myCards,
+          step: step,
+        );
+        if (!approved || index == -1) return approved;
+        myCards[index] = live.copyWith(
+          houses: step >= 5 ? live.houses : live.houses + 1,
+          hotels: step >= 5 ? 1 : live.hotels,
+        );
+        onBuilt();
+        return true;
+      },
+    );
+  }
+
+  /// One step of building: the rules, the ask, then the wait for the banker.
+  ///
+  /// Returns true only when the banker has approved, which is the only outcome
+  /// that puts a house up. Anything else is a dialog saying why, never a charge.
+  Future<bool> _buyBuilding({
+    required BankpopSpace space,
+    required PlayerCard card,
+    required List<PlayerCard> myCards,
+    required int step,
+  }) async {
+    final Map<int, BankpopSpace> spaces = await PlayerCards.spaces();
+    final List<BankpopSpace> set = spaces.values
+        .where((BankpopSpace s) => s.color == space.color)
+        .toList();
+
+    // Full set, even build, hotel last: the rules live in BuildingRules so they
+    // are the same everywhere and can be tested on their own.
+    final BuildingDecision decision = BuildingRules.next(
+      space: space,
+      set: set,
+      ownedCards: myCards.map((PlayerCard c) => c.cardIndex).toSet(),
+      houses: card.houses,
+      hotels: card.hotels,
+      housesByCard: <int, int>{
+        for (final PlayerCard c in myCards) c.cardIndex: c.houses,
+      },
+    );
+    final BuildingKind wanted =
+        step >= 5 ? BuildingKind.hotel : BuildingKind.house;
+    if (!mounted) return false;
+    if (!decision.allowed || decision.kind != wanted) {
+      await showMessage(
+        context,
+        decision.reason ??
+            'Build evenly: every card in the set has to be level before the '
+                'next house.',
+        title: 'Cannot build yet',
+      );
+      return false;
+    }
+
+    final String id = playerID ??
+        (await SharedPreferences.getInstance()).getString('playerID') ??
+        '';
+    if (id.isEmpty) {
+      if (!mounted) return false;
+      await showMessage(context, 'This device has no player id');
+      return false;
+    }
+
+    final AskOutcome asked = await CardRequests.ask(
+      gameId: widget.gameId,
+      cardIndex: card.cardIndex,
+      playerId: id,
+      playerName: card.to,
+      kind: wanted == BuildingKind.hotel ? 'hotel' : 'house',
+      amount: decision.price.toDouble(),
+    );
+    if (!mounted) return false;
+    if (!asked.sent) {
+      await showMessage(
+        context,
+        switch (asked.result) {
+          AskResult.waiting =>
+            'That card already has a request waiting for the banker.',
+          AskResult.failed =>
+            'Could not send the request. Has supabase/buildings.sql been run?',
+          AskResult.sent => 'Could not send the request.',
+        },
+        title: 'Request not sent',
+      );
+      return false;
+    }
+
+    return _waitForApproval(
+      requestId: asked.requestId!,
+      what: wanted == BuildingKind.hotel ? 'hotel' : 'house',
+      where: space.name,
+    );
+  }
+
+  /// Sits with the request until the banker settles it. Closes itself on success;
+  /// cancelling takes the request back, and a refusal comes back as a dialog.
+  Future<bool> _waitForApproval({
+    required int requestId,
+    required String what,
+    required String where,
+  }) async {
+    if (!mounted) return false;
+
+    String? outcome; // 'approved' | 'rejected' | 'cancelled'
+    Timer? poll;
+
+    await showDialog<void>(
+      context: context,
+      // A request is waiting on an answer either way; dismissing would only bring
+      // the same dialog back on the next poll.
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) {
+        poll = Timer.periodic(const Duration(seconds: 2), (Timer _) async {
+          final String? status = await CardRequests.statusOf(requestId);
+          if (!dialogContext.mounted || status == null) return;
+          if (status == 'pending') return;
+          outcome = status;
+          Navigator.of(dialogContext).pop();
+        });
+        return AlertDialog(
+          backgroundColor: const Color(0xFFFFF8E1),
+          title: const Text('Waiting for the banker'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              const CircularProgressIndicator(color: Color(0xFF689F38)),
+              const SizedBox(height: 14),
+              Text(
+                'The banker is approving your $what on $where.',
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () {
+                outcome = 'cancelled';
+                CardRequests.cancel(requestId);
+                Navigator.of(dialogContext).pop();
+              },
+              child: const Text('Cancel request'),
+            ),
+          ],
+        );
+      },
+    );
+    poll?.cancel();
+    if (!mounted) return false;
+
+    if (outcome == 'approved') return true;
+    if (outcome == 'rejected') {
+      await showMessage(
+        context,
+        'The banker turned down the $what on $where.',
+        title: 'Not approved',
+      );
+    }
+    return false;
   }
 
   void notification(String message, String value) {
@@ -2082,6 +2446,13 @@ class _PlayersScreenState extends State<PlayersScreen> {
                 },
                 icon: const Icon(FontAwesomeIcons.clockRotateLeft)),
             const SizedBox(width: 5),
+            // The board itself, to check who owns what. A tap only opens a deed.
+            IconButton(
+              onPressed: _showBoard,
+              icon: const Icon(Icons.grid_on),
+              tooltip: 'Board',
+            ),
+            const SizedBox(width: 5),
             IconButton(
                 onPressed: () async {
                   bool shouldLeave = await _onWillPop();
@@ -2301,6 +2672,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
                             runSpacing: 6,
                             children: [
                               if (payOption == 'ScanPay') const ReceiveButton(),
+                              // Always available: a player should be able to look
+                              // at what they hold, cards game or not.
                               ElevatedButton.icon(
                                 onPressed: _showMyCards,
                                 icon: Icon(Icons.credit_card, size: 16.sp),
@@ -2318,7 +2691,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                   ),
                                 ),
                               ),
-                              if (payOption == 'ScanPay')
+                              if (_playWithCards && payOption == 'ScanPay')
                                 ElevatedButton.icon(
                                   onPressed: () {
                                     Navigator.push(

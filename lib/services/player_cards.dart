@@ -15,6 +15,8 @@ class PlayerCard {
     required this.to,
     required this.date,
     required this.time,
+    this.houses = 0,
+    this.hotels = 0,
   });
 
   final int? id;
@@ -24,7 +26,30 @@ class PlayerCard {
   final String date;
   final String time;
 
+  /// Houses built on this card, 0-4. The fifth step is [hotels].
+  final int houses;
+
+  /// 1 once a hotel has been put up, which is only allowed after 4 houses.
+  final int hotels;
+
+  bool get hasHotel => hotels > 0;
+
   DateTime? get acquiredAt => DateTime.tryParse('$date $time'.trim());
+
+  /// The same card with new building counts, so a screen can show a house it has
+  /// just seen approved without re-reading the table.
+  PlayerCard copyWith({int? houses, int? hotels}) {
+    return PlayerCard(
+      id: id,
+      cardIndex: cardIndex,
+      from: from,
+      to: to,
+      date: date,
+      time: time,
+      houses: houses ?? this.houses,
+      hotels: hotels ?? this.hotels,
+    );
+  }
 
   factory PlayerCard.fromMap(Map<String, dynamic> map) {
     return PlayerCard(
@@ -34,8 +59,34 @@ class PlayerCard {
       to: map['to']?.toString() ?? '',
       date: map['date']?.toString() ?? '',
       time: map['time']?.toString() ?? '',
+      // Both are missing until supabase/buildings.sql has been run, and a card
+      // with no buildings reads the same either way.
+      houses: (map['houses'] as num?)?.toInt() ?? 0,
+      hotels: (map['hotels'] as num?)?.toInt() ?? 0,
     );
   }
+}
+
+/// Who holds a card on the board: the name shown on the tile and the profile
+/// behind it.
+class CardOwner {
+  const CardOwner({
+    required this.name,
+    this.playerId,
+    this.avatar,
+    this.houses = 0,
+    this.hotels = 0,
+  });
+
+  final String name;
+  final String? playerId;
+
+  /// Asset path from `players_test.avatar`, or null when that row has none.
+  final String? avatar;
+
+  /// What is standing on the card: 0-4 houses, then the hotel.
+  final int houses;
+  final int hotels;
 }
 
 /// What happened when a card was claimed for a player.
@@ -117,6 +168,85 @@ class PlayerCards {
       // makes it decisive.
       debugPrint('Could not check card ownership: $error');
       return null;
+    }
+  }
+
+  /// Board index -> the player holding it, for the whole game.
+  ///
+  /// The board draws this on its tiles and shows the profile on tap, so it is
+  /// read once when the board opens rather than per tile. An unreachable table
+  /// yields an empty map: the board still works, it just shows no owners.
+  static Future<Map<int, CardOwner>> owners(String gameId) async {
+    if (gameId.isEmpty) return const <int, CardOwner>{};
+
+    final SupabaseClient supabase = Supabase.instance.client;
+    List<dynamic> rows;
+    try {
+      rows = await supabase
+          .from(_table)
+          .select('card_index, to, receiver_id, houses, hotels')
+          .eq('game_id', gameId);
+    } catch (error) {
+      // Either the buildings columns are missing (supabase/buildings.sql) or the
+      // id columns are (supabase/player_cards.sql). One narrower query tries the
+      // shape that predates them both; a board with no owners at all is better
+      // than a board that will not open.
+      try {
+        rows = await supabase
+            .from(_table)
+            .select('card_index, to, code')
+            .eq('game_id', gameId);
+      } catch (fallbackError) {
+        debugPrint('Could not read card owners: $fallbackError');
+        return const <int, CardOwner>{};
+      }
+    }
+
+    final Map<String, String> avatars = await _avatars(gameId);
+    final Map<int, CardOwner> result = <int, CardOwner>{};
+    for (final dynamic raw in rows) {
+      final Map<String, dynamic> row = raw as Map<String, dynamic>;
+      final int? index = (row['card_index'] as num?)?.toInt();
+      if (index == null || result.containsKey(index)) continue;
+      final String? id = _receiverIdOf(row);
+      result[index] = CardOwner(
+        name: row['to']?.toString() ?? 'Player',
+        playerId: id,
+        avatar: id == null ? null : avatars[id],
+        houses: (row['houses'] as num?)?.toInt() ?? 0,
+        hotels: (row['hotels'] as num?)?.toInt() ?? 0,
+      );
+    }
+    return result;
+  }
+
+  /// `receiver_id` when the trigger has filled it, otherwise the second half of
+  /// `code`, which is always written.
+  static String? _receiverIdOf(Map<String, dynamic> row) {
+    final String? explicit = row['receiver_id']?.toString();
+    if (explicit != null && explicit.isNotEmpty) return explicit;
+    final String code = row['code']?.toString() ?? '';
+    final List<String> parts = code.split('_');
+    if (parts.length < 2 || parts[1].isEmpty) return null;
+    return parts[1];
+  }
+
+  /// player_id -> avatar asset path for this game's players.
+  static Future<Map<String, String>> _avatars(String gameId) async {
+    try {
+      final List<dynamic> rows = await Supabase.instance.client
+          .from('players_test')
+          .select('player_id, avatar')
+          .eq('game_id', gameId);
+      return <String, String>{
+        for (final dynamic raw in rows)
+          if ((raw as Map<String, dynamic>)['player_id'] != null &&
+              raw['avatar'] != null)
+            raw['player_id'].toString(): raw['avatar'].toString(),
+      };
+    } catch (error) {
+      debugPrint('Could not read player avatars: $error');
+      return const <String, String>{};
     }
   }
 

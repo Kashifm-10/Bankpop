@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mon/models/bankpop_board.dart';
+import 'package:mon/services/player_cards.dart';
 import 'package:mon/widgets/bankpop_space_card.dart';
+import 'package:mon/widgets/bankpop_tile.dart';
+import 'package:mon/widgets/card_owner_badge.dart';
 
 const BankpopSpace _beggarAlley = BankpopSpace(
   index: 1,
@@ -13,6 +16,35 @@ const BankpopSpace _beggarAlley = BankpopSpace(
   houseCost: 50,
   hotelCost: 50,
 );
+
+/// One board tile at the size the board draws it, so the owner label is laid
+/// out the way it is in a game rather than in a roomy test box.
+Widget _tile({String? ownerName, int houses = 0, int hotels = 0}) {
+  return MaterialApp(
+    home: Scaffold(
+      body: Center(
+        child: BankpopTile(
+          space: _beggarAlley,
+          side: BoardSide.bottom,
+          width: 34,
+          height: 46,
+          ownerName: ownerName,
+          houses: houses,
+          hotels: hotels,
+          onTap: () {},
+        ),
+      ),
+    ),
+  );
+}
+
+/// A building dot on a tile's colour block.
+Finder _dots(Color color) => find.byWidgetPredicate(
+      (Widget widget) =>
+          widget is Container &&
+          widget.decoration is BoxDecoration &&
+          (widget.decoration as BoxDecoration).color == color,
+    );
 
 /// The deed is opened from a dialog, so the tests need a screen with a button
 /// that does what the banker screen does.
@@ -78,5 +110,140 @@ void main() {
     expect(find.text('Close'), findsOneWidget);
     expect(find.text('Show QR'), findsNothing);
     expect(find.text('Assign to player'), findsNothing);
+  });
+
+  testWidgets('an owned deed shows the owner instead of a sell action',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(_opener((BuildContext context) {
+      // What the board passes for a card that already has an owner: the same
+      // deed, with the owner where Give Card puts its QR button.
+      return showBankpopSpaceCard(
+        context,
+        _beggarAlley,
+        actionWidget: const CardOwnerBadge(owner: CardOwner(name: 'Ameen')),
+      );
+    }, 'open'));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    // The deed itself is unchanged, price and all.
+    expect(find.text('£60'), findsOneWidget);
+    expect(find.text('Ameen'), findsOneWidget);
+    expect(find.text('owns this card'), findsOneWidget);
+    expect(find.text('Show QR'), findsNothing);
+  });
+
+  testWidgets('a sold tile carries the owner name', (WidgetTester tester) async {
+    await tester.pumpWidget(_tile(ownerName: 'Ameen'));
+    await tester.pumpAndSettle();
+
+    // Somebody walking the board sees whose card it is without tapping.
+    expect(find.text('Ameen'), findsOneWidget);
+  });
+
+  testWidgets('an unsold tile stays empty', (WidgetTester tester) async {
+    await tester.pumpWidget(_tile());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Ameen'), findsNothing);
+  });
+
+  testWidgets('a deed ticks the houses it has and offers the next level',
+      (WidgetTester tester) async {
+    int? asked;
+    await tester.pumpWidget(_opener((BuildContext context) {
+      return showBankpopSpaceCard(
+        context,
+        _beggarAlley,
+        houses: 1,
+        hotels: 0,
+        onBuild: (int step) async {
+          asked = step;
+          return true; // the banker approved
+        },
+      );
+    }, 'open'));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    // One house built: its row carries the tick, the second row the plus.
+    expect(find.byIcon(Icons.check_circle), findsOneWidget);
+    expect(find.byIcon(Icons.add_circle), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.add_circle));
+    await tester.pumpAndSettle();
+
+    expect(asked, 2);
+    // Approved, so the second row is ticked too and the plus moved on.
+    expect(find.byIcon(Icons.check_circle), findsNWidgets(2));
+    expect(find.byIcon(Icons.add_circle), findsOneWidget);
+  });
+
+  testWidgets('a hotel deed ticks every level and offers nothing',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(_opener((BuildContext context) {
+      return showBankpopSpaceCard(
+        context,
+        _beggarAlley,
+        houses: 4,
+        hotels: 1,
+      );
+    }, 'open'));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    // Four houses plus the hotel: five ticks, nothing left to buy.
+    expect(find.byIcon(Icons.check_circle), findsNWidgets(5));
+    expect(find.byIcon(Icons.add_circle), findsNothing);
+  });
+
+  testWidgets('rent values stay right-aligned with the mark beside them',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(_opener((BuildContext context) {
+      return showBankpopSpaceCard(
+        context,
+        _beggarAlley,
+        houses: 1,
+        onBuild: (int step) async => false, // the plus only exists with this
+      );
+    }, 'open'));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    // Rents are 2, 10, 30... and one house is built: its row carries the tick,
+    // the next row the plus. Every value has to end at the same right edge.
+    final double bare = tester.getTopRight(find.text('\u00a32')).dx;
+    final double ticked = tester.getTopRight(find.text('\u00a310')).dx;
+    final double offered = tester.getTopRight(find.text('\u00a330')).dx;
+    expect(ticked, moreOrLessEquals(bare, epsilon: 0.5));
+    expect(offered, moreOrLessEquals(bare, epsilon: 0.5));
+
+    // And the mark is on the left of its value, not trailing the row.
+    expect(
+      tester.getTopRight(find.byIcon(Icons.check_circle)).dx,
+      lessThanOrEqualTo(ticked),
+    );
+    expect(
+      tester.getTopRight(find.byIcon(Icons.add_circle)).dx,
+      lessThanOrEqualTo(offered),
+    );
+  });
+
+  testWidgets('a tile shows one green dot per house',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(_tile(houses: 2));
+    await tester.pumpAndSettle();
+
+    expect(_dots(Colors.green.shade800), findsNWidgets(2));
+    expect(_dots(Colors.red.shade700), findsNothing);
+  });
+
+  testWidgets('a hotel replaces the green dots with one red dot',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(_tile(houses: 4, hotels: 1));
+    await tester.pumpAndSettle();
+
+    expect(_dots(Colors.red.shade700), findsOneWidget);
+    expect(_dots(Colors.green.shade800), findsNothing);
   });
 }

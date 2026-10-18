@@ -4,22 +4,92 @@ import 'package:mon/models/bankpop_board.dart';
 /// The deed for one board space.
 ///
 /// [actionWidget] is drawn in the footer next to Close, so a caller can offer an
-/// action for the space it just showed ("Sell this card" in a cards game). The
-/// widget closes this dialog itself when it is tapped, which lets it open its own
-/// follow-up instead of stacking another route on top of the deed.
+/// action for the space it just showed ("Sell this card" in a cards game), or the
+/// face and name of whoever owns it. The widget closes this dialog itself when it
+/// is tapped, which lets it open its own follow-up instead of stacking another
+/// route on top of the deed.
+///
+/// [houses] and [hotels] say what is already built: every rent row that has been
+/// bought carries a tick, whether this deed was opened from the board or from the
+/// player's own cards. [onBuild], which only the player's card detail passes,
+/// puts a plus on the row that would be bought next; a tap approved by the banker
+/// increments the counts held here, so that plus becomes a tick without the deed
+/// being reopened.
 Future<void> showBankpopSpaceCard(
-    BuildContext context, BankpopSpace space, {Widget? actionWidget}) async {
-  final isStation = space.color == 'Station';
-  final isUtility = space.color == 'Utility';
-
-  // Stations get a dark brown header, Utilities get a light grey header
-  final headerColor = (isStation || isUtility)
-      ? const Color.fromARGB(255, 0, 0, 0)
-      : Color(BankpopBoard.colorForGroup(space.color));
-
+  BuildContext context,
+  BankpopSpace space, {
+  Widget? actionWidget,
+  int houses = 0,
+  int hotels = 0,
+  Future<bool> Function(int step)? onBuild,
+}) async {
   await showDialog(
     context: context,
-    builder: (_) => Dialog(
+    builder: (_) => _SpaceCardDialog(
+      space: space,
+      actionWidget: actionWidget,
+      houses: houses,
+      hotels: hotels,
+      onBuild: onBuild,
+    ),
+  );
+}
+
+class _SpaceCardDialog extends StatefulWidget {
+  const _SpaceCardDialog({
+    required this.space,
+    this.actionWidget,
+    this.houses = 0,
+    this.hotels = 0,
+    this.onBuild,
+  });
+
+  final BankpopSpace space;
+  final Widget? actionWidget;
+  final int houses;
+  final int hotels;
+  final Future<bool> Function(int step)? onBuild;
+
+  @override
+  State<_SpaceCardDialog> createState() => _SpaceCardDialogState();
+}
+
+class _SpaceCardDialogState extends State<_SpaceCardDialog> {
+  late int houses = widget.houses;
+  late int hotels = widget.hotels;
+
+  /// True while a request is with the banker, so a double tap cannot ask twice.
+  bool _building = false;
+
+  Future<void> _buy(int step) async {
+    final Future<bool> Function(int step)? onBuild = widget.onBuild;
+    if (onBuild == null || _building) return;
+    setState(() => _building = true);
+    final bool approved = await onBuild(step);
+    if (!mounted) return;
+    setState(() {
+      _building = false;
+      if (!approved) return;
+      if (step >= 5) {
+        hotels = 1;
+      } else {
+        houses += 1;
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final BankpopSpace space = widget.space;
+    final bool isStation = space.color == 'Station';
+    final bool isUtility = space.color == 'Utility';
+
+    // Stations get a dark brown header, Utilities get a light grey header
+    final headerColor = (isStation || isUtility)
+        ? const Color.fromARGB(255, 0, 0, 0)
+        : Color(BankpopBoard.colorForGroup(space.color));
+
+    return Dialog(
       insetPadding: const EdgeInsets.all(20),
       backgroundColor: Colors.transparent, // Let the Container handle the shape
       child: Container(
@@ -62,7 +132,13 @@ Future<void> showBankpopSpaceCard(
                     if (isStation) _buildStationDeed(space),
                     if (isUtility) _buildUtilityDeed(space),
                     if (!isStation && !isUtility)
-                      _buildColorPropertyDeed(space),
+                      _buildColorPropertyDeed(
+                        space,
+                        houses: houses,
+                        hotels: hotels,
+                        building: _building,
+                        onBuy: widget.onBuild == null ? null : _buy,
+                      ),
                   ],
                 ),
               ),
@@ -71,11 +147,22 @@ Future<void> showBankpopSpaceCard(
             // Footer anchored at the bottom: optional action on the left,
             // Close on the right.
             Padding(
-              padding: const EdgeInsets.only(bottom: 8, left: 12, right: 12, top: 8),
+              padding:
+                  const EdgeInsets.only(bottom: 8, left: 12, right: 12, top: 8),
               child: Row(
                 children: [
-                  if (actionWidget != null) actionWidget,
-                  const Spacer(),
+                  // The action gets the space it needs to shrink when it is wide
+                  // (an owner's name, say) instead of pushing Close off the row,
+                  // and still starts at the left at its natural size.
+                  if (widget.actionWidget != null)
+                    Expanded(
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: widget.actionWidget,
+                      ),
+                    )
+                  else
+                    const Spacer(),
                   TextButton(
                     onPressed: () => Navigator.pop(context),
                     child: const Text('Close', style: TextStyle(fontSize: 15)),
@@ -86,12 +173,21 @@ Future<void> showBankpopSpaceCard(
           ],
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 // 1. Standard Color Properties Layout
-Widget _buildColorPropertyDeed(BankpopSpace space) {
+//
+// Each rent row can carry a mark: a tick for a level that has been bought, or a
+// plus for the one level that could be bought next.
+Widget _buildColorPropertyDeed(
+  BankpopSpace space, {
+  required int houses,
+  required int hotels,
+  required bool building,
+  required Future<void> Function(int step)? onBuy,
+}) {
   return Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
@@ -111,7 +207,16 @@ Widget _buildColorPropertyDeed(BankpopSpace space) {
         ),
         const SizedBox(height: 12),
         for (var i = 0; i < space.rent!.length; i++)
-          _row(_rentLabel(space, i), '£${space.rent![i]}'),
+          _rentRow(
+            _rentLabel(space, i),
+            '£${space.rent![i]}',
+            built: (i >= 1 && i <= 4 && houses >= i) || (i == 5 && hotels > 0),
+            // One plus only: the very next level this card could take.
+            buy: onBuy != null && _isNextStep(i, houses, hotels)
+                ? () => onBuy(i)
+                : null,
+            building: building,
+          ),
         if (space.houseCost != null) ...[
           const Divider(
               height: 24,
@@ -124,6 +229,74 @@ Widget _buildColorPropertyDeed(BankpopSpace space) {
     ],
   );
 }
+
+/// Row `i` is the next buy when it is the level immediately above what is built:
+/// house 1 when there are none, house 3 when there are two, and the hotel only
+/// once all four houses are up. Rows below what is built carry their tick
+/// instead, and everything else is history or out of reach.
+bool _isNextStep(int i, int houses, int hotels) {
+  if (hotels > 0) return false;
+  if (i == 5) return houses >= 4;
+  if (i < 1 || i > 4) return false;
+  return houses < 4 && i == houses + 1;
+}
+
+Widget _rentRow(
+  String label,
+  String value, {
+  required bool built,
+  required VoidCallback? buy,
+  required bool building,
+}) =>
+    Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        children: [
+          // The label takes the slack, so the value stays hard against the right
+          // edge the way every other row on the deed sits - the mark just to its
+          // left rather than trailing the row.
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  fontSize: 14,
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w500),
+            ),
+          ),
+          if (built)
+            const Padding(
+              padding: EdgeInsets.only(right: 8),
+              child: Icon(Icons.check_circle,
+                  size: 16, color: Color(0xFF689F38)),
+            )
+          else if (buy != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: SizedBox(
+                width: 26,
+                height: 26,
+                child: IconButton(
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  iconSize: 24,
+                  color: const Color(0xFF689F38),
+                  tooltip: 'Ask the banker to build here',
+                  onPressed: building ? null : buy,
+                  icon: const Icon(Icons.add_circle),
+                ),
+              ),
+            ),
+          Text(value,
+              style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600, // Made bolder
+                  color: Colors.black)),
+        ],
+      ),
+    );
 
 // 2. Station Property Layout
 Widget _buildStationDeed(BankpopSpace space) {

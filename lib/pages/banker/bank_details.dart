@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 import 'package:mon/pages/banker/banker_screen.dart';
+import 'package:mon/widgets/app_message.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -49,9 +50,7 @@ class _BankValueScreenState extends State<BankValueScreen> {
     if (bankValueText.isEmpty ||
         playerAmountText.isEmpty ||
         advanceAmountText.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill all')),
-      );
+      showMessage(context, 'Please fill all');
       return;
     }
     setState(() {
@@ -61,9 +60,7 @@ class _BankValueScreenState extends State<BankValueScreen> {
     final playerValue = double.tryParse(_playerAmountController.text.trim());
     final advanceValue = double.parse(_advanceAmountController.text.trim());
     if (bankValue == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid bank value')),
-      );
+      showMessage(context, 'Invalid bank value');
       return;
     }
 
@@ -75,14 +72,27 @@ class _BankValueScreenState extends State<BankValueScreen> {
     await prefs.setDouble('playerValue', playerValue!);
     await prefs.setDouble('advance', advanceValue);
     String? playerID = prefs.getString('playerID');
-    await Supabase.instance.client.from('players_test').insert({
+
+    // The cards switch travels with the bank row, so the players' devices know
+    // whether to offer "My Cards" / "Buy Card" at all.
+    final Map<String, dynamic> bankRow = <String, dynamic>{
       'game_id': gameId,
       'role': role,
       'name': playerName,
       'wallet': bankValue,
       'player_id': playerID,
-      'SP/IP': _selectedOption
-    });
+      'SP/IP': _selectedOption,
+      'play_with_cards': _playWithCards,
+    };
+    try {
+      await Supabase.instance.client.from('players_test').insert(bankRow);
+    } on PostgrestException catch (error) {
+      // The flag needs supabase/cards_mode.sql. A game without that column can
+      // still start; only the players lose the cards buttons.
+      if (!error.message.contains('play_with_cards')) rethrow;
+      bankRow.remove('play_with_cards');
+      await Supabase.instance.client.from('players_test').insert(bankRow);
+    }
     await prefs.setString('name', 'banker');
     await prefs.setString('role', 'banker');
     await prefs.setString('display_name', 'Bank');
@@ -381,10 +391,7 @@ class _BankValueScreenState extends State<BankValueScreen> {
                           _selectedOption == 'ScanPay') {
                         _startGame();
                       } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                              content: Text('Please select payment type')),
-                        );
+                        showMessage(context, 'Please select payment type');
                       }
                     },
                     style: ElevatedButton.styleFrom(

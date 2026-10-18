@@ -11,6 +11,15 @@ class BankpopTile extends StatelessWidget {
   final double height;
   final VoidCallback onTap;
 
+  /// Name of the player holding this card, written in the tile's empty space so
+  /// the board itself says who owns what. Null on an unsold space.
+  final String? ownerName;
+
+  /// Buildings on the card: one green dot on its colour block per house, and a
+  /// single red dot once the hotel has replaced them.
+  final int houses;
+  final int hotels;
+
   const BankpopTile({
     super.key,
     required this.space,
@@ -18,6 +27,9 @@ class BankpopTile extends StatelessWidget {
     required this.width,
     required this.height,
     required this.onTap,
+    this.ownerName,
+    this.houses = 0,
+    this.hotels = 0,
   });
 
   @override
@@ -50,6 +62,51 @@ class BankpopTile extends StatelessWidget {
   }
 
   Widget _buildContent() {
+    final Widget body = _buildTileBody();
+    if (ownerName == null) return body;
+    // Overlay the owner in the space the deed leaves empty. Properties have no
+    // picture there; a Station or Utility does, so the chip keeps the name
+    // readable on top of it.
+    return Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        body,
+        Center(child: _ownerChip()),
+      ],
+    );
+  }
+
+  Widget _ownerChip() {
+    final double minDim = min(width, height);
+    return RotatedBox(
+      quarterTurns: _quarterTurns(side),
+      child: Container(
+        constraints: BoxConstraints(
+          maxWidth: (width > height ? width : height) * 0.92,
+          maxHeight: height * 0.94,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.88),
+          borderRadius: BorderRadius.circular(2),
+        ),
+        child: Text(
+          ownerName!,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: (minDim * 0.30).clamp(6.0, 11.0).toDouble(),
+            height: 1.1,
+            fontWeight: FontWeight.w700,
+            color: Colors.black87,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTileBody() {
     if (side == BoardSide.corner) {
       return _buildCornerContent();
     }
@@ -132,34 +189,63 @@ class BankpopTile extends StatelessWidget {
         height: 14,
         width: double.infinity,
         decoration: BoxDecoration(color: color, border: border),
+        child: _stripMarks(horizontal: true),
       );
     } else {
       return Container(
         width: 14,
         height: double.infinity,
         decoration: BoxDecoration(color: color, border: border),
+        child: _stripMarks(horizontal: false),
       );
     }
   }
 
-  Widget _rotatedIcon(BoardSide side, double size) {
-    int quarterTurns = 0;
+  /// What is built on the card, as dots inside its colour block: one green dot
+  /// per house, and the hotel replacing all of them with a single red dot. Null
+  /// while the card is bare, so the block stays a plain colour strip.
+  Widget? _stripMarks({required bool horizontal}) {
+    if (houses <= 0 && hotels <= 0) return null;
+
+    final Widget dot = Container(
+      width: 7,
+      height: 7,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: hotels > 0 ? Colors.red.shade700 : Colors.green.shade800,
+      ),
+    );
+    final List<Widget> marks =
+        hotels > 0 ? <Widget>[dot] : <Widget>[for (int i = 0; i < houses; i++) dot];
+
+    // A four-dot row is wider than a tile on a small board: scale it to the block
+    // rather than letting the flex overflow.
+    final Widget stack = horizontal
+        ? Row(mainAxisSize: MainAxisSize.min, children: marks)
+        : Column(mainAxisSize: MainAxisSize.min, children: marks);
+    return Center(
+      child: FittedBox(fit: BoxFit.scaleDown, child: stack),
+    );
+  }
+
+  /// Text on the left column, top row and right column is turned so it reads
+  /// from the edge of the board, the way the tile's picture is.
+  int _quarterTurns(BoardSide side) {
     switch (side) {
-      case BoardSide.bottom:
-        quarterTurns = 0;
-        break;
       case BoardSide.left:
-        quarterTurns = 1;
-        break;
+        return 1;
       case BoardSide.top:
-        quarterTurns = 2;
-        break;
+        return 2;
       case BoardSide.right:
-        quarterTurns = 3;
-        break;
-      default:
-        quarterTurns = 0;
+        return 3;
+      case BoardSide.bottom:
+      case BoardSide.corner:
+        return 0;
     }
+  }
+
+  Widget _rotatedIcon(BoardSide side, double size) {
+    final int quarterTurns = _quarterTurns(side);
 
     Widget? content;
     bool isFullFill = false;

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:mon/models/bankpop_board.dart';
+import 'package:mon/widgets/app_message.dart';
 import 'package:mon/services/player_cards.dart';
 import 'package:mon/widgets/bankpop_board_popup.dart';
 import 'package:mon/widgets/bankpop_space_card.dart';
@@ -29,28 +30,15 @@ Future<void> showGiveCardFlow({
   required String payOption,
   required String bankerId,
 }) async {
-  final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
-
-  // Say what the next tap means, because the board looks identical to the one on
-  // the home screen where a tap opens the deed.
-  messenger.showSnackBar(
-    const SnackBar(
-      content: Text('Tap a property to sell it as a card'),
-      duration: Duration(seconds: 2),
-    ),
-  );
-
   final BankpopSpace? space = await showDialog<BankpopSpace>(
     context: context,
-    builder: (_) => const BankpopBoardPopup(isCardMode: true),
+    builder: (_) => BankpopBoardPopup(isCardMode: true, gameId: gameId),
   );
   if (space == null || !context.mounted) return;
 
   final int? price = space.price;
   if (price == null || price <= 0) {
-    messenger.showSnackBar(
-      SnackBar(content: Text('${space.name} cannot be sold as a card')),
-    );
+    showMessage(context, '${space.name} cannot be sold as a card');
     return;
   }
 
@@ -58,9 +46,7 @@ Future<void> showGiveCardFlow({
   final String? owner = await PlayerCards.ownerOf(gameId, space.index);
   if (!context.mounted) return;
   if (owner != null) {
-    messenger.showSnackBar(
-      SnackBar(content: Text('${space.name} is already owned by $owner')),
-    );
+    showMessage(context, '${space.name} is already owned by $owner');
     return;
   }
 
@@ -165,8 +151,6 @@ Future<void> _assignToPlayer(
   required String gameId,
   required String bankerId,
 }) async {
-  final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
-
   final List<Map<String, dynamic>> roster;
   try {
     final List<dynamic> rows = await Supabase.instance.client
@@ -177,17 +161,14 @@ Future<void> _assignToPlayer(
     roster = rows.cast<Map<String, dynamic>>();
   } catch (error) {
     debugPrint('Could not load players for a card: $error');
-    messenger.showSnackBar(
-      const SnackBar(content: Text('Could not load the players')),
-    );
+    if (!context.mounted) return;
+    showMessage(context, 'Could not load the players');
     return;
   }
   if (!context.mounted) return;
 
   if (roster.isEmpty) {
-    messenger.showSnackBar(
-      const SnackBar(content: Text('No players have joined yet')),
-    );
+    showMessage(context, 'No players have joined yet');
     return;
   }
 
@@ -227,9 +208,7 @@ Future<void> _assignToPlayer(
   final String playerId = chosen['player_id']?.toString() ?? '';
   final String playerName = _displayName(chosen['name']?.toString());
   if (playerId.isEmpty) {
-    messenger.showSnackBar(
-      const SnackBar(content: Text('That player has no id in this game')),
-    );
+    showMessage(context, 'That player has no id in this game');
     return;
   }
 
@@ -244,21 +223,16 @@ Future<void> _assignToPlayer(
   if (!context.mounted) return;
 
   if (claim.alreadySold) {
-    messenger.showSnackBar(
-      SnackBar(content: Text('${space.name} has already been sold')),
-    );
+    showMessage(context, '${space.name} has already been sold');
     return;
   }
   if (!claim.ok) {
-    messenger.showSnackBar(
-      const SnackBar(content: Text('Could not give the card. Please try again.')),
-    );
+    showMessage(context, 'Could not give the card. Please try again.');
     return;
   }
 
-  messenger.showSnackBar(
-    SnackBar(content: Text('$playerName now owns ${space.name}')),
-  );
+  showMessage(context, '$playerName now owns ${space.name}',
+      title: 'Card given');
 }
 
 /// "ameen" -> "Ameen"; tolerates the empty names a roster row can carry.

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:mon/models/bankpop_board.dart';
+import 'package:mon/services/card_requests.dart';
 import 'package:mon/services/player_cards.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -40,10 +41,15 @@ class TransactionHistoryPage extends StatefulWidget {
   final String gameId;
   final String playerId;
 
+  /// True on the bank's device: a banker did not buy the buildings it approved,
+  /// so the Houses tab shows the whole game rather than one player's share.
+  final bool showAllPlayers;
+
   const TransactionHistoryPage({
     super.key,
     required this.gameId,
     required this.playerId,
+    this.showAllPlayers = false,
   });
 
   @override
@@ -57,6 +63,9 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
   /// stored card index back into a property name.
   late Future<List<PlayerCard>> _cardsFuture;
   late Future<Map<int, BankpopSpace>> _spacesFuture;
+
+  /// The houses and hotels half: every building that was approved, newest first.
+  late Future<List<CardRequest>> _buildingsFuture;
 
   String? playerName;
   String? playerID;
@@ -79,6 +88,39 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
       playerId: widget.playerId,
     );
     _spacesFuture = PlayerCards.spaces();
+    _buildingsFuture = _fetchBuildings();
+  }
+
+  /// Approved buildings for this game, newest first: a player's own, or the
+  /// whole game when this is the bank's screen.
+  ///
+  /// The payments themselves also land in `transactions` when the banker
+  /// approves, so the money shows up on the first tab as well; this tab is the
+  /// buildings it bought.
+  Future<List<CardRequest>> _fetchBuildings() async {
+    try {
+      final builder = Supabase.instance.client
+          .from('card_requests')
+          .select()
+          .eq('game_id', widget.gameId)
+          .eq('status', 'approved');
+      final filtered = widget.showAllPlayers
+          ? builder
+          : builder.eq('player_id', widget.playerId);
+
+      final List<dynamic> rows = await filtered
+          .order('date', ascending: false)
+          .order('time', ascending: false)
+          .limit(200);
+      return rows
+          .map((dynamic row) =>
+              CardRequest.fromMap(row as Map<String, dynamic>))
+          .toList();
+    } catch (error) {
+      // The table is created by supabase/buildings.sql; until it exists the tab
+      // simply reads as empty rather than erroring.
+      return const <CardRequest>[];
+    }
   }
 
   /// This player's newest rows in this game, capped at 200. The indexed filter
@@ -248,7 +290,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
       backgroundColor: Colors.yellow.shade50,
       appBar: AppBar(
@@ -281,6 +323,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
           tabs: [
             Tab(text: 'Transactions'),
             Tab(text: 'Cards'),
+            Tab(text: 'Houses'),
           ],
         ),
       ),
@@ -288,6 +331,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
         children: [
           _buildTransactionsTab(),
           _buildCardsTab(),
+          _buildHousesTab(),
         ],
       ),
       ),
@@ -428,6 +472,137 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
           },
         );
       },
+    );
+  }
+
+  /// Houses and hotels that have been bought in this game, newest first.
+  Widget _buildHousesTab() {
+    return FutureBuilder<List<CardRequest>>(
+      future: _buildingsFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: CircularProgressIndicator(color: Color(0xFF689F38)),
+          );
+        }
+        if (snapshot.hasError) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Text(
+                'Could not load houses: ${snapshot.error}',
+                textAlign: TextAlign.center,
+              ),
+            ),
+          );
+        }
+
+        final requests = snapshot.data ?? const <CardRequest>[];
+        if (requests.isEmpty) {
+          return const Center(child: Text('No houses or hotels yet.'));
+        }
+
+        return FutureBuilder<Map<int, BankpopSpace>>(
+          future: _spacesFuture,
+          builder: (context, spaceSnapshot) {
+            final spaces = spaceSnapshot.data ?? const <int, BankpopSpace>{};
+            return ListView.builder(
+              padding: const EdgeInsets.all(10),
+              itemCount: requests.length,
+              itemBuilder: (context, index) =>
+                  _buildBuildingRow(requests[index], spaces),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildBuildingRow(CardRequest request, Map<int, BankpopSpace> spaces) {
+    final BankpopSpace? space = spaces[request.cardIndex];
+    final String name = space?.name ?? 'Card #${request.cardIndex}';
+    final Color groupColor = space == null
+        ? Colors.grey
+        : Color(BankpopBoard.colorForGroup(space.color));
+    final String who = widget.showAllPlayers ? request.playerName : '';
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3.0),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border.all(color: Colors.white, width: 1),
+          borderRadius: const BorderRadius.all(Radius.circular(12)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 8,
+              height: 38,
+              decoration: BoxDecoration(
+                color: groupColor,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 5,
+              child: Text(
+                name,
+                style: TextStyle(
+                  fontSize: 14.sp,
+                  fontWeight: FontWeight.w500,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Expanded(
+              flex: 4,
+              child: Row(
+                children: [
+                  Icon(
+                    request.isHotel ? Icons.business : Icons.home,
+                    size: 15,
+                    color: const Color(0xFF689F38),
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      request.isHotel ? 'Hotel' : 'House',
+                      style: TextStyle(fontSize: 12.sp, color: Colors.grey[700]),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              flex: 3,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '£${request.amount.toStringAsFixed(0)}',
+                    style: TextStyle(
+                      fontSize: 12.sp,
+                      fontWeight: FontWeight.w600,
+                      color: const Color(0xFF33691E),
+                    ),
+                  ),
+                  if (who.isNotEmpty)
+                    Text(
+                      who,
+                      style: TextStyle(
+                          fontSize: 11.sp, color: Colors.grey[600]),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

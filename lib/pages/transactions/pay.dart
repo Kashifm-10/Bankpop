@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:mon/services/player_cards.dart';
+import 'package:mon/widgets/app_message.dart';
 import 'package:mon/services/wallet_transfer.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -239,6 +240,16 @@ class _QRPayScannerState extends State<QRPayScanner> {
       return;
     }
 
+    // Affordability first: there is no point reserving a card, or asking the
+    // player to confirm, when the payment can only fail.
+    final double? balance = await _walletBalance(payerId);
+    if (!mounted) return;
+    if (balance != null && balance < price) {
+      navigator.pop();
+      notify('failed', detail: 'Insufficient funds');
+      return;
+    }
+
     // Do not charge for a property the bank has already sold.
     final String? owner = await PlayerCards.ownerOf(widget.gameId, cardIndex);
     if (!mounted) return;
@@ -310,7 +321,7 @@ class _QRPayScannerState extends State<QRPayScanner> {
       notify(
         'failed',
         detail: transfer.failure == TransferFailure.insufficientFunds
-            ? 'Insufficient balance'
+            ? 'Insufficient funds'
             : 'Please try again',
       );
       return;
@@ -350,6 +361,24 @@ class _QRPayScannerState extends State<QRPayScanner> {
         ],
       ),
     );
+  }
+
+  /// This player's wallet, or null when it cannot be read - in which case the
+  /// atomic transfer still refuses a payment they cannot afford.
+  Future<double?> _walletBalance(String playerId) async {
+    try {
+      final Map<String, dynamic>? row = await Supabase.instance.client
+          .from('players_test')
+          .select('wallet')
+          .eq('game_id', widget.gameId)
+          .eq('player_id', playerId)
+          .eq('role', 'player')
+          .maybeSingle();
+      return (row?['wallet'] as num?)?.toDouble();
+    } catch (error) {
+      debugPrint('Could not read the wallet before a card purchase: $error');
+      return null;
+    }
   }
 
   void notify(String message, {String? detail}) {
@@ -419,12 +448,10 @@ class _QRPayScannerState extends State<QRPayScanner> {
   }
 
   void _showError(String message) {
-    if (context.mounted) {
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
-    }
+    if (!context.mounted) return;
+    Navigator.pop(context); // Close the scanner
+    if (!context.mounted) return;
+    showMessage(context, message);
   }
 
   @override

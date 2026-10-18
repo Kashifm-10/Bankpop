@@ -10,6 +10,7 @@ import 'package:mon/pages/profile_edit.dart';
 import 'package:mon/pages/role.dart';
 import 'package:mon/profile.dart';
 import 'package:mon/widgets/bankpop_board_popup.dart';
+import 'package:mon/widgets/app_message.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -384,20 +385,27 @@ class _WelcomePageState extends State<WelcomePage> {
                         Row(
                           children: [
                             GestureDetector(
-                              onTap: () => showDialog(
-                                context: context,
-                                builder: (_) => const BankpopBoardPopup(),
-                              ),
+                              onTap: () async {
+                                // Read at tap time: the game id is written when
+                                // this device joins or starts a game, which can
+                                // happen after this screen first loaded.
+                                final SharedPreferences prefs =
+                                    await SharedPreferences.getInstance();
+                                if (!context.mounted) return;
+                                showDialog(
+                                  context: context,
+                                  builder: (_) => BankpopBoardPopup(
+                                    gameId: prefs.getString('gameID') ?? '',
+                                  ),
+                                );
+                              },
                               child: const Icon(Icons.grid_on),
                             ),
                             SizedBox(width: 15),
                             GestureDetector(
                               onTap: () {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                      content: Text(
-                                          'Only an idiot would press this.')),
-                                );
+                                showMessage(context,
+                                    'Only an idiot would press this.');
                               },
                               child: const Icon(
                                 CupertinoIcons.info_circle_fill,
