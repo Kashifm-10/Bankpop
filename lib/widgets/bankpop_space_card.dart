@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:mon/models/bankpop_board.dart';
 
+/// The deed for one board space.
+///
+/// [actionWidget] is drawn in the footer next to Close, so a caller can offer an
+/// action for the space it just showed ("Sell this card" in a cards game). The
+/// widget closes this dialog itself when it is tapped, which lets it open its own
+/// follow-up instead of stacking another route on top of the deed.
 Future<void> showBankpopSpaceCard(
-    BuildContext context, BankpopSpace space) async {
+    BuildContext context, BankpopSpace space, {Widget? actionWidget}) async {
   final isStation = space.color == 'Station';
   final isUtility = space.color == 'Utility';
 
@@ -62,15 +68,19 @@ Future<void> showBankpopSpaceCard(
               ),
             ),
 
-            // Close Button anchored at the bottom
+            // Footer anchored at the bottom: optional action on the left,
+            // Close on the right.
             Padding(
-              padding: const EdgeInsets.only(bottom: 8, right: 12, top: 8),
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Close', style: TextStyle(fontSize: 15)),
-                ),
+              padding: const EdgeInsets.only(bottom: 8, left: 12, right: 12, top: 8),
+              child: Row(
+                children: [
+                  if (actionWidget != null) actionWidget,
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Close', style: TextStyle(fontSize: 15)),
+                  ),
+                ],
               ),
             ),
           ],

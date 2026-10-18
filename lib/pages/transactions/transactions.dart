@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:mon/models/bankpop_board.dart';
+import 'package:mon/services/player_cards.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -50,6 +52,12 @@ class TransactionHistoryPage extends StatefulWidget {
 
 class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
   late Future<List<Transaction>> _transactionsFuture;
+
+  /// The property cards half of the ledger, and the board needed to turn a
+  /// stored card index back into a property name.
+  late Future<List<PlayerCard>> _cardsFuture;
+  late Future<Map<int, BankpopSpace>> _spacesFuture;
+
   String? playerName;
   String? playerID;
 
@@ -66,6 +74,11 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
   void initState() {
     super.initState();
     _transactionsFuture = fetchTransactions();
+    _cardsFuture = PlayerCards.forPlayer(
+      gameId: widget.gameId,
+      playerId: widget.playerId,
+    );
+    _spacesFuture = PlayerCards.spaces();
   }
 
   /// This player's newest rows in this game, capped at 200. The indexed filter
@@ -234,7 +247,9 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
       backgroundColor: Colors.yellow.shade50,
       appBar: AppBar(
         surfaceTintColor: Colors.transparent,
@@ -257,8 +272,31 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
           ),
           const SizedBox(width: 10),
         ],
+        // Cards are the second half of the same ledger: the money, and the
+        // properties it bought.
+        bottom: const TabBar(
+          labelColor: Color(0xFF689F38),
+          indicatorColor: Color(0xFF689F38),
+          unselectedLabelColor: Colors.black54,
+          tabs: [
+            Tab(text: 'Transactions'),
+            Tab(text: 'Cards'),
+          ],
+        ),
       ),
-      body: Column(
+      body: TabBarView(
+        children: [
+          _buildTransactionsTab(),
+          _buildCardsTab(),
+        ],
+      ),
+      ),
+    );
+  }
+
+  /// The money history, unchanged, now the first tab.
+  Widget _buildTransactionsTab() {
+    return Column(
         children: [
           SizedBox(height: 10),
           Padding(
@@ -346,6 +384,109 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
             ),
           ),
         ],
+    );
+  }
+
+  /// The cards this player bought or sold, newest first.
+  Widget _buildCardsTab() {
+    return FutureBuilder<List<PlayerCard>>(
+      future: _cardsFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: CircularProgressIndicator(color: Color(0xFF689F38)),
+          );
+        }
+        if (snapshot.hasError) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Text(
+                'Could not load cards: ${snapshot.error}',
+                textAlign: TextAlign.center,
+              ),
+            ),
+          );
+        }
+
+        final cards = snapshot.data ?? const <PlayerCard>[];
+        if (cards.isEmpty) {
+          return const Center(child: Text("No cards yet."));
+        }
+
+        return FutureBuilder<Map<int, BankpopSpace>>(
+          future: _spacesFuture,
+          builder: (context, spaceSnapshot) {
+            final spaces = spaceSnapshot.data ?? const <int, BankpopSpace>{};
+            return ListView.builder(
+              padding: const EdgeInsets.all(10),
+              itemCount: cards.length,
+              itemBuilder: (context, index) {
+                return _buildCardRow(cards[index], spaces);
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildCardRow(PlayerCard card, Map<int, BankpopSpace> spaces) {
+    final BankpopSpace? space = spaces[card.cardIndex];
+    final String name = space?.name ?? 'Card #${card.cardIndex}';
+    final Color groupColor = space == null
+        ? Colors.grey
+        : Color(BankpopBoard.colorForGroup(space.color));
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3.0),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border.all(color: Colors.white, width: 1),
+          borderRadius: const BorderRadius.all(Radius.circular(12)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 8,
+              height: 38,
+              decoration: BoxDecoration(
+                color: groupColor,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 5,
+              child: Text(
+                name,
+                style: TextStyle(
+                  fontSize: 14.sp,
+                  fontWeight: FontWeight.w500,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Expanded(
+              flex: 4,
+              child: Text(
+                '${_displayName(card.from)} \u2192 ${_displayName(card.to)}',
+                style: TextStyle(fontSize: 12.sp, color: Colors.grey[700]),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Expanded(
+              flex: 3,
+              child: Text(
+                _relativeTime('${card.date} ${card.time}'),
+                textAlign: TextAlign.right,
+                style: TextStyle(fontSize: 12.sp, color: Colors.grey[600]),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -6,7 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:lottie/lottie.dart';
+import 'package:mon/models/bankpop_board.dart';
 import 'package:mon/pages/transactions/pay.dart';
+import 'package:mon/services/player_cards.dart';
 import 'package:mon/services/wallet_transfer.dart';
 import 'package:mon/pages/transactions/receive.dart';
 import 'package:mon/pages/transactions/transactions.dart';
@@ -316,6 +318,158 @@ class _PlayersScreenState extends State<PlayersScreen> {
     } catch (e) {
       debugPrint('Error updating avatar: $e');
     }
+  }
+
+  /// The properties this player has bought, newest first.
+  ///
+  /// The table stores the board index, so the name and group colour are looked
+  /// up from the bundled board - that keeps a card readable even if the row was
+  /// written on another device.
+  Future<void> _showMyCards() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String id = playerID ?? prefs.getString('playerID') ?? '';
+    if (id.isEmpty) return;
+
+    if (!mounted) return;
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+
+    final List<PlayerCard> cards;
+    try {
+      cards =
+          await PlayerCards.forPlayer(gameId: widget.gameId, playerId: id);
+    } catch (error) {
+      debugPrint('Could not load cards: $error');
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Could not load your cards')),
+      );
+      return;
+    }
+    final Map<int, BankpopSpace> spaces = await PlayerCards.spaces();
+    if (!mounted) return;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.yellow.shade50,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (BuildContext sheetContext) {
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.6,
+          minChildSize: 0.3,
+          maxChildSize: 0.9,
+          builder: (BuildContext context, ScrollController controller) {
+            return Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 8, 6),
+                  child: Row(
+                    children: [
+                      Text(
+                        'My Cards',
+                        style: TextStyle(
+                          fontSize: 18.sp,
+                          fontWeight: FontWeight.bold,
+                          color: const Color(0xFF689F38),
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        onPressed: () => Navigator.of(sheetContext).pop(),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: cards.isEmpty
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Text(
+                              'You do not own any cards yet.\nThe bank sells '
+                              'properties during the game.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 15.sp,
+                                color: Colors.black54,
+                              ),
+                            ),
+                          ),
+                        )
+                      : ListView.builder(
+                          controller: controller,
+                          padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+                          itemCount: cards.length,
+                          itemBuilder: (BuildContext context, int index) =>
+                              _buildCardTile(cards[index], spaces),
+                        ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildCardTile(PlayerCard card, Map<int, BankpopSpace> spaces) {
+    final BankpopSpace? space = spaces[card.cardIndex];
+    final String name = space?.name ?? 'Card #${card.cardIndex}';
+    final Color groupColor = space == null
+        ? Colors.grey
+        : Color(BankpopBoard.colorForGroup(space.color));
+    final DateTime? acquired = card.acquiredAt;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 10,
+            height: 42,
+            decoration: BoxDecoration(
+              color: groupColor,
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: TextStyle(
+                    fontSize: 15.sp,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  card.from == card.to
+                      ? 'Owned by ${card.to}'
+                      : '${card.from} \u2192 ${card.to}',
+                  style: TextStyle(fontSize: 12.sp, color: Colors.black54),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            acquired == null ? card.date : DateFormat('d MMM').format(acquired),
+            style: TextStyle(fontSize: 12.sp, color: Colors.grey[600]),
+          ),
+        ],
+      ),
+    );
   }
 
   void notification(String message, String value) {
@@ -2138,11 +2292,61 @@ class _PlayersScreenState extends State<PlayersScreen> {
                         ),
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
+                          // Three buttons no longer fit on one line on a narrow
+                          // phone, so they wrap instead of overflowing.
+                          child: Wrap(
+                            alignment: WrapAlignment.end,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            spacing: 10,
+                            runSpacing: 6,
                             children: [
                               if (payOption == 'ScanPay') const ReceiveButton(),
-                              const SizedBox(width: 10),
+                              ElevatedButton.icon(
+                                onPressed: _showMyCards,
+                                icon: Icon(Icons.credit_card, size: 16.sp),
+                                label: Text(
+                                  'My Cards',
+                                  style: TextStyle(fontSize: 16.sp),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 5),
+                                  backgroundColor: const Color(0xFF1565C0),
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
+                              ),
+                              if (payOption == 'ScanPay')
+                                ElevatedButton.icon(
+                                  onPressed: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => QRPayScanner(
+                                          gameId: widget.gameId,
+                                          isCardMode: true,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  icon: Icon(Icons.qr_code_scanner,
+                                      size: 16.sp),
+                                  label: Text(
+                                    'Buy Card',
+                                    style: TextStyle(fontSize: 16.sp),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 5),
+                                    backgroundColor: const Color(0xFF689F38),
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                  ),
+                                ),
                               ElevatedButton.icon(
                                 onPressed: () {
                                   payOption == 'ScanPay'

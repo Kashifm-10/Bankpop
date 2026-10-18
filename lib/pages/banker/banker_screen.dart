@@ -9,6 +9,7 @@ import 'package:mon/pages/home.dart';
 import 'package:mon/pages/transactions/receive.dart';
 import 'package:mon/services/wallet_transfer.dart';
 import 'package:mon/pages/transactions/transactions.dart';
+import 'package:mon/widgets/give_card_flow.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -35,6 +36,11 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
   String ID = '';
   bool _isFetching = false; // One fetch in flight at a time
   bool? _isAlsoPlayer; // Cached: does this device also hold a player row?
+
+  /// Cards game, chosen on the "Enter Bank Value" screen before the game
+  /// started. When on, the bank can sell board properties: by QR in a ScanPay
+  /// game, by assignment to a named player in an InstantPay one.
+  bool _playWithCards = false;
   StreamSubscription<List<Map<String, dynamic>>>? _rosterUpdates;
   StreamSubscription<List<Map<String, dynamic>>>? _requestUpdates;
 
@@ -46,6 +52,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
     _subscribeToRoster(); // Live roster and bank header
     _subscribeToRequests(); // Live join requests
     startPolling(); // Reconciliation, in case Realtime is unavailable
+    _loadStartupSettings();
   }
 
   @override
@@ -318,6 +325,44 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
         break; // stop showing dialogs after accepting one
       }
     }
+  }
+
+  /// Reads what this device knows about the game it is hosting.
+  ///
+  /// The cards switch lives here rather than on the server, so it survives a
+  /// rebuild but is written once per game start by bank_details.dart. [ID] is the
+  /// bank row's player_id, which the history screen needs before the first join
+  /// request has been accepted - it used to be filled in only from a stake.
+  Future<void> _loadStartupSettings() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final bool enabled = prefs.getBool('playWithCards') ?? false;
+    final String ownId = prefs.getString('playerID') ?? '';
+    if (!mounted) return;
+    if (enabled == _playWithCards && (ownId.isEmpty || ownId == ID)) return;
+    setState(() {
+      _playWithCards = enabled;
+      if (ownId.isNotEmpty) ID = ownId;
+    });
+  }
+
+  /// Board in cards mode, then a deed with a sell action on it.
+  Future<void> _openGiveCardFlow() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    // The bank row's player_id, which is what a card QR has to pay.
+    final String bankerId = prefs.getString('playerID') ?? ID;
+    if (!mounted) return;
+    if (bankerId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This device has no player id')),
+      );
+      return;
+    }
+    await showGiveCardFlow(
+      context: context,
+      gameId: widget.gameId,
+      payOption: payOption,
+      bankerId: bankerId,
+    );
   }
 
   void _showQRDialog(BuildContext context) {
@@ -1314,12 +1359,36 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                       ],
                     ),
                     const SizedBox(height: 10),
-                    if (payOption == 'ScanPay')
-                      const Row(
+                    if (payOption == 'ScanPay' || _playWithCards)
+                      Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
-                          ReceiveButton(),
-                          SizedBox(width: 0),
+                          if (payOption == 'ScanPay') const ReceiveButton(),
+                          if (_playWithCards) ...[
+                            if (payOption == 'ScanPay')
+                              const SizedBox(width: 8),
+                            ElevatedButton.icon(
+                              onPressed: _openGiveCardFlow,
+                              icon: Icon(
+                                FontAwesomeIcons.handHolding,
+                                size: 16.sp,
+                              ),
+                              label: Text(
+                                'Give Card',
+                                style: TextStyle(fontSize: 16.sp),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 5),
+                                backgroundColor:
+                                    const Color(0xFF1565C0),
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
+                            ),
+                          ],
                           /*                           ElevatedButton.icon(
                             onPressed: () {
                               Navigator.push(

@@ -19,6 +19,10 @@ class _BankValueScreenState extends State<BankValueScreen> {
   bool _isLoading = false;
   String _selectedOption = '';
 
+  /// Cards game: the bank sells board properties to the players. Saved with the
+  /// game so the banker screen knows to offer the Give Card flow.
+  bool _playWithCards = false;
+
   final TextEditingController _bankValueController = TextEditingController();
   final TextEditingController _playerAmountController = TextEditingController();
   final TextEditingController _advanceAmountController =
@@ -83,6 +87,7 @@ class _BankValueScreenState extends State<BankValueScreen> {
     await prefs.setString('role', 'banker');
     await prefs.setString('display_name', 'Bank');
     await prefs.setString('gameID', gameId);
+    await prefs.setBool('playWithCards', _playWithCards);
 
     // Proceed to next screen
     // ignore: use_build_context_synchronously
@@ -138,11 +143,19 @@ class _BankValueScreenState extends State<BankValueScreen> {
               end: Alignment.bottomRight,
             ),
           ),
-          child: Padding(
-            padding: EdgeInsets.all(4.w),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
+          // The form grew by the cards switch; a short screen (or a large text
+          // scale) would otherwise overflow with no way to reach Start Game.
+          // Centring is kept while the content still fits.
+          child: LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) =>
+                SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Padding(
+                  padding: EdgeInsets.all(4.w),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
                 Padding(
                   padding: const EdgeInsets.only(right: 15.0),
                   child: SizedBox(
@@ -331,7 +344,34 @@ class _BankValueScreenState extends State<BankValueScreen> {
                     ),
                   ),
                 ),
-                SizedBox(height: 4.h),
+                // Cards game: the bank sells board properties to the players.
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: Text(
+                    'Play with Cards',
+                    style: TextStyle(
+                      fontSize: 15.sp,
+                      fontWeight: FontWeight.bold,
+                      color: const Color(0xFF33691E),
+                    ),
+                  ),
+                  subtitle: Text(
+                    'Enable so players can buy properties from the bank',
+                    style: TextStyle(
+                      fontSize: 12.sp,
+                      color: Colors.black54,
+                    ),
+                  ),
+                  value: _playWithCards,
+                  activeThumbColor: const Color(0xFF689F38),
+                  onChanged: (bool value) {
+                    setState(() {
+                      _playWithCards = value;
+                    });
+                  },
+                ),
+                SizedBox(height: 2.h),
                 SizedBox(
                   width: 50.w,
                   height: 6.h,
@@ -370,7 +410,10 @@ class _BankValueScreenState extends State<BankValueScreen> {
                         : Text('Start Game', style: TextStyle(fontSize: 18.sp)),
                   ),
                 ),
-              ],
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
         ),

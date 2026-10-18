@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:mon/services/player_cards.dart';
 import 'package:mon/services/wallet_transfer.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,7 +12,16 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 class QRPayScanner extends StatefulWidget {
   final String gameId;
-  const QRPayScanner({super.key, required this.gameId});
+
+  /// Opened from "Buy Card": the scanner reads the same payloads, so this only
+  /// changes what the screen says it is for.
+  final bool isCardMode;
+
+  const QRPayScanner({
+    super.key,
+    required this.gameId,
+    this.isCardMode = false,
+  });
 
   @override
   State<QRPayScanner> createState() => _QRPayScannerState();
@@ -24,7 +34,9 @@ class _QRPayScannerState extends State<QRPayScanner> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Scan QR to Pay")),
+      appBar: AppBar(
+        title: Text(widget.isCardMode ? "Scan Card QR" : "Scan QR to Pay"),
+      ),
       body: Stack(
         children: [
           MobileScanner(
@@ -45,6 +57,25 @@ class _QRPayScannerState extends State<QRPayScanner> {
               ),
             ),
           ),
+          if (widget.isCardMode)
+            Positioned(
+              left: 24,
+              right: 24,
+              bottom: 32,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  "Scan the bank's property card QR to buy it",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white, fontSize: 14.sp),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -63,6 +94,12 @@ class _QRPayScannerState extends State<QRPayScanner> {
 
     try {
       final Map<String, dynamic> data = jsonDecode(scannedCode);
+
+      // A property card for sale, rather than a plain payment.
+      if (data['type'] == 'card') {
+        await _handleCardPurchase(data);
+        return;
+      }
 
       final playerID = data['playerID'];
       final value = data['value'];
@@ -169,6 +206,150 @@ class _QRPayScannerState extends State<QRPayScanner> {
     } catch (e) {
       _showError('Failed to process QR data');
     }
+  }
+
+  /// Buys the property a card QR from the bank is offering.
+  ///
+  /// The card is claimed before the money moves. The card is the thing two
+  /// players can collide over, and a claim that was just written can always be
+  /// released if the payment fails - a refund cannot be guaranteed.
+  Future<void> _handleCardPurchase(Map<String, dynamic> data) async {
+    // Held rather than re-read from `context`: this screen pops itself midway
+    // through, and a captured navigator stays valid after that.
+    final NavigatorState navigator = Navigator.of(context);
+    final int? cardIndex = data['cardIndex'] is num
+        ? (data['cardIndex'] as num).toInt()
+        : int.tryParse('${data['cardIndex']}');
+    final String cardName = (data['name'] ?? 'Card').toString();
+    final double price = double.tryParse('${data['price']}') ?? 0;
+    final String bankerId = (data['playerID'] ?? '').toString();
+
+    if (cardIndex == null || bankerId.isEmpty || price <= 0) {
+      _showError('This card QR is not valid');
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final String payerId = prefs.getString('playerID') ?? '';
+    final String payerName = prefs.getString('display_name') ??
+        prefs.getString('profile_name') ??
+        'Player';
+    if (payerId.isEmpty) {
+      _showError('This device has no player id');
+      return;
+    }
+
+    // Do not charge for a property the bank has already sold.
+    final String? owner = await PlayerCards.ownerOf(widget.gameId, cardIndex);
+    if (!mounted) return;
+    if (owner != null) {
+      _showError('$cardName is already owned by $owner');
+      return;
+    }
+
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFFFFF8E1),
+        title: const Text('Buy Card'),
+        content: Text(
+          'Buy $cardName for £$price?\nThe money goes to the bank.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('No'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Yes'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (confirmed != true) {
+      navigator.pop(); // Back to the wallet
+      return;
+    }
+
+    final ClaimResult claim = await PlayerCards.claim(
+      gameId: widget.gameId,
+      cardIndex: cardIndex,
+      fromName: 'Bank',
+      toName: payerName,
+      // The bank issued it, the scanning player received it.
+      payerId: bankerId,
+      receiverId: payerId,
+    );
+    if (!mounted) return;
+    if (claim.alreadySold) {
+      _showError('$cardName has just been sold to another player');
+      return;
+    }
+    if (!claim.ok) {
+      _showError('Could not reserve the card. Please try again.');
+      return;
+    }
+
+    final TransferOutcome transfer = await WalletTransfer.pay(
+      gameId: widget.gameId,
+      fromId: payerId,
+      fromRole: WalletTransfer.playerRole,
+      toId: bankerId,
+      toRole: WalletTransfer.bankerRole,
+      amount: price,
+    );
+    if (!mounted) return;
+
+    if (!transfer.ok) {
+      // The player was never charged, so hand the card back to the bank.
+      await PlayerCards.release(claim.rowId);
+      if (!mounted) return;
+      navigator.pop(); // Back to the wallet
+      notify(
+        'failed',
+        detail: transfer.failure == TransferFailure.insufficientFunds
+            ? 'Insufficient balance'
+            : 'Please try again',
+      );
+      return;
+    }
+
+    // The card row is the card history; this keeps the money history too, the
+    // way an ordinary ScanPay payment does.
+    try {
+      await Supabase.instance.client.from('transactions').insert({
+        'game_id': widget.gameId,
+        'value': price,
+        'from': payerName,
+        'to': 'Bank',
+        'code': '${payerId}_$bankerId',
+        'date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
+        'time': DateFormat('HH:mm:ss').format(DateTime.now()),
+      });
+    } catch (error) {
+      debugPrint('Could not write the card purchase to transactions: $error');
+    }
+    if (!mounted) return;
+
+    // The scanner is about to leave the tree; show the receipt through the
+    // navigator that owns the route instead of the dying scanner context.
+    navigator.pop();
+    await showDialog<void>(
+      context: navigator.context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFFFFF8E1),
+        title: const Text('Card purchased'),
+        content: Text('You now own $cardName.'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   void notify(String message, {String? detail}) {

@@ -5,7 +5,15 @@ import 'package:mon/widgets/bankpop_space_card.dart';
 import 'package:mon/widgets/bankpop_tile.dart';
 
 class BankpopBoardPopup extends StatefulWidget {
-  const BankpopBoardPopup({super.key});
+  /// Cards game: tapping a property closes the board and hands that space back
+  /// to the caller instead of opening its deed.
+  ///
+  /// Read it with `showDialog<BankpopSpace>(...)`: the board pops with the
+  /// tapped space, so the caller decides what selling it means (a ScanPay QR, or
+  /// an InstantPay assignment) without this widget knowing about games.
+  final bool isCardMode;
+
+  const BankpopBoardPopup({super.key, this.isCardMode = false});
 
   @override
   State<BankpopBoardPopup> createState() => _BankpopBoardPopupState();
@@ -42,7 +50,11 @@ class _BankpopBoardPopupState extends State<BankpopBoardPopup> {
               return Center(
                   child: Text('Could not load board: ${snap.error}'));
             }
-            return _Board(board: snap.data!, size: size);
+            return _Board(
+              board: snap.data!,
+              size: size,
+              isCardMode: widget.isCardMode,
+            );
           },
         ),
       ),
@@ -53,8 +65,13 @@ class _BankpopBoardPopupState extends State<BankpopBoardPopup> {
 class _Board extends StatelessWidget {
   final BankpopBoard board;
   final double size;
+  final bool isCardMode;
 
-  const _Board({required this.board, required this.size});
+  const _Board({
+    required this.board,
+    required this.size,
+    required this.isCardMode,
+  });
 
   static const int _cornerFlex = 14;
   static const int _tileFlex = 10;
@@ -198,6 +215,12 @@ class _Board extends StatelessWidget {
         return;
       }
       showBankpopSpecialInfo(context, space.name);
+      return;
+    }
+    if (isCardMode) {
+      // Hand the space back to the caller; it knows whether this device sells
+      // cards by QR or assigns them to a player.
+      Navigator.of(context).pop(space);
       return;
     }
     showBankpopSpaceCard(context, space);
