@@ -14,9 +14,10 @@ class PlayerCard {
     required this.from,
     required this.to,
     required this.date,
-    required this.time,
+    required    this.time,
     this.houses = 0,
     this.hotels = 0,
+    this.mortgaged = false,
   });
 
   final int? id;
@@ -32,13 +33,27 @@ class PlayerCard {
   /// 1 once a hotel has been put up, which is only allowed after 4 houses.
   final int hotels;
 
+  /// The card is mortgaged: it still belongs to this player, but it collects no
+  /// rent, takes no buildings, and only moves in a trade with the interest paid.
+  final bool mortgaged;
+
   bool get hasHotel => hotels > 0;
+
+  /// Mortgage value on the deed: half the printed price, the same figure the
+  /// rules book prints for every price on the board.
+  int mortgageValue(BankpopSpace? space) => ((space?.price ?? 0) ~/ 2);
+
+  /// What it costs to take the mortgage back off: the value, plus 10%.
+  int unmortgageCost(BankpopSpace? space) {
+    final int value = mortgageValue(space);
+    return value + (value / 10).ceil();
+  }
 
   DateTime? get acquiredAt => DateTime.tryParse('$date $time'.trim());
 
-  /// The same card with new building counts, so a screen can show a house it has
-  /// just seen approved without re-reading the table.
-  PlayerCard copyWith({int? houses, int? hotels}) {
+  /// The same card with new counts, so a screen can show a house or a mortgage
+  /// it has just seen approved without re-reading the table.
+  PlayerCard copyWith({int? houses, int? hotels, bool? mortgaged}) {
     return PlayerCard(
       id: id,
       cardIndex: cardIndex,
@@ -48,6 +63,7 @@ class PlayerCard {
       time: time,
       houses: houses ?? this.houses,
       hotels: hotels ?? this.hotels,
+      mortgaged: mortgaged ?? this.mortgaged,
     );
   }
 
@@ -63,6 +79,8 @@ class PlayerCard {
       // with no buildings reads the same either way.
       houses: (map['houses'] as num?)?.toInt() ?? 0,
       hotels: (map['hotels'] as num?)?.toInt() ?? 0,
+      // Supabase/mortgage_trades.sql.
+      mortgaged: map['mortgaged'] == true,
     );
   }
 }
@@ -76,6 +94,7 @@ class CardOwner {
     this.avatar,
     this.houses = 0,
     this.hotels = 0,
+    this.mortgaged = false,
   });
 
   final String name;
@@ -87,6 +106,9 @@ class CardOwner {
   /// What is standing on the card: 0-4 houses, then the hotel.
   final int houses;
   final int hotels;
+
+  /// True when the card is mortgaged.
+  final bool mortgaged;
 }
 
 /// What happened when a card was claimed for a player.
@@ -184,7 +206,7 @@ class PlayerCards {
     try {
       rows = await supabase
           .from(_table)
-          .select('card_index, to, receiver_id, houses, hotels')
+          .select('card_index, to, receiver_id, houses, hotels, mortgaged')
           .eq('game_id', gameId);
     } catch (error) {
       // Either the buildings columns are missing (supabase/buildings.sql) or the
@@ -215,6 +237,7 @@ class PlayerCards {
         avatar: id == null ? null : avatars[id],
         houses: (row['houses'] as num?)?.toInt() ?? 0,
         hotels: (row['hotels'] as num?)?.toInt() ?? 0,
+        mortgaged: row['mortgaged'] == true,
       );
     }
     return result;

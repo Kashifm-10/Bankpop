@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:mon/models/bankpop_board.dart';
 import 'package:mon/services/card_requests.dart';
+import 'package:mon/services/deals.dart';
 import 'package:mon/services/player_cards.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -67,6 +68,15 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
   /// The houses and hotels half: every building that was approved, newest first.
   late Future<List<CardRequest>> _buildingsFuture;
 
+  /// Mortgage / unmortgage events, so the Cards tab can show them too.
+  late Future<List<DealRequest>> _mortgagesFuture;
+
+  /// House / hotel sales back to the bank, so the Houses tab can show them.
+  late Future<List<DealRequest>> _houseSalesFuture;
+
+  /// Every trade this player sent or received, settled or otherwise.
+  late Future<List<DealRequest>> _tradesFuture;
+
   String? playerName;
   String? playerID;
 
@@ -89,6 +99,9 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
     );
     _spacesFuture = PlayerCards.spaces();
     _buildingsFuture = _fetchBuildings();
+    _mortgagesFuture = _fetchMortgages();
+    _houseSalesFuture = _fetchHouseSales();
+    _tradesFuture = _fetchTrades();
   }
 
   /// Approved buildings for this game, newest first: a player's own, or the
@@ -120,6 +133,79 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
       // The table is created by supabase/buildings.sql; until it exists the tab
       // simply reads as empty rather than erroring.
       return const <CardRequest>[];
+    }
+  }
+
+  /// Approved mortgage / unmortgage deals involving this player, newest first.
+  Future<List<DealRequest>> _fetchMortgages() async {
+    try {
+      final List<dynamic> rows = await Supabase.instance.client
+          .from('deal_requests')
+          .select()
+          .eq('game_id', widget.gameId)
+          .inFilter('kind', <String>['mortgage', 'unmortgage'])
+          .eq('status', 'approved')
+          .or('from_id.eq.${widget.playerId},to_id.eq.${widget.playerId}')
+          .order('date', ascending: false)
+          .order('time', ascending: false)
+          .limit(200);
+      return rows
+          .cast<Map<String, dynamic>>()
+          .map(DealRequest.fromMap)
+          .toList();
+    } catch (error) {
+      debugPrint('Could not read mortgages: $error');
+      return const <DealRequest>[];
+    }
+  }
+
+  /// House / hotel sales back to the bank for this game, or for one player when
+  /// showAllPlayers is false.
+  Future<List<DealRequest>> _fetchHouseSales() async {
+    try {
+      final builder = Supabase.instance.client
+          .from('deal_requests')
+          .select()
+          .eq('game_id', widget.gameId)
+          .inFilter('kind', <String>['sell_house', 'sell_hotel'])
+          .eq('status', 'approved');
+      final filtered = widget.showAllPlayers
+          ? builder
+          : builder.eq('from_id', widget.playerId);
+      final List<dynamic> rows = await filtered
+          .order('date', ascending: false)
+          .order('time', ascending: false)
+          .limit(200);
+      return rows
+          .cast<Map<String, dynamic>>()
+          .map(DealRequest.fromMap)
+          .toList();
+    } catch (error) {
+      debugPrint('Could not read house sales: $error');
+      return const <DealRequest>[];
+    }
+  }
+
+  /// Every trade this player sent or received, in any final state.
+  Future<List<DealRequest>> _fetchTrades() async {
+    try {
+      final List<dynamic> rows = await Supabase.instance.client
+          .from('deal_requests')
+          .select()
+          .eq('game_id', widget.gameId)
+          .eq('kind', 'trade')
+          .inFilter('status', <String>['approved', 'rejected', 'cancelled'])
+          .or('from_id.eq.${widget.playerId},to_id.eq.${widget.playerId}')
+          .order('date', ascending: false)
+          .order('time', ascending: false)
+          .limit(200);
+      return rows
+          .cast<Map<String, dynamic>>()
+          .map(DealRequest.fromMap)
+          .toList();
+    } catch (error) {
+      debugPrint('Could not read trades: $error');
+      return const <DealRequest>[];
     }
   }
 
@@ -290,7 +376,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 3,
+      length: 4,
       child: Scaffold(
       backgroundColor: Colors.yellow.shade50,
       appBar: AppBar(
@@ -324,6 +410,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
             Tab(text: 'Transactions'),
             Tab(text: 'Cards'),
             Tab(text: 'Houses'),
+            Tab(text: 'Trades'),
           ],
         ),
       ),
@@ -332,6 +419,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
           _buildTransactionsTab(),
           _buildCardsTab(),
           _buildHousesTab(),
+          _buildTradesTab(),
         ],
       ),
       ),
@@ -431,10 +519,11 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
     );
   }
 
-  /// The cards this player bought or sold, newest first.
+  /// Cards this player bought or sold, newest first, interleaved with the
+  /// mortgage / unmortgage events on them.
   Widget _buildCardsTab() {
-    return FutureBuilder<List<PlayerCard>>(
-      future: _cardsFuture,
+    return FutureBuilder<List<dynamic>>(
+      future: Future.wait<dynamic>([_cardsFuture, _mortgagesFuture]),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
@@ -453,8 +542,9 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
           );
         }
 
-        final cards = snapshot.data ?? const <PlayerCard>[];
-        if (cards.isEmpty) {
+        final cards = (snapshot.data![0] as List).cast<PlayerCard>();
+        final mortgages = (snapshot.data![1] as List).cast<DealRequest>();
+        if (cards.isEmpty && mortgages.isEmpty) {
           return const Center(child: Text("No cards yet."));
         }
 
@@ -462,12 +552,24 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
           future: _spacesFuture,
           builder: (context, spaceSnapshot) {
             final spaces = spaceSnapshot.data ?? const <int, BankpopSpace>{};
+            final entries = <MapEntry<String, Widget>>[];
+            for (final PlayerCard card in cards) {
+              entries.add(MapEntry(
+                '${card.date} ${card.time}',
+                _buildCardRow(card, spaces),
+              ));
+            }
+            for (final DealRequest m in mortgages) {
+              entries.add(MapEntry(
+                '${m.date} ${m.time}',
+                _buildMortgageRow(m, spaces),
+              ));
+            }
+            entries.sort((a, b) => b.key.compareTo(a.key));
             return ListView.builder(
               padding: const EdgeInsets.all(10),
-              itemCount: cards.length,
-              itemBuilder: (context, index) {
-                return _buildCardRow(cards[index], spaces);
-              },
+              itemCount: entries.length,
+              itemBuilder: (context, index) => entries[index].value,
             );
           },
         );
@@ -475,10 +577,10 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
     );
   }
 
-  /// Houses and hotels that have been bought in this game, newest first.
+  /// Houses and hotels bought and sold in this game, newest first.
   Widget _buildHousesTab() {
-    return FutureBuilder<List<CardRequest>>(
-      future: _buildingsFuture,
+    return FutureBuilder<List<dynamic>>(
+      future: Future.wait<dynamic>([_buildingsFuture, _houseSalesFuture]),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
@@ -497,8 +599,9 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
           );
         }
 
-        final requests = snapshot.data ?? const <CardRequest>[];
-        if (requests.isEmpty) {
+        final builds = (snapshot.data![0] as List).cast<CardRequest>();
+        final sales = (snapshot.data![1] as List).cast<DealRequest>();
+        if (builds.isEmpty && sales.isEmpty) {
           return const Center(child: Text('No houses or hotels yet.'));
         }
 
@@ -506,11 +609,24 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
           future: _spacesFuture,
           builder: (context, spaceSnapshot) {
             final spaces = spaceSnapshot.data ?? const <int, BankpopSpace>{};
+            final entries = <MapEntry<String, Widget>>[];
+            for (final CardRequest b in builds) {
+              entries.add(MapEntry(
+                '${b.date} ${b.time}',
+                _buildBuildingRow(b, spaces),
+              ));
+            }
+            for (final DealRequest s in sales) {
+              entries.add(MapEntry(
+                '${s.date} ${s.time}',
+                _buildHouseSaleRow(s, spaces),
+              ));
+            }
+            entries.sort((a, b) => b.key.compareTo(a.key));
             return ListView.builder(
               padding: const EdgeInsets.all(10),
-              itemCount: requests.length,
-              itemBuilder: (context, index) =>
-                  _buildBuildingRow(requests[index], spaces),
+              itemCount: entries.length,
+              itemBuilder: (context, index) => entries[index].value,
             );
           },
         );
@@ -600,6 +716,309 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
                 ],
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// A mortgage / unmortgage event in the Cards tab.
+  Widget _buildMortgageRow(DealRequest d, Map<int, BankpopSpace> spaces) {
+    final int cardIndex = d.cards.isNotEmpty ? d.cards.first : -1;
+    final BankpopSpace? space = spaces[cardIndex];
+    final String name = space?.name ?? 'Card #$cardIndex';
+    final Color groupColor = space == null
+        ? Colors.grey
+        : Color(BankpopBoard.colorForGroup(space.color));
+    final bool isMortgage = d.kind == DealKind.mortgage;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3.0),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border.all(color: Colors.white, width: 1),
+          borderRadius: const BorderRadius.all(Radius.circular(12)),
+        ),
+        child: Row(
+          children: <Widget>[
+            Container(
+              width: 8,
+              height: 38,
+              decoration: BoxDecoration(
+                color: groupColor,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 5,
+              child: Text(
+                name,
+                style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.w500),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Expanded(
+              flex: 4,
+              child: Row(
+                children: <Widget>[
+                  Icon(
+                    isMortgage ? Icons.lock : Icons.lock_open,
+                    size: 14,
+                    color: const Color(0xFF689F38),
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      isMortgage ? 'Mortgaged' : 'Unmortgaged',
+                      style: TextStyle(
+                          fontSize: 12.sp, color: Colors.grey[700]),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              flex: 3,
+              child: Text(
+                _relativeTime('${d.date} ${d.time}'),
+                textAlign: TextAlign.right,
+                style: TextStyle(fontSize: 12.sp, color: Colors.grey[600]),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// A house / hotel sold back to the bank in the Houses tab.
+  Widget _buildHouseSaleRow(DealRequest d, Map<int, BankpopSpace> spaces) {
+    final int cardIndex = d.cards.isNotEmpty ? d.cards.first : -1;
+    final BankpopSpace? space = spaces[cardIndex];
+    final String name = space?.name ?? 'Card #$cardIndex';
+    final Color groupColor = space == null
+        ? Colors.grey
+        : Color(BankpopBoard.colorForGroup(space.color));
+    final bool isHotel = d.kind == DealKind.sellHotel;
+    final double refund =
+        ((isHotel ? space?.hotelCost : space?.houseCost) ?? 0) / 2;
+    final String who = widget.showAllPlayers ? d.fromName : '';
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3.0),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border.all(color: Colors.white, width: 1),
+          borderRadius: const BorderRadius.all(Radius.circular(12)),
+        ),
+        child: Row(
+          children: <Widget>[
+            Container(
+              width: 8,
+              height: 38,
+              decoration: BoxDecoration(
+                color: groupColor,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 5,
+              child: Text(
+                name,
+                style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.w500),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Expanded(
+              flex: 4,
+              child: Row(
+                children: <Widget>[
+                  Icon(
+                    isHotel ? Icons.business : Icons.home,
+                    size: 15,
+                    color: Colors.orange.shade700,
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      isHotel ? 'Hotel sold' : 'House sold',
+                      style: TextStyle(
+                          fontSize: 12.sp, color: Colors.grey[700]),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              flex: 3,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: <Widget>[
+                  Text(
+                    '+\u00a3${refund.toStringAsFixed(0)}',
+                    style: TextStyle(
+                      fontSize: 12.sp,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.green.shade700,
+                    ),
+                  ),
+                  if (who.isNotEmpty)
+                    Text(
+                      who,
+                      style: TextStyle(
+                          fontSize: 11.sp, color: Colors.grey[600]),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Every trade this player was party to, in any final state.
+  Widget _buildTradesTab() {
+    return FutureBuilder<List<DealRequest>>(
+      future: _tradesFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: CircularProgressIndicator(color: Color(0xFF689F38)),
+          );
+        }
+        if (snapshot.hasError) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Text(
+                'Could not load trades: ${snapshot.error}',
+                textAlign: TextAlign.center,
+              ),
+            ),
+          );
+        }
+
+        final trades = snapshot.data ?? const <DealRequest>[];
+        if (trades.isEmpty) {
+          return const Center(child: Text('No trades yet.'));
+        }
+
+        return FutureBuilder<Map<int, BankpopSpace>>(
+          future: _spacesFuture,
+          builder: (context, spaceSnapshot) {
+            final spaces = spaceSnapshot.data ?? const <int, BankpopSpace>{};
+            return ListView.builder(
+              padding: const EdgeInsets.all(10),
+              itemCount: trades.length,
+              itemBuilder: (context, index) =>
+                  _buildTradeRow(trades[index], spaces),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildTradeRow(DealRequest trade, Map<int, BankpopSpace> spaces) {
+    final Color statusColor;
+    switch (trade.status) {
+      case 'approved':
+        statusColor = Colors.green.shade700;
+        break;
+      case 'rejected':
+        statusColor = Colors.red.shade700;
+        break;
+      case 'cancelled':
+        statusColor = Colors.grey.shade600;
+        break;
+      default:
+        statusColor = Colors.orange.shade700;
+    }
+    final List<String> givenBits = <String>[
+      if (trade.cards.isNotEmpty)
+        trade.cards
+            .map((int i) => spaces[i]?.name ?? 'Card #$i')
+            .join(', '),
+      if (trade.offerCash > 0)
+        '\u00a3${trade.offerCash.toStringAsFixed(0)}',
+    ];
+    final List<String> gotBits = <String>[
+      if (trade.wants.isNotEmpty)
+        trade.wants
+            .map((int i) => spaces[i]?.name ?? 'Card #$i')
+            .join(', '),
+      if (trade.wantsCash > 0)
+        '\u00a3${trade.wantsCash.toStringAsFixed(0)}',
+    ];
+    final String given = givenBits.isEmpty ? '' : givenBits.join(' + ');
+    final String got = gotBits.isEmpty ? '' : gotBits.join(' + ');
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3.0),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border.all(color: Colors.white, width: 1),
+          borderRadius: const BorderRadius.all(Radius.circular(12)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    '${_displayName(trade.fromName)} \u2192 ${_displayName(trade.toName)}',
+                    style: TextStyle(
+                        fontSize: 13.sp, fontWeight: FontWeight.w600),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    trade.status.toUpperCase(),
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                      color: statusColor,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            if (given.isNotEmpty)
+              Text(
+                'Gave: $given',
+                style: TextStyle(fontSize: 11, color: Colors.grey[700]),
+              ),
+            if (got.isNotEmpty)
+              Text(
+                'Got: $got',
+                style: TextStyle(fontSize: 11, color: Colors.grey[700]),
+              ),
+            if (trade.date.isNotEmpty)
+              Text(
+                _relativeTime('${trade.date} ${trade.time}'),
+                style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+              ),
           ],
         ),
       ),

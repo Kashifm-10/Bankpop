@@ -7,19 +7,7 @@ import 'package:mon/widgets/bankpop_tile.dart';
 import 'package:mon/widgets/card_owner_badge.dart';
 
 class BankpopBoardPopup extends StatefulWidget {
-  /// Cards game: tapping an unsold property closes the board and hands that
-  /// space back to the caller instead of opening its deed. A property that has
-  /// already been sold opens its deed with the owner on it, in either mode, so
-  /// there is nothing to sell.
-  ///
-  /// Read it with `showDialog<BankpopSpace>(...)`: the board pops with the
-  /// tapped space, so the caller decides what selling it means (a ScanPay QR, or
-  /// an InstantPay assignment) without this widget knowing about games.
   final bool isCardMode;
-
-  /// This game's id. It is only used to find out who owns which card: an owned
-  /// tile shows the owner's name, and tapping it shows their profile. Empty when
-  /// the board is opened outside a game, where no card can have been sold.
   final String gameId;
 
   const BankpopBoardPopup({
@@ -101,7 +89,7 @@ class _Board extends StatelessWidget {
 
   static const int _cornerFlex = 14;
   static const int _tileFlex = 10;
-  static const int _middleFlex = 90; 
+  static const int _middleFlex = 90;
 
   BankpopSpace? _spaceAt(int index) {
     for (final s in board.spaces) {
@@ -111,23 +99,15 @@ class _Board extends StatelessWidget {
   }
 
   @override
-  @override
   Widget build(BuildContext context) {
     final go = _spaceAt(0);
     final jail = _spaceAt(10);
     final freeParking = _spaceAt(20);
     final goToJail = _spaceAt(30);
 
-    // Bottom goes right to left (9 down to 1)
     final bottomTiles = [for (var i = 9; i >= 1; i--) _spaceAt(i)];
-    
-    // LEFT SIDE FIX: Goes top to bottom (19 down to 11)
     final leftTiles = [for (var i = 19; i >= 11; i--) _spaceAt(i)];
-    
-    // Top goes left to right (21 up to 29)
     final topTiles = [for (var i = 21; i <= 29; i++) _spaceAt(i)];
-    
-    // Right goes top to bottom (31 up to 39)
     final rightTiles = [for (var i = 31; i <= 39; i++) _spaceAt(i)];
 
     return Container(
@@ -135,15 +115,12 @@ class _Board extends StatelessWidget {
       height: size,
       decoration: BoxDecoration(
         color: const Color(0xFFF4E0BF),
-        // Removed the outer bottom and right borders
-        borderRadius: BorderRadius.circular(6), // Added rounded corners
+        borderRadius: BorderRadius.circular(6),
       ),
-      // ClipRRect ensures the square tiles don't bleed out of the rounded board
       child: ClipRRect(
         borderRadius: BorderRadius.circular(6),
         child: Column(
           children: [
-            // ── TOP ROW ──
             Expanded(
               flex: _cornerFlex,
               child: Row(
@@ -155,12 +132,10 @@ class _Board extends StatelessWidget {
                 ],
               ),
             ),
-            // ── MIDDLE ──
             Expanded(
               flex: _middleFlex,
               child: Row(
                 children: [
-                  // LEFT COLUMN
                   Expanded(
                     flex: _cornerFlex,
                     child: Column(
@@ -170,12 +145,10 @@ class _Board extends StatelessWidget {
                       ],
                     ),
                   ),
-                  // CENTER LOGO AREA
                   Expanded(
                     flex: _middleFlex,
                     child: _interior(),
                   ),
-                  // RIGHT COLUMN
                   Expanded(
                     flex: _cornerFlex,
                     child: Column(
@@ -188,7 +161,6 @@ class _Board extends StatelessWidget {
                 ],
               ),
             ),
-            // ── BOTTOM ROW ──
             Expanded(
               flex: _cornerFlex,
               child: Row(
@@ -207,8 +179,8 @@ class _Board extends StatelessWidget {
   }
 
   Widget _flexTile(
-    BuildContext context, 
-    BankpopSpace? space, 
+    BuildContext context,
+    BankpopSpace? space,
     {required BoardSide side, required int flex}
   ) {
     return Expanded(
@@ -226,6 +198,7 @@ class _Board extends StatelessWidget {
             ownerName: owners[space.index]?.name,
             houses: owners[space.index]?.houses ?? 0,
             hotels: owners[space.index]?.hotels ?? 0,
+            mortgaged: owners[space.index]?.mortgaged ?? false,
             onTap: () => _onTap(context, space),
           );
         },
@@ -246,10 +219,6 @@ class _Board extends StatelessWidget {
       showBankpopSpecialInfo(context, space.name);
       return;
     }
-    // A sold card belongs to someone. Its deed is the same deed as an unsold
-    // one, with the owner's face and name where the sell action would be - which
-    // in a cards game also keeps the banker from offering a property that has
-    // already gone.
     final CardOwner? owner = owners[space.index];
     if (owner != null) {
       showBankpopSpaceCard(
@@ -262,8 +231,6 @@ class _Board extends StatelessWidget {
       return;
     }
     if (isCardMode) {
-      // Hand the space back to the caller; it knows whether this device sells
-      // cards by QR or assigns them to a player.
       Navigator.of(context).pop(space);
       return;
     }
@@ -274,7 +241,6 @@ class _Board extends StatelessWidget {
     return Container(
       decoration: const BoxDecoration(
         color: Color(0xFFF4E0BF),
-        // The center board area draws its own Top and Left border to fit the grid
         border: Border(
           top: BorderSide(color: Colors.black, width: 1.0),
           left: BorderSide(color: Colors.black, width: 1.0),
@@ -282,7 +248,7 @@ class _Board extends StatelessWidget {
       ),
       child: Image.asset(
         'assets/images/play_icon.jpg',
-        fit: BoxFit.cover, 
+        fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) {
           return const SizedBox.shrink();
         },

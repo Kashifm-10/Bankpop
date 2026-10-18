@@ -18,6 +18,8 @@ class CardRequest {
     required this.playerName,
     required this.kind,
     required this.amount,
+    this.date = '',
+    this.time = '',
   });
 
   final int id;
@@ -30,6 +32,12 @@ class CardRequest {
   final String kind;
   final double amount;
 
+  /// When the request was written (`yyyy-MM-dd`).
+  final String date;
+
+  /// When the request was written (`HH:mm:ss`).
+  final String time;
+
   bool get isHotel => kind == 'hotel';
 
   factory CardRequest.fromMap(Map<String, dynamic> map) {
@@ -41,6 +49,8 @@ class CardRequest {
       playerName: map['player_name']?.toString() ?? 'Player',
       kind: map['kind']?.toString() ?? 'house',
       amount: (map['amount'] as num?)?.toDouble() ?? 0,
+      date: map['date']?.toString() ?? '',
+      time: map['time']?.toString() ?? '',
     );
   }
 }

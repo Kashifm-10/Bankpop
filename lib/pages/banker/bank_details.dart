@@ -73,8 +73,10 @@ class _BankValueScreenState extends State<BankValueScreen> {
     await prefs.setDouble('advance', advanceValue);
     String? playerID = prefs.getString('playerID');
 
-    // The cards switch travels with the bank row, so the players' devices know
-    // whether to offer "My Cards" / "Buy Card" at all.
+    // Everything a later screen (or a second banker device) needs to run
+    // this game lives on the bank row: the cards switch, the per-player
+    // stake, and the round advance. prefs keeps a local copy for speed, but
+    // the row is the source of truth.
     final Map<String, dynamic> bankRow = <String, dynamic>{
       'game_id': gameId,
       'role': role,
@@ -83,21 +85,41 @@ class _BankValueScreenState extends State<BankValueScreen> {
       'player_id': playerID,
       'SP/IP': _selectedOption,
       'play_with_cards': _playWithCards,
+      'player_value': playerValue,
+      'advance_value': advanceValue,
     };
     try {
       await Supabase.instance.client.from('players_test').insert(bankRow);
     } on PostgrestException catch (error) {
-      // The flag needs supabase/cards_mode.sql. A game without that column can
-      // still start; only the players lose the cards buttons.
-      if (!error.message.contains('play_with_cards')) rethrow;
-      bankRow.remove('play_with_cards');
+      // The three optional columns need their SQL files (cards_mode.sql
+      // and shared_game_state.sql). A project that has not run them can
+      // still start a game; the affected features fall back to local
+      // prefs instead of failing.
+      final String message = error.message;
+      bool removed = false;
+      if (message.contains('play_with_cards')) {
+        bankRow.remove('play_with_cards');
+        removed = true;
+      }
+      if (message.contains('player_value')) {
+        bankRow.remove('player_value');
+        removed = true;
+      }
+      if (message.contains('advance_value')) {
+        bankRow.remove('advance_value');
+        removed = true;
+      }
+      if (!removed) rethrow;
       await Supabase.instance.client.from('players_test').insert(bankRow);
     }
     await prefs.setString('name', 'banker');
     await prefs.setString('role', 'banker');
     await prefs.setString('display_name', 'Bank');
     await prefs.setString('gameID', gameId);
-    await prefs.setBool('playWithCards', _playWithCards);
+    // play_with_cards travels on the bank row (players_test), not in prefs:
+    // the switch is a property of the game, shared with every device.
+    // playerValue / advance stay in prefs as a local cache; the banker
+    // screens read them from the row whenever it can be read.
 
     // Proceed to next screen
     // ignore: use_build_context_synchronously

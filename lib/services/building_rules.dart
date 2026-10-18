@@ -50,6 +50,10 @@ class BuildingRules {
 
     /// Houses on each owned card, by board index.
     required Map<int, int> housesByCard,
+
+    /// Which of those cards are mortgaged: nothing can be built while the group
+    /// has a mortgage on it.
+    Map<int, bool> mortgagedByCard = const <int, bool>{},
   }) {
     final String? colour = space.color;
     if (colour == null || colour == 'Station' || colour == 'Utility') {
@@ -58,6 +62,17 @@ class BuildingRules {
     }
     if (hotels > 0) {
       return const BuildingDecision.blocked('This card already has a hotel');
+    }
+
+    // A mortgaged card anywhere in the set stops building on all of it.
+    final List<BankpopSpace> mortgaged = set
+        .where((BankpopSpace s) => mortgagedByCard[s.index] == true)
+        .toList();
+    if (mortgaged.isNotEmpty) {
+      return BuildingDecision.blocked(
+        'Unmortgage first: ${mortgaged.map((BankpopSpace s) => s.name).join(', ')} '
+        'is mortgaged.',
+      );
     }
 
     final List<BankpopSpace> missing =
@@ -97,6 +112,56 @@ class BuildingRules {
     final int price = space.houseCost ?? 0;
     if (price <= 0) {
       return const BuildingDecision.blocked('This property has no house price');
+    }
+    return BuildingDecision.build(BuildingKind.house, price);
+  }
+
+  /// What the bank will pay for taking one building off [space] back: half the
+  /// price it was bought for, and only when the set is sold evenly.
+  ///
+  /// Selling runs the same way building does, in reverse: a card may only lose
+  /// its next building while it is level with the rest of the set, so nobody can
+  /// strip one property and leave the others standing.
+  static BuildingDecision sell({
+    required BankpopSpace space,
+    required List<BankpopSpace> set,
+    required int houses,
+    required int hotels,
+    required Map<int, int> housesByCard,
+  }) {
+    final String? colour = space.color;
+    if (colour == null || colour == 'Station' || colour == 'Utility') {
+      return const BuildingDecision.blocked(
+          'Buildings only come off colour properties');
+    }
+    if (houses <= 0 && hotels <= 0) {
+      return const BuildingDecision.blocked('There is nothing to sell here');
+    }
+
+    // Selling a hotel first turns it back into the four houses it came from.
+    if (hotels > 0) {
+      final int price = (space.hotelCost ?? 0) ~/ 2;
+      if (price <= 0) {
+        return const BuildingDecision.blocked(
+            'This property has no hotel price to halve');
+      }
+      return BuildingDecision.build(BuildingKind.hotel, price);
+    }
+
+    int most = 0;
+    for (final BankpopSpace s in set) {
+      final int onCard = housesByCard[s.index] ?? 0;
+      if (onCard > most) most = onCard;
+    }
+    if (houses < most) {
+      return const BuildingDecision.blocked(
+          'Sell evenly: the rest of the set has to come down first');
+    }
+
+    final int price = (space.houseCost ?? 0) ~/ 2;
+    if (price <= 0) {
+      return const BuildingDecision.blocked(
+          'This property has no house price to halve');
     }
     return BuildingDecision.build(BuildingKind.house, price);
   }

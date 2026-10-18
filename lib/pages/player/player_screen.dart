@@ -10,6 +10,7 @@ import 'package:mon/models/bankpop_board.dart';
 import 'package:mon/pages/transactions/pay.dart';
 import 'package:mon/services/building_rules.dart';
 import 'package:mon/services/card_requests.dart';
+import 'package:mon/services/deals.dart';
 import 'package:mon/services/player_cards.dart';
 import 'package:mon/services/wallet_transfer.dart';
 import 'package:mon/pages/transactions/receive.dart';
@@ -18,6 +19,7 @@ import 'package:mon/widgets/app_message.dart';
 import 'package:mon/widgets/bankpop_board_popup.dart';
 import 'package:mon/widgets/card_owner_badge.dart';
 import 'package:mon/widgets/bankpop_space_card.dart';
+import 'package:mon/widgets/trade_builder_dialog.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -103,7 +105,14 @@ class _PlayersScreenState extends State<PlayersScreen> {
   /// flag existed, this stays false and the card buttons stay hidden.
   bool _playWithCards = false;
 
+  /// The round advance, read from the bank row. Local prefs is a fallback
+  /// while the row cannot carry it (project without
+  /// shared_game_state.sql).
+  double? _advanceValue;
+
   bool _isFetching = false; // One poll in flight at a time
+  bool _isProcessingDeal = false;
+  String? _bankerPlayerId;
   StreamSubscription<List<Map<String, dynamic>>>? _rosterUpdates;
 
   /// Digits of this device's id, padded so the wallet-card slices below can
@@ -187,6 +196,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
 
       _applyRosterRows(
           (response as List<dynamic>).cast<Map<String, dynamic>>());
+      unawaited(_checkDeals());
     } catch (e) {
       debugPrint('Error fetching players: $e');
     } finally {
@@ -218,16 +228,33 @@ class _PlayersScreenState extends State<PlayersScreen> {
       });
     }
 
-    // The banker's cards switch, as written on the bank row at game start.
+    // The banker's cards switch and advance, as written on the bank row at
+    // game start. Capture the bank's player_id at the same time: a trade that
+    // touches a mortgaged card owes the bank 10% interest, and only the id
+    // can route it.
     bool cardsMode = _playWithCards;
+    double? advance = _advanceValue;
     for (final Map<String, dynamic> row in rows) {
-      if (row['role'] == 'banker' && row.containsKey('play_with_cards')) {
-        cardsMode = row['play_with_cards'] == true;
+      if (row['role'] == 'banker') {
+        if (row.containsKey('play_with_cards')) {
+          cardsMode = row['play_with_cards'] == true;
+        }
+        if (row['advance_value'] is num) {
+          advance = (row['advance_value'] as num).toDouble();
+        }
+        final String? bankId = row['player_id']?.toString();
+        if (bankId != null && bankId.isNotEmpty) {
+          _bankerPlayerId = bankId;
+          Deals.rememberBankId(bankId);
+        }
         break;
       }
     }
-    if (cardsMode != _playWithCards) {
-      setState(() => _playWithCards = cardsMode);
+    if (cardsMode != _playWithCards || advance != _advanceValue) {
+      setState(() {
+        _playWithCards = cardsMode;
+        _advanceValue = advance;
+      });
     }
 
     _applyMyPlayer(roster);
@@ -291,6 +318,11 @@ class _PlayersScreenState extends State<PlayersScreen> {
       });
     }
 
+    // Keep the QR mirror (role / display_name) in step with the row, so a
+    // banker who renames a player does not leave this device sending a QR
+    // with the old name. One cheap read and only one write when it changed.
+    _syncQrMirror(name);
+
     // Show SnackBar only if there's a change
     if (previousWallet != null) {
       if (wallet > previousWallet!) {
@@ -303,16 +335,34 @@ class _PlayersScreenState extends State<PlayersScreen> {
     previousWallet = wallet.toDouble();
   }
 
+  /// Keeps `display_name` and `role` in prefs in step with the roster row.
+  /// receive.dart reads them to build a QR; without this a rename on the
+  /// bank's screen never reaches the player's QR.
+  Future<void> _syncQrMirror(String? liveName) async {
+    if (liveName == null || liveName.isEmpty) return;
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    if (prefs.getString('display_name') == liveName &&
+        prefs.getString('role') == 'player') {
+      return;
+    }
+    await prefs.setString('display_name', liveName);
+    await prefs.setString('role', 'player');
+  }
+
   Future<void> fetchCurrentPlayerName() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('gameID', widget.gameId);
 
-    // This device is playing as a player in this game. Store the role and the
-    // display name in prefs so the QR generator (receive.dart) can build the
-    // correct payload without a database round-trip.
+    // role / display_name are a local mirror of the roster row so
+    // receive.dart can build a QR without a database read. They are
+    // refreshed from the live roster in _applyMyPlayer below; this method
+    // only seeds them, so a device that has just opened the game has
+    // something to send before the first tick lands.
     final profileName = prefs.getString('profile_name');
     await prefs.setString('role', 'player');
-    await prefs.setString('display_name', profileName ?? 'Player');
+    if (!prefs.containsKey('display_name') || prefs.getString('display_name')!.isEmpty) {
+      await prefs.setString('display_name', profileName ?? 'Player');
+    }
 
     if (!mounted) return;
     setState(() {
@@ -361,6 +411,471 @@ class _PlayersScreenState extends State<PlayersScreen> {
     );
   }
 
+  /// A yes/no confirmation with the Bankpop style. Used before a deal is
+  /// committed so a single tap cannot mortgage a card by accident.
+  Future<bool> _confirm(String title, String message, String action) async {
+    final bool? result = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFFFFF8E1),
+        title: Text(title),
+        content: Text(message),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(action),
+          ),
+        ],
+      ),
+    );
+    return result == true;
+  }
+
+  /// Live trades addressed to this player. Polled on every reconciliation tick;
+  /// trades are between players, so mortgage requests never show up here.
+  Future<void> _checkDeals() async {
+    if (_isProcessingDeal) return;
+    final String? id = playerID;
+    if (id == null || id.isEmpty) return;
+    _isProcessingDeal = true;
+    try {
+      final List<DealRequest> deals = await Deals.pendingFor(widget.gameId, id);
+      if (deals.isEmpty || !mounted) return;
+
+      final Map<int, BankpopSpace> spaces = await PlayerCards.spaces();
+      if (!mounted) return;
+
+      for (final DealRequest deal in deals) {
+        if (!deal.isTrade) continue;
+        await _showTradeOffer(deal, spaces);
+        if (!mounted) return;
+        break; // one dialog per tick
+      }
+    } catch (error) {
+      debugPrint('Could not check deals: $error');
+    } finally {
+      _isProcessingDeal = false;
+    }
+  }
+
+  Future<void> _showTradeOffer(
+    DealRequest deal,
+    Map<int, BankpopSpace> spaces,
+  ) async {
+    String? autoClosed;
+    Timer? poll;
+    final String? result = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) {
+        poll = Timer.periodic(const Duration(seconds: 2), (Timer t) async {
+          final String? status = await Deals.statusOf(deal.id);
+          if (!dialogContext.mounted) { t.cancel(); return; }
+          if (status == null || status == 'pending') return;
+          t.cancel();
+          autoClosed = status;
+          Navigator.of(dialogContext).pop(null);
+        });
+        return AlertDialog(
+          backgroundColor: const Color(0xFFFFF8E1),
+          title: Text('Trade from ${deal.fromName}'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                if (deal.cards.isNotEmpty) ...<Widget>[
+                  const Text('They give:',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  for (final int i in deal.cards)
+                    Text('  - ${spaces[i]?.name ?? 'Card #$i'}'),
+                ],
+                if (deal.offerCash > 0)
+                  Text('  - \u00a3${deal.offerCash.toStringAsFixed(0)} cash'),
+                if (deal.wants.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 8),
+                  const Text('They want:',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  for (final int i in deal.wants)
+                    Text('  - ${spaces[i]?.name ?? 'Card #$i'}'),
+                ],
+                if (deal.wantsCash > 0)
+                  Text('  - \u00a3${deal.wantsCash.toStringAsFixed(0)} cash'),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () {
+                poll?.cancel();
+                Navigator.of(dialogContext).pop('reject');
+              },
+              child: const Text('Reject'),
+            ),
+            TextButton(
+              onPressed: () {
+                poll?.cancel();
+                Navigator.of(dialogContext).pop('counter');
+              },
+              child: const Text('Counter'),
+            ),
+            TextButton(
+              onPressed: () {
+                poll?.cancel();
+                Navigator.of(dialogContext).pop('accept');
+              },
+              child: const Text('Accept'),
+            ),
+          ],
+        );
+      },
+    );
+    poll?.cancel();
+    if (!mounted) return;
+    if (autoClosed != null) {
+      await showMessage(
+        context,
+        autoClosed == 'cancelled'
+            ? '${deal.fromName} cancelled this trade.'
+            : 'This trade was already settled.',
+        title: autoClosed == 'cancelled' ? 'Cancelled' : 'Already settled',
+      );
+      return;
+    }
+
+    if (result == 'accept') {
+      final DealOutcome outcome = await Deals.approve(deal);
+      if (!mounted) return;
+      showMessage(
+        context,
+        outcome.ok
+            ? 'Trade with ${deal.fromName} settled'
+            : 'Trade failed: ${outcome.error}',
+        title: outcome.ok ? 'Trade complete' : 'Not settled',
+      );
+      if (outcome.ok) _refreshRoster();
+    } else if (result == 'reject') {
+      await Deals.decline(deal.id);
+    } else if (result == 'counter') {
+      // Without this the original deal stays pending and re-prompts on the
+      // next reconciliation tick, sitting on top of the counter the player
+      // just sent.
+      await Deals.decline(deal.id);
+      if (!mounted) return;
+      await _openTradeBuilder(counterTo: deal);
+    }
+  }
+
+  Future<void> _openTradeBuilder({DealRequest? counterTo}) async {
+    final String id = playerID ?? '';
+    if (id.isEmpty) return;
+    final List<PlayerCard> myCards =
+        await PlayerCards.forPlayer(gameId: widget.gameId, playerId: id);
+    final Map<int, BankpopSpace> spaces = await PlayerCards.spaces();
+    final List<dynamic> roster = await Supabase.instance.client
+        .from('players_test')
+        .select('name, player_id')
+        .eq('game_id', widget.gameId)
+        .eq('role', 'player');
+    if (!mounted) return;
+
+    await showDialog<bool>(
+      context: context,
+      builder: (_) => TradeBuilderDialog(
+        gameId: widget.gameId,
+        myId: id,
+        myName: currentPlayerName ?? 'Player',
+        myCards: myCards,
+        spaces: spaces,
+        players: roster.cast<Map<String, dynamic>>(),
+        counterTo: counterTo,
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------
+  // Mortgage / unmortgage / sell-a-building
+  //
+  // Every one of these writes a DealRequest addressed to the bank, then waits
+  // for the banker's approve/decline. Nothing moves until the banker settles
+  // it; the rules live in services/deals.dart, not here.
+  // ---------------------------------------------------------------------
+
+  Future<void> _mortgageCard({
+    required BankpopSpace space,
+    required PlayerCard card,
+    required List<PlayerCard> myCards,
+    required VoidCallback onBuilt,
+  }) async {
+    final String? bankId = _bankerPlayerId;
+    if (bankId == null || bankId.isEmpty) {
+      if (!mounted) return;
+      await showMessage(context, 'Cannot find the bank in this game');
+      return;
+    }
+    final String id = playerID ?? '';
+    if (id.isEmpty) return;
+
+    final Map<int, BankpopSpace> spaces = await PlayerCards.spaces();
+    final bool builtInGroup = myCards.any((PlayerCard c) {
+      final BankpopSpace? s = spaces[c.cardIndex];
+      return s?.color == space.color && (c.houses > 0 || c.hotels > 0);
+    });
+    if (!mounted) return;
+    if (builtInGroup) {
+      await showMessage(
+        context,
+        'Sell the buildings in the ${space.color} group first',
+        title: 'Cannot mortgage yet',
+      );
+      return;
+    }
+
+    final int halfValue = (space.price ?? 0) ~/ 2;
+    final bool confirmed = await _confirm(
+      'Mortgage ${space.name}?',
+      'The bank will pay you \u00a3$halfValue and the card stops '
+          'collecting rent until you unmortgage it.',
+      'Mortgage',
+    );
+    if (!confirmed || !mounted) return;
+
+    final int? dealId = await Deals.ask(
+      gameId: widget.gameId,
+      kind: DealKind.mortgage,
+      fromId: id,
+      fromName: currentPlayerName ?? 'Player',
+      toId: bankId,
+      toName: 'Bank',
+      cards: <int>[card.cardIndex],
+    );
+    if (!mounted) return;
+    if (dealId == null) {
+      await showMessage(context, 'Could not ask to mortgage ${space.name}');
+      return;
+    }
+    final bool approved =
+        await _waitForDeal(dealId: dealId, what: 'mortgage');
+    if (approved && mounted) {
+      // Write to myCards, refresh the sheet, then close the deed one frame
+      // later. Without the deferred pop the sheet's rebuild could race the
+      // deed's dismissal and the mini card would stay stale.
+      final int idx =
+          myCards.indexWhere((PlayerCard c) => c.cardIndex == card.cardIndex);
+      if (idx != -1) {
+        myCards[idx] = myCards[idx].copyWith(mortgaged: true);
+      }
+      onBuilt();
+      _refreshRoster();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) Navigator.of(context).maybePop();
+      });
+    }
+  }
+
+  Future<void> _unmortgageCard({
+    required PlayerCard card,
+    required List<PlayerCard> myCards,
+    required VoidCallback onBuilt,
+  }) async {
+    final String? bankId = _bankerPlayerId;
+    if (bankId == null || bankId.isEmpty) return;
+    final String id = playerID ?? '';
+    if (id.isEmpty) return;
+
+    final Map<int, BankpopSpace> spaces = await PlayerCards.spaces();
+    final int unmortgageValue = card.unmortgageCost(spaces[card.cardIndex]);
+    final bool confirmed = await _confirm(
+      'Unmortgage ${spaces[card.cardIndex]?.name ?? "this card"}?',
+      'You will pay the bank \u00a3$unmortgageValue to clear the mortgage '
+          'and start collecting rent again.',
+      'Unmortgage',
+    );
+    if (!confirmed || !mounted) return;
+
+    final int? dealId = await Deals.ask(
+      gameId: widget.gameId,
+      kind: DealKind.unmortgage,
+      fromId: id,
+      fromName: currentPlayerName ?? 'Player',
+      toId: bankId,
+      toName: 'Bank',
+      cards: <int>[card.cardIndex],
+    );
+    if (!mounted || dealId == null) return;
+    final bool approved =
+        await _waitForDeal(dealId: dealId, what: 'unmortgage');
+    if (approved && mounted) {
+      final int idx =
+          myCards.indexWhere((PlayerCard c) => c.cardIndex == card.cardIndex);
+      if (idx != -1) {
+        myCards[idx] = myCards[idx].copyWith(mortgaged: false);
+      }
+      onBuilt();
+      _refreshRoster();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) Navigator.of(context).maybePop();
+      });
+    }
+  }
+
+  Future<void> _sellHouse({
+    required PlayerCard card,
+    required List<PlayerCard> myCards,
+    required VoidCallback onBuilt,
+  }) async {
+    final String? bankId = _bankerPlayerId;
+    if (bankId == null || bankId.isEmpty) return;
+    final String id = playerID ?? '';
+    if (id.isEmpty) return;
+
+    final Map<int, BankpopSpace> spaces = await PlayerCards.spaces();
+    final BankpopSpace? space = spaces[card.cardIndex];
+    final int refund = (space?.houseCost ?? 0) ~/ 2;
+    final bool confirmed = await _confirm(
+      'Sell a house on ${space?.name ?? "this card"}?',
+      'The bank will pay you \u00a3$refund and one house will be removed '
+          'from the card.',
+      'Sell house',
+    );
+    if (!confirmed || !mounted) return;
+
+    final int? dealId = await Deals.ask(
+      gameId: widget.gameId,
+      kind: DealKind.sellHouse,
+      fromId: id,
+      fromName: currentPlayerName ?? 'Player',
+      toId: bankId,
+      toName: 'Bank',
+      cards: <int>[card.cardIndex],
+    );
+    if (!mounted || dealId == null) return;
+    final bool approved =
+        await _waitForDeal(dealId: dealId, what: 'house sale');
+    if (approved && mounted) {
+      final int idx =
+          myCards.indexWhere((PlayerCard c) => c.cardIndex == card.cardIndex);
+      if (idx != -1) {
+        myCards[idx] = myCards[idx].copyWith(
+          houses: (myCards[idx].houses - 1).clamp(0, 4),
+        );
+      }
+      onBuilt();
+      _refreshRoster();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) Navigator.of(context).maybePop();
+      });
+    }
+  }
+
+  Future<void> _sellHotel({
+    required PlayerCard card,
+    required List<PlayerCard> myCards,
+    required VoidCallback onBuilt,
+  }) async {
+    final String? bankId = _bankerPlayerId;
+    if (bankId == null || bankId.isEmpty) return;
+    final String id = playerID ?? '';
+    if (id.isEmpty) return;
+
+    final Map<int, BankpopSpace> spaces = await PlayerCards.spaces();
+    final BankpopSpace? space = spaces[card.cardIndex];
+    final int refund = (space?.hotelCost ?? 0) ~/ 2;
+    final bool confirmed = await _confirm(
+      'Sell the hotel on ${space?.name ?? "this card"}?',
+      'The bank will pay you \u00a3$refund and the hotel will be removed '
+          'from the card.',
+      'Sell hotel',
+    );
+    if (!confirmed || !mounted) return;
+
+    final int? dealId = await Deals.ask(
+      gameId: widget.gameId,
+      kind: DealKind.sellHotel,
+      fromId: id,
+      fromName: currentPlayerName ?? 'Player',
+      toId: bankId,
+      toName: 'Bank',
+      cards: <int>[card.cardIndex],
+    );
+    if (!mounted || dealId == null) return;
+    final bool approved =
+        await _waitForDeal(dealId: dealId, what: 'hotel sale');
+    if (approved && mounted) {
+      final int idx =
+          myCards.indexWhere((PlayerCard c) => c.cardIndex == card.cardIndex);
+      if (idx != -1) {
+        myCards[idx] = myCards[idx].copyWith(hotels: 0);
+      }
+      onBuilt();
+      _refreshRoster();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) Navigator.of(context).maybePop();
+      });
+    }
+  }
+
+  /// Waits out a bank deal. Same shape as `_waitForApproval` for buildings, but
+  /// polls `Deals.statusOf` instead of `CardRequests.statusOf`.
+  Future<bool> _waitForDeal({
+    required int dealId,
+    required String what,
+  }) async {
+    if (!mounted) return false;
+    String? outcome;
+    Timer? poll;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) {
+        poll = Timer.periodic(const Duration(seconds: 2), (Timer _) async {
+          final String? status = await Deals.statusOf(dealId);
+          if (!dialogContext.mounted || status == null) return;
+          if (status == 'pending') return;
+          outcome = status;
+          Navigator.of(dialogContext).pop();
+        });
+        return AlertDialog(
+          backgroundColor: const Color(0xFFFFF8E1),
+          title: const Text('Waiting for the banker'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              const CircularProgressIndicator(color: Color(0xFF689F38)),
+              const SizedBox(height: 14),
+              Text('The banker is reviewing your $what.'),
+            ],
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () {
+                outcome = 'cancelled';
+                Deals.cancel(dealId);
+                Navigator.of(dialogContext).pop();
+              },
+              child: const Text('Cancel request'),
+            ),
+          ],
+        );
+      },
+    );
+    poll?.cancel();
+    if (!mounted) return false;
+    if (outcome == 'approved') return true;
+    if (outcome == 'rejected') {
+      await showMessage(
+        context,
+        'The banker turned down your $what.',
+        title: 'Not approved',
+      );
+    }
+    return false;
+  }
   /// The properties this player has bought, newest first.
   ///
   /// The table stores the board index, so the name and group colour are looked
@@ -592,7 +1107,26 @@ class _PlayersScreenState extends State<PlayersScreen> {
               const SizedBox(height: 6),
               Row(
                 children: [
-                  if (card.hasHotel)
+                  if (card.mortgaged)
+                    Container(
+                      width: 14,
+                      height: 14,
+                      margin: const EdgeInsets.only(right: 3),
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.red,
+                      ),
+                      alignment: Alignment.center,
+                      child: const Text(
+                        'M',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 8,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    )
+                  else if (card.hasHotel)
                     Container(
                       width: 7,
                       height: 7,
@@ -655,33 +1189,63 @@ class _PlayersScreenState extends State<PlayersScreen> {
     required List<PlayerCard> myCards,
     required VoidCallback onBuilt,
   }) async {
+    final int index =
+        myCards.indexWhere((PlayerCard c) => c.cardIndex == card.cardIndex);
+    final PlayerCard live = index == -1 ? card : myCards[index];
+
     await showBankpopSpaceCard(
       context,
       space,
-      actionWidget: CardOwnerBadge(
-        owner: CardOwner(
-          name: card.to,
-          playerId: playerID,
-          houses: card.houses,
-          hotels: card.hotels,
-        ),
+      actionWidget: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          CardOwnerBadge(
+            owner: CardOwner(
+              name: live.to,
+              playerId: playerID,
+              houses: live.houses,
+              hotels: live.hotels,
+              mortgaged: live.mortgaged,
+            ),
+          ),
+          const SizedBox(height: 6),
+          _CardManageBar(
+            card: live,
+            onMortgage: () => _mortgageCard(
+              space: space,
+              card: live,
+              myCards: myCards,
+              onBuilt: onBuilt,
+            ),
+            onUnmortgage: () => _unmortgageCard(
+              card: live,
+              myCards: myCards,
+              onBuilt: onBuilt,
+            ),
+            onSellHouse: () =>
+                _sellHouse(card: live, myCards: myCards, onBuilt: onBuilt),
+            onSellHotel: () =>
+                _sellHotel(card: live, myCards: myCards, onBuilt: onBuilt),
+          ),
+        ],
       ),
-      houses: card.houses,
-      hotels: card.hotels,
+      houses: live.houses,
+      hotels: live.hotels,
       onBuild: (int step) async {
-        final int index =
-            myCards.indexWhere((PlayerCard c) => c.cardIndex == card.cardIndex);
-        final PlayerCard live = index == -1 ? card : myCards[index];
+        final int idx = myCards
+            .indexWhere((PlayerCard c) => c.cardIndex == card.cardIndex);
+        final PlayerCard liveCard = idx == -1 ? card : myCards[idx];
         final bool approved = await _buyBuilding(
           space: space,
-          card: live,
+          card: liveCard,
           myCards: myCards,
           step: step,
         );
-        if (!approved || index == -1) return approved;
-        myCards[index] = live.copyWith(
-          houses: step >= 5 ? live.houses : live.houses + 1,
-          hotels: step >= 5 ? 1 : live.hotels,
+        if (!approved || idx == -1) return approved;
+        myCards[idx] = liveCard.copyWith(
+          houses: step >= 5 ? liveCard.houses : liveCard.houses + 1,
+          hotels: step >= 5 ? 1 : liveCard.hotels,
         );
         onBuilt();
         return true;
@@ -2447,11 +3011,13 @@ class _PlayersScreenState extends State<PlayersScreen> {
                 icon: const Icon(FontAwesomeIcons.clockRotateLeft)),
             const SizedBox(width: 5),
             // The board itself, to check who owns what. A tap only opens a deed.
-            IconButton(
-              onPressed: _showBoard,
-              icon: const Icon(Icons.grid_on),
-              tooltip: 'Board',
-            ),
+            // Only there is anything to look at in a cards game.
+            if (_playWithCards)
+              IconButton(
+                onPressed: _showBoard,
+                icon: const Icon(Icons.grid_on),
+                tooltip: 'Board',
+              ),
             const SizedBox(width: 5),
             IconButton(
                 onPressed: () async {
@@ -2691,6 +3257,25 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                   ),
                                 ),
                               ),
+                              if (_playWithCards)
+                                ElevatedButton.icon(
+                                  onPressed: () => _openTradeBuilder(),
+                                  icon: Icon(Icons.swap_horiz, size: 16.sp),
+                                  label: Text(
+                                    'Trade',
+                                    style: TextStyle(fontSize: 16.sp),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 5),
+                                    backgroundColor: const Color(0xFF7B1FA2),
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(10),
+                                    ),
+                                  ),
+                                ),
                               if (_playWithCards && payOption == 'ScanPay')
                                 ElevatedButton.icon(
                                   onPressed: () {
@@ -2768,6 +3353,65 @@ class _PlayersScreenState extends State<PlayersScreen> {
                   }
                 },
               ),
+      ),
+    );
+  }
+}
+
+
+/// The manage bar shown in a deed opened from the player's own hand: mortgage,
+/// unmortgage, sell a house, or sell a hotel, each subject to the bank's
+/// approval (see the rules in `services/deals.dart`).
+class _CardManageBar extends StatelessWidget {
+  const _CardManageBar({
+    required this.card,
+    required this.onMortgage,
+    required this.onUnmortgage,
+    required this.onSellHouse,
+    required this.onSellHotel,
+  });
+
+  final PlayerCard card;
+  final Future<void> Function() onMortgage;
+  final Future<void> Function() onUnmortgage;
+  final Future<void> Function() onSellHouse;
+  final Future<void> Function() onSellHotel;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool canMortgage =
+        !card.mortgaged && card.houses == 0 && card.hotels == 0;
+    return Wrap(
+      spacing: 6,
+      runSpacing: 4,
+      children: <Widget>[
+        if (canMortgage)
+          _chip('Mortgage', const Color(0xFF616161), onMortgage),
+        if (card.mortgaged)
+          _chip('Unmortgage', const Color(0xFF2E7D32), onUnmortgage),
+        if (card.houses > 0 && !card.hasHotel)
+          _chip('Sell house', const Color(0xFFE65100), onSellHouse),
+        if (card.hasHotel)
+          _chip('Sell hotel', const Color(0xFFB71C1C), onSellHotel),
+      ],
+    );
+  }
+
+  Widget _chip(String label, Color colour, Future<void> Function() onTap) {
+    return SizedBox(
+      height: 24,
+      child: ElevatedButton(
+        onPressed: onTap,
+        style: ElevatedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          backgroundColor: colour,
+          foregroundColor: Colors.white,
+          minimumSize: const Size(0, 24),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(6),
+          ),
+        ),
+        child: Text(label, style: const TextStyle(fontSize: 10)),
       ),
     );
   }

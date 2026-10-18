@@ -44,20 +44,6 @@ class _QRPayScannerState extends State<QRPayScanner> {
             controller: _controller,
             onDetect: _onDetect,
           ),
-          // The scan frame the old scanner drew. MobileScanner has no overlay
-          // API, so it is a plain red border over the same 250.w window.
-          Center(
-            child: IgnorePointer(
-              child: Container(
-                width: 250.w,
-                height: 250.w,
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.red, width: 10),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-            ),
-          ),
           if (widget.isCardMode)
             Positioned(
               left: 24,
