@@ -111,7 +111,7 @@
     },
     {
       "index": 12,
-      "name": "Power Plant",
+      "name": "Electric",
       "type": "Property",
       "price": 150,
       "rent": [4, 10],
@@ -147,7 +147,7 @@
     },
     {
       "index": 15,
-      "name": "Central Transit",
+      "name": "Central Transit Station",
       "type": "Property",
       "price": 200,
       "rent": [25, 50, 100, 200],

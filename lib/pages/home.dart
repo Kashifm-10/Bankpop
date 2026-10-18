@@ -10,6 +10,7 @@ import 'package:mon/pages/profile_edit.dart';
 import 'package:mon/pages/role.dart';
 import 'package:mon/profile.dart';
 import 'package:mon/widgets/bankpop_board_popup.dart';
+import 'package:mon/widgets/app_message.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -34,6 +35,11 @@ class _WelcomePageState extends State<WelcomePage> {
   String userName = "";
   File? _profileImage;
 
+  /// True when the game this device last joined is playing with cards. Read
+  /// from prefs (banker) or the bank row (players), so the board icon is only
+  /// offered in a game that actually uses cards.
+  bool _playWithCards = false;
+
   @override
   void initState() {
     super.initState();
@@ -44,6 +50,25 @@ class _WelcomePageState extends State<WelcomePage> {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     _profilePath = prefs.getString("profile_image") ?? '';
     userName = prefs.getString('profile_name') ?? "";
+    // Cards mode is a property of the current game, stored on its bank row.
+    // Read it from there every time so no local copy can disagree with the
+    // game that is actually in play.
+    final String? gameId = prefs.getString('gameID');
+    if (gameId != null && gameId.isNotEmpty) {
+      try {
+        final Map<String, dynamic>? bankRow = await supabase
+            .from('players_test')
+            .select('play_with_cards')
+            .eq('game_id', gameId)
+            .eq('role', 'banker')
+            .maybeSingle();
+        _playWithCards = bankRow?['play_with_cards'] == true;
+      } catch (error) {
+        // A project without cards_mode.sql throws here; the board icon then
+        // simply stays hidden, which matches the missing column's false.
+        debugPrint('Could not read cards mode: $error');
+      }
+    }
     if (_profilePath.isNotEmpty && userName.isNotEmpty) {
       await _loadPackageInfo();
       await _loadUser();
@@ -383,21 +408,26 @@ class _WelcomePageState extends State<WelcomePage> {
                         ),
                         Row(
                           children: [
-                            GestureDetector(
-                              onTap: () => showDialog(
-                                context: context,
-                                builder: (_) => const BankpopBoardPopup(),
+                            if (_playWithCards)
+                              GestureDetector(
+                                onTap: () async {
+                                  final SharedPreferences prefs =
+                                      await SharedPreferences.getInstance();
+                                  if (!context.mounted) return;
+                                  showDialog(
+                                    context: context,
+                                    builder: (_) => BankpopBoardPopup(
+                                      gameId: prefs.getString('gameID') ?? '',
+                                    ),
+                                  );
+                                },
+                                child: const Icon(Icons.grid_on),
                               ),
-                              child: const Icon(Icons.grid_on),
-                            ),
                             SizedBox(width: 15),
                             GestureDetector(
                               onTap: () {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                      content: Text(
-                                          'Only an idiot would press this.')),
-                                );
+                                showMessage(context,
+                                    'Only an idiot would press this.');
                               },
                               child: const Icon(
                                 CupertinoIcons.info_circle_fill,
