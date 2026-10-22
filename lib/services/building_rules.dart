@@ -99,7 +99,8 @@ class BuildingRules {
       }
       final int price = space.hotelCost ?? 0;
       if (price <= 0) {
-        return const BuildingDecision.blocked('This property has no hotel price');
+        return const BuildingDecision.blocked(
+            'This property has no hotel price');
       }
       return BuildingDecision.build(BuildingKind.hotel, price);
     }

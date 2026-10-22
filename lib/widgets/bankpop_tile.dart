@@ -188,16 +188,19 @@ class BankpopTile extends StatelessWidget {
     BoxBorder border;
     switch (side) {
       case BoardSide.bottom:
-        border = const Border(bottom: BorderSide(color: Colors.black, width: 1.0));
+        border =
+            const Border(bottom: BorderSide(color: Colors.black, width: 1.0));
         break;
       case BoardSide.top:
         border = const Border(top: BorderSide(color: Colors.black, width: 1.0));
         break;
       case BoardSide.left:
-        border = const Border(left: BorderSide(color: Colors.black, width: 1.0));
+        border =
+            const Border(left: BorderSide(color: Colors.black, width: 1.0));
         break;
       case BoardSide.right:
-        border = const Border(right: BorderSide(color: Colors.black, width: 1.0));
+        border =
+            const Border(right: BorderSide(color: Colors.black, width: 1.0));
         break;
       default:
         border = const Border();
@@ -284,7 +287,8 @@ class BankpopTile extends StatelessWidget {
         imagePath,
         fit: BoxFit.fill,
         errorBuilder: (context, error, stackTrace) {
-          final fallbackIcon = _getIconForSpace(space.name) ?? Icons.broken_image;
+          final fallbackIcon =
+              _getIconForSpace(space.name) ?? Icons.broken_image;
           return Center(
               child: Icon(fallbackIcon, size: size, color: Colors.black87));
         },
@@ -300,7 +304,8 @@ class BankpopTile extends StatelessWidget {
 
     return RotatedBox(
       quarterTurns: quarterTurns,
-      child: isFullFill ? SizedBox.expand(child: content) : Center(child: content),
+      child:
+          isFullFill ? SizedBox.expand(child: content) : Center(child: content),
     );
   }
 

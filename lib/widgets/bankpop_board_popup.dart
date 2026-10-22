@@ -10,10 +10,16 @@ class BankpopBoardPopup extends StatefulWidget {
   final bool isCardMode;
   final String gameId;
 
+  /// In cards mode a tap normally closes the board with the chosen space. When
+  /// this is set the board stays open and the callback runs instead, so the
+  /// caller can open the deed *on top of* the board rather than replacing it.
+  final void Function(BankpopSpace space)? onSpaceSelected;
+
   const BankpopBoardPopup({
     super.key,
     this.isCardMode = false,
     this.gameId = '',
+    this.onSpaceSelected,
   });
 
   @override
@@ -50,8 +56,7 @@ class _BankpopBoardPopupState extends State<BankpopBoardPopup> {
               return const Center(child: CircularProgressIndicator());
             }
             if (snap.hasError || !snap.hasData) {
-              return Center(
-                  child: Text('Could not load board: ${snap.error}'));
+              return Center(child: Text('Could not load board: ${snap.error}'));
             }
             return FutureBuilder<Map<int, CardOwner>>(
               future: _owners,
@@ -63,6 +68,7 @@ class _BankpopBoardPopupState extends State<BankpopBoardPopup> {
                   board: snap.data!,
                   size: size,
                   isCardMode: widget.isCardMode,
+                  onSpaceSelected: widget.onSpaceSelected,
                   owners: ownersSnap.data ?? const <int, CardOwner>{},
                 );
               },
@@ -79,12 +85,14 @@ class _Board extends StatelessWidget {
   final double size;
   final bool isCardMode;
   final Map<int, CardOwner> owners;
+  final void Function(BankpopSpace space)? onSpaceSelected;
 
   const _Board({
     required this.board,
     required this.size,
     required this.isCardMode,
     required this.owners,
+    this.onSpaceSelected,
   });
 
   static const int _cornerFlex = 14;
@@ -125,10 +133,12 @@ class _Board extends StatelessWidget {
               flex: _cornerFlex,
               child: Row(
                 children: [
-                  _flexTile(context, freeParking, side: BoardSide.corner, flex: _cornerFlex),
+                  _flexTile(context, freeParking,
+                      side: BoardSide.corner, flex: _cornerFlex),
                   for (final s in topTiles)
                     _flexTile(context, s, side: BoardSide.top, flex: _tileFlex),
-                  _flexTile(context, goToJail, side: BoardSide.corner, flex: _cornerFlex),
+                  _flexTile(context, goToJail,
+                      side: BoardSide.corner, flex: _cornerFlex),
                 ],
               ),
             ),
@@ -141,7 +151,8 @@ class _Board extends StatelessWidget {
                     child: Column(
                       children: [
                         for (final s in leftTiles)
-                          _flexTile(context, s, side: BoardSide.left, flex: _tileFlex),
+                          _flexTile(context, s,
+                              side: BoardSide.left, flex: _tileFlex),
                       ],
                     ),
                   ),
@@ -154,7 +165,8 @@ class _Board extends StatelessWidget {
                     child: Column(
                       children: [
                         for (final s in rightTiles)
-                          _flexTile(context, s, side: BoardSide.right, flex: _tileFlex),
+                          _flexTile(context, s,
+                              side: BoardSide.right, flex: _tileFlex),
                       ],
                     ),
                   ),
@@ -165,10 +177,13 @@ class _Board extends StatelessWidget {
               flex: _cornerFlex,
               child: Row(
                 children: [
-                  _flexTile(context, jail, side: BoardSide.corner, flex: _cornerFlex),
+                  _flexTile(context, jail,
+                      side: BoardSide.corner, flex: _cornerFlex),
                   for (final s in bottomTiles)
-                    _flexTile(context, s, side: BoardSide.bottom, flex: _tileFlex),
-                  _flexTile(context, go, side: BoardSide.corner, flex: _cornerFlex),
+                    _flexTile(context, s,
+                        side: BoardSide.bottom, flex: _tileFlex),
+                  _flexTile(context, go,
+                      side: BoardSide.corner, flex: _cornerFlex),
                 ],
               ),
             ),
@@ -178,17 +193,15 @@ class _Board extends StatelessWidget {
     );
   }
 
-  Widget _flexTile(
-    BuildContext context,
-    BankpopSpace? space,
-    {required BoardSide side, required int flex}
-  ) {
+  Widget _flexTile(BuildContext context, BankpopSpace? space,
+      {required BoardSide side, required int flex}) {
     return Expanded(
       flex: flex,
       child: LayoutBuilder(
         builder: (context, constraints) {
           if (space == null) {
-            return SizedBox(width: constraints.maxWidth, height: constraints.maxHeight);
+            return SizedBox(
+                width: constraints.maxWidth, height: constraints.maxHeight);
           }
           return BankpopTile(
             space: space,
@@ -231,6 +244,12 @@ class _Board extends StatelessWidget {
       return;
     }
     if (isCardMode) {
+      // The caller wants to keep the board visible under the deed it opens.
+      final void Function(BankpopSpace space)? onSelected = onSpaceSelected;
+      if (onSelected != null) {
+        onSelected(space);
+        return;
+      }
       Navigator.of(context).pop(space);
       return;
     }

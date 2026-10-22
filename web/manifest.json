@@ -3,10 +3,9 @@
      "short_name": "Bankpop",
      "start_url": ".",
      "display": "standalone",
-     "background_color": "#0175C2",
-     "theme_color": "#0175C2",
-     "description": "A new Flutter project.",
-     "orientation": "portrait-primary",
+     "background_color": "#DCEDC8",
+     "theme_color": "#689F38",
+     "description": "BankPop - the digital banker and money tracker for board game night.",
      "prefer_related_applications": false,
      "icons": [
           {

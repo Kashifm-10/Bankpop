@@ -1,14 +1,20 @@
-import 'dart:io';
-
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lottie/lottie.dart';
+import 'package:mon/pages/auth/auth_screen.dart';
+import 'package:mon/pages/game_history_screen.dart';
 import 'package:mon/pages/player/player_screen.dart';
+import 'package:mon/services/account.dart';
 import 'package:mon/pages/profile_edit.dart';
+import 'package:mon/services/game_session.dart';
+import 'package:mon/services/player_exit.dart';
+import 'package:mon/services/profile_avatar.dart';
 import 'package:mon/pages/role.dart';
 import 'package:mon/profile.dart';
+import 'package:mon/widgets/app_dialog.dart';
+import 'package:mon/widgets/how_to_play_dialog.dart';
 import 'package:mon/widgets/bankpop_board_popup.dart';
 import 'package:mon/widgets/app_message.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -31,14 +37,20 @@ class _WelcomePageState extends State<WelcomePage> {
   String packageName = '';
   String version = '';
   String buildNumber = '';
-  String _profilePath = '';
+
+  /// The bundled avatar this device picked, or the app icon. It is an asset
+  /// path rather than a file, so the same value renders on Android and web.
+  String _avatarAsset = ProfileAvatar.appIcon;
   String userName = "";
-  File? _profileImage;
 
   /// True when the game this device last joined is playing with cards. Read
   /// from prefs (banker) or the bank row (players), so the board icon is only
   /// offered in a game that actually uses cards.
   bool _playWithCards = false;
+
+  /// An account is optional: a guest gets the whole app, and this only decides
+  /// whether the greeting carries the "sign in to keep your games" banner.
+  bool _signedIn = false;
 
   @override
   void initState() {
@@ -48,28 +60,40 @@ class _WelcomePageState extends State<WelcomePage> {
 
   Future<void> check() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
-    _profilePath = prefs.getString("profile_image") ?? '';
+    final bool signedIn = await Account.isSignedIn();
+    if (mounted && signedIn != _signedIn) {
+      setState(() => _signedIn = signedIn);
+    }
+    _avatarAsset = ProfileAvatar.saved(prefs);
     userName = prefs.getString('profile_name') ?? "";
-    // Cards mode is a property of the current game, stored on its bank row.
-    // Read it from there every time so no local copy can disagree with the
-    // game that is actually in play.
+    // Cards mode is a property of the game, kept on its session row. The local
+    // copy is only a fallback while that row cannot be read (a project that
+    // has not run game_sessions.sql yet).
     final String? gameId = prefs.getString('gameID');
+    _playWithCards = prefs.getBool('playWithCards') ?? false;
     if (gameId != null && gameId.isNotEmpty) {
-      try {
-        final Map<String, dynamic>? bankRow = await supabase
-            .from('players_test')
-            .select('play_with_cards')
-            .eq('game_id', gameId)
-            .eq('role', 'banker')
-            .maybeSingle();
-        _playWithCards = bankRow?['play_with_cards'] == true;
-      } catch (error) {
-        // A project without cards_mode.sql throws here; the board icon then
-        // simply stays hidden, which matches the missing column's false.
-        debugPrint('Could not read cards mode: $error');
+      final GameSession? session = await GameSession.fetch(gameId);
+      if (session != null) {
+        _playWithCards = session.playWithCards;
+      } else {
+        // A game started before game_sessions.sql keeps the switch on its bank
+        // row; read it there so the board icon does not disappear.
+        try {
+          final Map<String, dynamic>? bankRow = await supabase
+              .from('players_test')
+              .select('play_with_cards')
+              .eq('game_id', gameId)
+              .eq('role', 'banker')
+              .maybeSingle();
+          if (bankRow?['play_with_cards'] is bool) {
+            _playWithCards = bankRow!['play_with_cards'] == true;
+          }
+        } catch (error) {
+          debugPrint('Could not read cards mode: $error');
+        }
       }
     }
-    if (_profilePath.isNotEmpty && userName.isNotEmpty) {
+    if (userName.isNotEmpty) {
       await _loadPackageInfo();
       await _loadUser();
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -111,8 +135,7 @@ class _WelcomePageState extends State<WelcomePage> {
   Future<void> _loadUser() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     setState(() {
-      _profilePath = prefs.getString("profile_image") ?? '';
-      _profileImage = File(_profilePath);
+      _avatarAsset = ProfileAvatar.saved(prefs);
       userName = prefs.getString('profile_name') ?? "Your Name";
     });
   }
@@ -123,19 +146,52 @@ class _WelcomePageState extends State<WelcomePage> {
     final String? playerID = prefs.getString('playerID');
     final String? gameID = prefs.getString('gameID');
 
+    // Nothing stored to continue: a fresh install mid-upgrade, or a pref that
+    // was cleared elsewhere. Say nothing and leave the home screen as it is.
+    if (playerID == null ||
+        playerID.isEmpty ||
+        gameID == null ||
+        gameID.isEmpty) {
+      if (mounted) Navigator.pop(context);
+      return;
+    }
+
     try {
+      // A finished game must not pull the player back into it on launch. The
+      // stored id is cleared so the home screen simply asks what to play next.
+      final GameSession? session = await GameSession.fetch(gameID);
+      if (session != null && session.isEnded) {
+        await prefs.remove('gameID');
+        if (mounted) Navigator.pop(context);
+        return;
+      }
       // One round trip instead of two sequential ones: read this device's rows
       // once and pick the role locally, with banker taking precedence.
       final response = await supabase
           .from('players_test')
           .select()
-          .eq('game_id', gameID!)
-          .eq('player_id', playerID!)
+          .eq('game_id', gameID)
+          .eq('player_id', playerID)
           .limit(10);
 
       final rows = response as List<dynamic>;
       final isBanker = rows.any((row) => row['role'] == 'banker');
       final isPlayer = rows.any((row) => row['role'] == 'player');
+
+      // A player the banker removed stays on the home screen: their seat is
+      // gone, and the REMOVED badge on the banker's list is all that is left of
+      // them in that game. The role check is deliberately not here: a project
+      // without player_status.sql marks a removal with role = 'kicked', and
+      // that row has to be recognised just the same.
+      final bool removed = rows.any((dynamic raw) {
+        final Map<String, dynamic> row = (raw as Map).cast<String, dynamic>();
+        return PlayerStanding.fromRow(row) == PlayerStanding.kicked;
+      });
+      if (removed) {
+        await prefs.remove('gameID');
+        if (mounted) Navigator.pop(context);
+        return;
+      }
 
       if (isBanker) {
         // ignore: use_build_context_synchronously
@@ -206,165 +262,6 @@ class _WelcomePageState extends State<WelcomePage> {
     );
   }
 
-  void showHowToPlayDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        Widget bullet(String text) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  "•  ",
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Color(0xFF827717),
-                  ),
-                ),
-                Expanded(
-                  child: Text(
-                    text,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: Color(0xFF827717),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        }
-
-        Widget roleContent({
-          required String role,
-          required List<String> scanPayPoints,
-          required List<String> instantPayPoints,
-        }) {
-          return SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  "ScanPay",
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                    color: Color(0xFFF57F17),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                ...scanPayPoints.map(bullet),
-                const SizedBox(height: 16),
-                const Text(
-                  "InstantPay",
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                    color: Color(0xFFF57F17),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                ...instantPayPoints.map(bullet),
-              ],
-            ),
-          );
-        }
-
-        return AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          backgroundColor: const Color(0xFFFFF9C4), // soft light green
-          title: const Text(
-            "How to Play",
-            style: TextStyle(
-              color: Color(0xFF33691E), // deep green for title
-              fontWeight: FontWeight.bold,
-              fontSize: 20,
-            ),
-          ),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: DefaultTabController(
-              length: 2,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const TabBar(
-                    labelColor: Color(0xFF33691E),
-                    unselectedLabelColor: Colors.grey,
-                    indicatorColor: Color(0xFF689F38),
-                    tabs: [
-                      Tab(text: "Player"),
-                      Tab(text: "Banker"),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    height: 280,
-                    child: TabBarView(
-                      children: [
-                        // Player tab
-                        roleContent(
-                          role: "Player",
-                          scanPayPoints: [
-                            "Join a game hosted by the banker.",
-                            "Manage your in-game balance digitally.",
-                            "Tap to pay rent, buy property, or collect income.",
-                            "Use the app instead of paper money or cards.",
-                            "Keep an eye on your balance and transactions.",
-                          ],
-                          instantPayPoints: [
-                            "Join a game instantly without scanning.",
-                            "Manage your in-game balance digitally.",
-                            "Tap to pay rent, buy property, or collect income.",
-                            "Use the app instead of paper money or cards.",
-                            "Monitor your balance at all times.",
-                          ],
-                        ),
-                        // Banker tab
-                        roleContent(
-                          role: "Banker",
-                          scanPayPoints: [
-                            "Start a new game and assign starting balances.",
-                            "Oversee all player transactions digitally.",
-                            "Adjust balances manually if needed.",
-                            "Ensure fair play and assist players.",
-                            "End the game when a winner is declared.",
-                          ],
-                          instantPayPoints: [
-                            "Quickly start a game without scanning.",
-                            "Oversee all player transactions digitally.",
-                            "Adjust balances manually if needed.",
-                            "Ensure fair play and assist players.",
-                            "End the game when a winner is declared.",
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          /*   actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text(
-              "Got it!",
-              style: TextStyle(
-                color: Color(0xFF689F38), // button green
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ], */
-        );
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -393,6 +290,10 @@ class _WelcomePageState extends State<WelcomePage> {
                 padding: EdgeInsets.symmetric(horizontal: 4.w, vertical: 0.h),
                 margin: EdgeInsets.symmetric(horizontal: 2.w, vertical: 2.h),
                 child: ListView(
+                  // The version label is pinned over the bottom of this list; the
+                  // padding stops the last card from sliding underneath it on a
+                  // short screen.
+                  padding: const EdgeInsets.only(bottom: 28),
                   children: [
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -426,8 +327,8 @@ class _WelcomePageState extends State<WelcomePage> {
                             SizedBox(width: 15),
                             GestureDetector(
                               onTap: () {
-                                showMessage(context,
-                                    'Only an idiot would press this.');
+                                showMessage(
+                                    context, 'Only an idiot would press this.');
                               },
                               child: const Icon(
                                 CupertinoIcons.info_circle_fill,
@@ -498,15 +399,12 @@ class _WelcomePageState extends State<WelcomePage> {
                                   child: CircleAvatar(
                                     radius: 26.sp,
                                     backgroundColor: Colors.white,
-                                    // Both sources are ~700-1200 px; the avatar
-                                    // is drawn at 52.sp, so decode it at 156px.
-                                    backgroundImage: _profileImage != null
-                                        ? ResizeImage(FileImage(_profileImage!),
-                                            width: 156)
-                                        : ResizeImage(
-                                            const AssetImage(
-                                                'assets/images/play_icon.jpg'),
-                                            width: 156),
+                                    // Both sources are ~700-1200 px; the
+                                    // avatar is drawn at 52.sp, so decode it
+                                    // at 156px.
+                                    backgroundImage: ProfileAvatar.provider(
+                                        _avatarAsset,
+                                        cacheWidth: 156),
                                   ),
                                 ),
                               ),
@@ -515,6 +413,11 @@ class _WelcomePageState extends State<WelcomePage> {
                         ),
                       ),
                     ),
+
+                    if (!_signedIn) ...<Widget>[
+                      const SizedBox(height: 10),
+                      _GuestBanner(onSignIn: _openAccount),
+                    ],
 
                     SizedBox(height: 6.h),
                     Text(
@@ -558,6 +461,21 @@ class _WelcomePageState extends State<WelcomePage> {
                         ),
                         const SizedBox(height: 20),
                         ButtonCard(
+                          title: "Your Games",
+                          gradientColors: const [
+                            Color.fromARGB(255, 214, 234, 248),
+                            Color.fromARGB(255, 197, 225, 245),
+                            Color.fromARGB(255, 144, 202, 249),
+                            Color.fromARGB(255, 100, 181, 246),
+                          ],
+                          textColor: const Color(0xFF0D47A1),
+                          lottieAssetPath: "assets/lottie/bank_role.json",
+                          overlayImageUrl:
+                              "https://i.pinimg.com/736x/b2/93/53/b293530e766938aeaad897363c9df0eb.jpg",
+                          onTap: () => _openGames(context),
+                        ),
+                        const SizedBox(height: 20),
+                        ButtonCard(
                           title: "How to use",
                           gradientColors: const [
                             Color.fromARGB(255, 243, 233, 141),
@@ -569,7 +487,7 @@ class _WelcomePageState extends State<WelcomePage> {
                           lottieAssetPath: "assets/lottie/help.json",
                           overlayImageUrl:
                               "https://i.pinimg.com/736x/b2/93/53/b293530e766938aeaad897363c9df0eb.jpg",
-                          onTap: () => showHowToPlayDialog(context),
+                          onTap: () => HowToPlayGuide.show(context),
                         ),
                         const SizedBox(height: 20),
                         ButtonCard(
@@ -596,7 +514,9 @@ class _WelcomePageState extends State<WelcomePage> {
                 right: 0,
                 bottom: 10,
                 child: Text(
-                  'Version $version.$buildNumber',
+                  buildNumber.isEmpty
+                      ? 'Version $version'
+                      : 'Version $version ($buildNumber)',
                   style: TextStyle(
                     fontSize: 12.sp,
                     color: const Color(0xFF558B2F), // medium green
@@ -612,6 +532,48 @@ class _WelcomePageState extends State<WelcomePage> {
     );
   }
 
+  /// Your Games belongs to the account: the list is read from the games this
+  /// player id has rows in, which a guest does not have anywhere but this
+  /// device. Asking for a sign-in is clearer than opening an empty list.
+  Future<void> _openGames(BuildContext context) async {
+    if (!await Account.isSignedIn()) {
+      if (!context.mounted) return;
+      final bool signIn = await showAppConfirm(
+        context,
+        title: 'Sign in to view your games',
+        icon: Icons.lock_outline,
+        confirmLabel: 'Sign in',
+        cancelLabel: 'Not now',
+        message:
+            'Your games are saved to your account, so they follow you to a '
+            'new phone or a reinstall. Sign in to see them - or keep playing '
+            'as a guest without an account.',
+      );
+      if (signIn && context.mounted) await _openAccount();
+      return;
+    }
+    if (!context.mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(builder: (_) => const GameHistoryScreen()),
+    );
+  }
+
+  /// The banner's "Sign in": the same screen the first run offers, and back to
+  /// the home screen afterwards so the name and avatar refresh.
+  Future<void> _openAccount() async {
+    final bool? signedIn = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute<bool>(
+        builder: (_) => const AuthScreen(returnOnSuccess: true),
+      ),
+    );
+    if (signedIn != true || !mounted) return;
+    await _loadUser();
+    final bool nowSignedIn = await Account.isSignedIn();
+    if (mounted) setState(() => _signedIn = nowSignedIn);
+  }
+
   void _startGame(BuildContext context) {
     // Push to the next page (GamePage)
     Navigator.push(
@@ -623,38 +585,100 @@ class _WelcomePageState extends State<WelcomePage> {
   }
 
   void _exitApp(BuildContext context) async {
-    bool? confirmExit = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          backgroundColor: Color(0xFFFFF8E1),
-          title: const Text('Exit the Game'),
-          content: const Text('Are you sure you want to exit?'),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop(false); // Cancel
-              },
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop(true); // Confirm
-              },
-              child: const Text('Exit'),
-            ),
-          ],
-        );
-      },
+    final bool confirmExit = await showAppConfirm(
+      context,
+      title: 'Exit the game?',
+      icon: Icons.power_settings_new,
+      destructive: true,
+      confirmLabel: 'Exit',
+      cancelLabel: 'Cancel',
+      message: 'Are you sure you want to exit? Any game you are in can be '
+          'reopened from Your Games.',
     );
 
-    if (confirmExit == true) {
-      if (Platform.isAndroid) {
-        SystemNavigator.pop(); // Closes the app
-      } else if (Platform.isIOS) {
-        exit(0); // Only way on iOS, but discouraged
-      }
+    if (!confirmExit) return;
+
+    if (kIsWeb) {
+      // A page cannot close a tab it did not open. Clearing the game and
+      // returning to the welcome screen is the closest equivalent, and it also
+      // leaves the browser in the state "Leave" is meant to produce.
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.remove('gameID');
+      if (!context.mounted) return;
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const WelcomePage()),
+        (Route<dynamic> route) => false,
+      );
+      return;
     }
+
+    // Android: the system back-to-home gesture. iOS does not allow an app to
+    // quit itself, so the same call is the platform's no-op there rather than
+    // the `exit(0)` this used to run (which Apple discourages).
+    await SystemNavigator.pop();
+  }
+}
+
+/// A quiet reminder, under the greeting, that a guest's games are local.
+class _GuestBanner extends StatelessWidget {
+  const _GuestBanner({required this.onSignIn});
+
+  final VoidCallback onSignIn;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      color: const Color(0xFFE8F5E9),
+      elevation: 0,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
+        child: Row(
+          children: <Widget>[
+            const Icon(Icons.person_outline,
+                color: Color(0xFF2E7D32), size: 22),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Playing as a guest',
+                    style: TextStyle(
+                      fontSize: 13.sp,
+                      fontWeight: FontWeight.w700,
+                      color: const Color(0xFF33691E),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Your games stay on this device. Sign in to keep them '
+                    'across devices and reinstalls.',
+                    style: TextStyle(
+                      fontSize: 11.sp,
+                      height: 1.25,
+                      color: const Color(0xFF558B2F),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            TextButton(
+              onPressed: onSignIn,
+              child: Text(
+                'Sign in',
+                style: TextStyle(
+                  fontSize: 13.sp,
+                  fontWeight: FontWeight.w600,
+                  color: const Color(0xFF2E7D32),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -680,28 +704,34 @@ class ButtonCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Card(
-        elevation: 3,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(15),
-        ),
-        color: Colors.transparent, // Keep transparent for gradient to show
-        child: Container(
-          width: 80.w,
-          height: 11.h,
-          decoration: BoxDecoration(
+    return Semantics(
+      // The whole card is the tap target, so it is the whole card that screen
+      // readers (and the web build's accessibility tree) should announce.
+      button: true,
+      label: title,
+      excludeSemantics: true,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Card(
+          elevation: 3,
+          shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(15),
-            gradient: LinearGradient(
-              colors: gradientColors,
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
           ),
-          child: Stack(
-            children: [
-              /*  if (overlayImageUrl != null)
+          color: Colors.transparent, // Keep transparent for gradient to show
+          child: Container(
+            width: 80.w,
+            height: 11.h,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(15),
+              gradient: LinearGradient(
+                colors: gradientColors,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+            child: Stack(
+              children: [
+                /*  if (overlayImageUrl != null)
                 Opacity(
                   opacity: 0.5,
                   child: ClipRRect(
@@ -716,36 +746,37 @@ class ButtonCard extends StatelessWidget {
                   ),
                 ),
          */
-              // 🔥 Foreground Lottie animation
-              if (lottieAssetPath != null)
-                Positioned(
-                  left: title != 'How to use' ? 0 : 10,
-                  bottom: 0,
-                  top: 0,
-                  child: SizedBox(
-                    height: title != 'How to use' ? 11.h : 8.h,
-                    width: title != 'How to use' ? 11.h : 8.h,
-                    child: Lottie.asset(lottieAssetPath!,
-                        fit: BoxFit.contain, repeat: true),
-                  ),
-                ),
-
-              Align(
-                alignment: Alignment.bottomRight,
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 10.0, right: 10),
-                  child: Text(
-                    title,
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 23.sp,
-                      fontWeight: FontWeight.bold,
+                // 🔥 Foreground Lottie animation
+                if (lottieAssetPath != null)
+                  Positioned(
+                    left: title != 'How to use' ? 0 : 10,
+                    bottom: 0,
+                    top: 0,
+                    child: SizedBox(
+                      height: title != 'How to use' ? 11.h : 8.h,
+                      width: title != 'How to use' ? 11.h : 8.h,
+                      child: Lottie.asset(lottieAssetPath!,
+                          fit: BoxFit.contain, repeat: true),
                     ),
-                    textAlign: TextAlign.right,
+                  ),
+
+                Align(
+                  alignment: Alignment.bottomRight,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 10.0, right: 10),
+                    child: Text(
+                      title,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 23.sp,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.right,
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

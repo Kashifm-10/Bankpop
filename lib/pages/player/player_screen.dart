@@ -3,22 +3,28 @@ import 'package:animated_flip_counter/animated_flip_counter.dart';
 import 'package:awesome_snackbar_content/awesome_snackbar_content.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:lottie/lottie.dart';
 import 'package:mon/models/bankpop_board.dart';
+import 'package:mon/pages/banker/banker_screen.dart';
 import 'package:mon/pages/transactions/pay.dart';
 import 'package:mon/services/building_rules.dart';
 import 'package:mon/services/card_requests.dart';
 import 'package:mon/services/deals.dart';
+import 'package:mon/services/game_session.dart';
 import 'package:mon/services/player_cards.dart';
+import 'package:mon/services/player_exit.dart';
 import 'package:mon/services/wallet_transfer.dart';
 import 'package:mon/pages/transactions/receive.dart';
 import 'package:mon/pages/transactions/transactions.dart';
+import 'package:mon/widgets/amount_keypad.dart';
+import 'package:mon/widgets/app_dialog.dart';
 import 'package:mon/widgets/app_message.dart';
 import 'package:mon/widgets/bankpop_board_popup.dart';
 import 'package:mon/widgets/card_owner_badge.dart';
 import 'package:mon/widgets/bankpop_space_card.dart';
+import 'package:mon/widgets/game_controls.dart';
+import 'package:mon/widgets/game_status_banner.dart';
 import 'package:mon/widgets/trade_builder_dialog.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -33,12 +39,17 @@ class Player {
   final Color color;
   final String avatar;
 
+  /// At the table, departed, or removed by the banker. The roster keeps a gone
+  /// player's row so the badge can sit beside their name.
+  final PlayerStanding standing;
+
   Player(
       {required this.playerID,
       required this.name,
       required this.value,
       required this.color,
-      required this.avatar});
+      required this.avatar,
+      this.standing = PlayerStanding.active});
 
   factory Player.fromMap(Map<String, dynamic> map) {
     return Player(
@@ -46,23 +57,22 @@ class Player {
         name: map['name'],
         value: double.tryParse(map['wallet'].toString()) ?? 0.0,
         color: Colors.primaries[map['name'].hashCode % Colors.primaries.length],
-        avatar: map['avatar'] ?? "assets/avatars/boy1.jpg");
+        avatar: map['avatar'] ?? "assets/avatars/boy1.jpg",
+        standing: PlayerStanding.fromRow(map));
   }
 
-  /// Value equality, so `listEquals` in the screens can tell "the roster did not
-  /// change" apart from "the wallet moved" and skip the rebuild. `color` is
-  /// derived from `name`, so it does not take part.
   @override
   bool operator ==(Object other) {
     return other is Player &&
         other.playerID == playerID &&
         other.name == name &&
         other.value == value &&
-        other.avatar == avatar;
+        other.avatar == avatar &&
+        other.standing == standing;
   }
 
   @override
-  int get hashCode => Object.hash(playerID, name, value, avatar);
+  int get hashCode => Object.hash(playerID, name, value, avatar, standing);
 }
 
 /// One colour group of this player's cards, in board order, as the My Cards
@@ -115,6 +125,37 @@ class _PlayersScreenState extends State<PlayersScreen> {
   String? _bankerPlayerId;
   StreamSubscription<List<Map<String, dynamic>>>? _rosterUpdates;
 
+  /// The game's row in `game_sessions`. It carries the rules (pay mode, cards,
+  /// advance) and the lifecycle - which is how this screen learns that the
+  /// banker paused or ended the game.
+  GameSession? _session;
+  StreamSubscription<GameSession>? _sessionUpdates;
+  bool _statusDialogOpen = false;
+
+  /// True once this device has been told it was removed, so the dialog and the
+  /// trip home happen exactly once even though the roster keeps arriving.
+  bool _standingHandled = false;
+
+  /// True once the bank has been handed to this device, so the offer to open
+  /// the banker table appears exactly once.
+  bool _bankOfferShown = false;
+
+  /// True when the banker paused the game, or ended it. The player can look at
+  /// the table and their holdings, but nothing here may move money or property.
+  bool get _viewOnly => _session?.blocksPlay ?? false;
+
+  /// Explains, once, why an action did nothing, and reports that it was
+  /// blocked. Every money-moving entry point starts with this.
+  bool _guardLifecycle() {
+    if (!_viewOnly) return false;
+    unawaited(showMessage(
+      context,
+      _session?.blockedReason ??
+          'The game is not running, so that cannot be done right now.',
+    ));
+    return true;
+  }
+
   /// Digits of this device's id, padded so the wallet-card slices below can
   /// never throw: the old code called `substring(0, 4)` directly, which blew up
   /// on any id with fewer than four digits and blanked the whole screen.
@@ -129,12 +170,6 @@ class _PlayersScreenState extends State<PlayersScreen> {
     return '${raw[0].toUpperCase()}${raw.substring(1)}';
   }
 
-  String get _cardNameLowered {
-    final String? raw = currentPlayerName;
-    if (raw == null || raw.isEmpty) return '';
-    return '${raw[0].toUpperCase()}${raw.substring(1).toLowerCase()}';
-  }
-
   @override
   void initState() {
     super.initState();
@@ -142,6 +177,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
     fetchCurrentPlayerName();
     _refreshRoster(); // Initial load
     _subscribeToRoster(); // Live updates
+    _subscribeToSession(); // Live suspend / resume / end
+    _loadSession(); // First read, before the socket connects
     startPolling(); // Reconciliation, in case Realtime is unavailable
     setAvatar();
   }
@@ -149,8 +186,172 @@ class _PlayersScreenState extends State<PlayersScreen> {
   @override
   void dispose() {
     _rosterUpdates?.cancel();
+    _sessionUpdates?.cancel();
     pollingTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _loadSession() async {
+    final GameSession? session = await GameSession.fetch(widget.gameId);
+    if (session != null) _applySession(session);
+  }
+
+  /// Leaves the game because the banker removed this player.
+  ///
+  /// The roster row stays (that is the badge); this device just has nothing
+  /// left to do here, so it says why and goes home rather than leaving a dead
+  /// screen that looks like a bug.
+  void _checkMyStanding(List<Map<String, dynamic>> rows) {
+    if (_standingHandled) return;
+    final String? me = playerID;
+    if (me == null || me.isEmpty) return;
+    for (final Map<String, dynamic> row in rows) {
+      if (row['player_id']?.toString() != me) continue;
+      if (PlayerStanding.fromRow(row) != PlayerStanding.kicked) continue;
+      _standingHandled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _leaveAsRemoved());
+      return;
+    }
+  }
+
+  Future<void> _leaveAsRemoved() async {
+    if (!mounted) return;
+    await showAppDialog<void>(
+      context,
+      title: 'Removed from the game',
+      icon: Icons.person_remove_alt_1,
+      accent: const Color(0xFFC62828),
+      barrierDismissible: false,
+      message: 'The banker removed you from this game. Your cash went to the '
+          'bank and your cards went back on the market, so this device no '
+          'longer has a seat at the table.',
+      actions: <Widget>[
+        AppDialogButton(
+          label: 'Back to home',
+          primary: true,
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ],
+    );
+    if (!mounted) return;
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.remove('gameID');
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute<void>(builder: (_) => const WelcomePage()),
+      (Route<dynamic> route) => false,
+    );
+  }
+
+  void _subscribeToSession() {
+    try {
+      _sessionUpdates = GameSession.stream(widget.gameId).listen(
+        _applySession,
+        onError: (Object error) =>
+            debugPrint('Session stream error, still polling: $error'),
+      );
+    } catch (e) {
+      debugPrint('Could not subscribe to the game session: $e');
+    }
+  }
+
+  void _applySession(GameSession session) {
+    if (!mounted || session.gameId != widget.gameId) return;
+    final bool rulesChanged = _playWithCards != session.playWithCards ||
+        _advanceValue != session.advanceValue ||
+        payOption != session.paymentOption;
+    final String? previousStatus = _session?.status;
+    final String previousBanker = _session?.bankerId ?? '';
+    setState(() {
+      _session = session;
+      _playWithCards = session.playWithCards;
+      _advanceValue = session.advanceValue;
+      payOption = session.paymentOption;
+    });
+    if (rulesChanged) setState(() {});
+
+    // Only a change that happens while the table is open is announced. A game
+    // that was already paused or ended when it was opened is explained by the
+    // banner and nothing else, so returning to look at an old table does not
+    // start with a dialog.
+    if (previousStatus != null && previousStatus != session.status) {
+      if (session.isSuspended) {
+        _showGameStatusDialog(suspended: true);
+      } else if (session.isEnded) {
+        _showGameStatusDialog(suspended: false);
+      } else if (_statusDialogOpen) {
+        // The banker resumed while the player was reading the pause dialog.
+        Navigator.of(context).maybePop();
+      }
+    }
+
+    // The bank has just been handed to this device: its seat now holds the bank
+    // row, so offer the banker's table instead of leaving it with a player's
+    // view of a game it runs.
+    final String? me = playerID;
+    if (me != null &&
+        me.isNotEmpty &&
+        previousBanker != me &&
+        session.bankerId == me) {
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _offerBankRole(session));
+    }
+  }
+
+  /// This device has become the banker by hand-over. Staying here is allowed -
+  /// it is still a seat at the table - but the controls it now has live on the
+  /// banker's screen.
+  Future<void> _offerBankRole(GameSession session) async {
+    if (_bankOfferShown || !mounted) return;
+    _bankOfferShown = true;
+
+    final bool open = await showAppConfirm(
+      context,
+      title: 'You are the banker',
+      icon: Icons.account_balance,
+      confirmLabel: 'Open banker table',
+      cancelLabel: 'Stay here',
+      message: 'The bank has been handed to you, so this device now pays, '
+          'advances, pauses and ends the game. The balance is unchanged.',
+    );
+    if (!open || !mounted) return;
+
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute<void>(
+        builder: (_) => BankerGameScreen(bankValue: 0, gameId: widget.gameId),
+      ),
+    );
+  }
+
+  /// The banker paused (or ended) the game. A paused game is resumable and
+  /// continues exactly where it stopped, so this is a message and a way out,
+  /// not an error - and it is not dismissible: the player either stays to look
+  /// at the board or goes back to the title screen.
+  Future<void> _showGameStatusDialog({required bool suspended}) async {
+    final GameSession? session = _session;
+    if (_statusDialogOpen || !mounted || session == null) return;
+    if (session.isSuspended != suspended) return;
+    _statusDialogOpen = true;
+    await showGameStatusDialog(
+      context,
+      session: session,
+      onReturnToTitle: _returnToTitle,
+    );
+    _statusDialogOpen = false;
+  }
+
+  /// Leaves the table for the title screen. The game itself is untouched: a
+  /// pause can still be resumed, and an ended game is still in Your Games to
+  /// look at.
+  Future<void> _returnToTitle() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.remove('gameID');
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => const WelcomePage()),
+      (Route<dynamic> route) => false,
+    );
   }
 
   /// Live roster for this game. Supabase Realtime pushes a change the moment a
@@ -196,6 +397,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
 
       _applyRosterRows(
           (response as List<dynamic>).cast<Map<String, dynamic>>());
+      unawaited(_loadSession());
       unawaited(_checkDeals());
     } catch (e) {
       debugPrint('Error fetching players: $e');
@@ -210,11 +412,24 @@ class _PlayersScreenState extends State<PlayersScreen> {
   void _applyRosterRows(List<Map<String, dynamic>> rows) {
     if (!mounted) return;
 
+    // A removed player keeps their row: the badge next to the name is how the
+    // table sees what happened. They sort to the bottom, under the live players.
     final List<Map<String, dynamic>> roster = rows
-        .where((Map<String, dynamic> row) => row['role'] == 'player')
+        .where((Map<String, dynamic> row) =>
+            row['role'] == 'player' ||
+            row['role'] == PlayerStanding.kicked.name)
         .toList()
-      ..sort((Map<String, dynamic> a, Map<String, dynamic> b) =>
-          ((b['wallet'] as num?) ?? 0).compareTo((a['wallet'] as num?) ?? 0));
+      ..sort((Map<String, dynamic> a, Map<String, dynamic> b) {
+        final bool aGone = PlayerStanding.fromRow(a).isGone;
+        final bool bGone = PlayerStanding.fromRow(b).isGone;
+        if (aGone != bGone) return aGone ? 1 : -1;
+        return ((b['wallet'] as num?) ?? 0)
+            .compareTo((a['wallet'] as num?) ?? 0);
+      });
+
+    // Before the list is drawn: if this device is the one that was removed, it
+    // has to leave rather than keep a seat it no longer has.
+    _checkMyStanding(rows);
 
     final List<Player> updatedPlayers =
         roster.map((Map<String, dynamic> row) => Player.fromMap(row)).toList();
@@ -228,32 +443,36 @@ class _PlayersScreenState extends State<PlayersScreen> {
       });
     }
 
-    // The banker's cards switch and advance, as written on the bank row at
-    // game start. Capture the bank's player_id at the same time: a trade that
-    // touches a mortgaged card owes the bank 10% interest, and only the id
-    // can route it.
-    bool cardsMode = _playWithCards;
-    double? advance = _advanceValue;
+    // The rules of the game come from `game_sessions` (see _applySession).
+    // The bank row is only needed here for the banker's id: a trade that
+    // touches a mortgaged card owes the bank 10% interest, and only the id can
+    // route it. On a project without the session table the bank row still
+    // carries the old copies of the rules, so they are read as a fallback.
+    bool legacyCards = _playWithCards;
+    double? legacyAdvance = _advanceValue;
     for (final Map<String, dynamic> row in rows) {
       if (row['role'] == 'banker') {
-        if (row.containsKey('play_with_cards')) {
-          cardsMode = row['play_with_cards'] == true;
-        }
-        if (row['advance_value'] is num) {
-          advance = (row['advance_value'] as num).toDouble();
-        }
         final String? bankId = row['player_id']?.toString();
         if (bankId != null && bankId.isNotEmpty) {
           _bankerPlayerId = bankId;
           Deals.rememberBankId(bankId);
         }
+        if (_session == null) {
+          if (row['play_with_cards'] is bool) {
+            legacyCards = row['play_with_cards'] == true;
+          }
+          if (row['advance_value'] is num) {
+            legacyAdvance = (row['advance_value'] as num).toDouble();
+          }
+        }
         break;
       }
     }
-    if (cardsMode != _playWithCards || advance != _advanceValue) {
+    if (_session == null &&
+        (legacyCards != _playWithCards || legacyAdvance != _advanceValue)) {
       setState(() {
-        _playWithCards = cardsMode;
-        _advanceValue = advance;
+        _playWithCards = legacyCards;
+        _advanceValue = legacyAdvance;
       });
     }
 
@@ -360,7 +579,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
     // something to send before the first tick lands.
     final profileName = prefs.getString('profile_name');
     await prefs.setString('role', 'player');
-    if (!prefs.containsKey('display_name') || prefs.getString('display_name')!.isEmpty) {
+    if (!prefs.containsKey('display_name') ||
+        prefs.getString('display_name')!.isEmpty) {
       await prefs.setString('display_name', profileName ?? 'Player');
     }
 
@@ -438,6 +658,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
   /// Live trades addressed to this player. Polled on every reconciliation tick;
   /// trades are between players, so mortgage requests never show up here.
   Future<void> _checkDeals() async {
+    if (_viewOnly) return;
     if (_isProcessingDeal) return;
     final String? id = playerID;
     if (id == null || id.isEmpty) return;
@@ -474,7 +695,10 @@ class _PlayersScreenState extends State<PlayersScreen> {
       builder: (BuildContext dialogContext) {
         poll = Timer.periodic(const Duration(seconds: 2), (Timer t) async {
           final String? status = await Deals.statusOf(deal.id);
-          if (!dialogContext.mounted) { t.cancel(); return; }
+          if (!dialogContext.mounted) {
+            t.cancel();
+            return;
+          }
           if (status == null || status == 'pending') return;
           t.cancel();
           autoClosed = status;
@@ -571,6 +795,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
   }
 
   Future<void> _openTradeBuilder({DealRequest? counterTo}) async {
+    if (_guardLifecycle()) return;
+
     final String id = playerID ?? '';
     if (id.isEmpty) return;
     final List<PlayerCard> myCards =
@@ -583,7 +809,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
         .eq('role', 'player');
     if (!mounted) return;
 
-    await showDialog<bool>(
+    final SentTradeOffer? sent = await showDialog<SentTradeOffer>(
       context: context,
       builder: (_) => TradeBuilderDialog(
         gameId: widget.gameId,
@@ -595,6 +821,29 @@ class _PlayersScreenState extends State<PlayersScreen> {
         counterTo: counterTo,
       ),
     );
+    if (sent == null || !mounted) return;
+
+    // The offer is out there now, so the sender waits on it - with a cancel
+    // button, because until the other side answers only the sender can pull it
+    // back. Cancelling flips the row to `cancelled`, and the other player's
+    // dialog closes itself on the next poll.
+    final bool accepted = await _waitForDeal(
+      dealId: sent.id,
+      what: 'trade',
+      title: 'Waiting for ${sent.toName}',
+      body: '${sent.toName} is reviewing your offer.\n'
+          'You can cancel it until they answer.',
+      declinedBy: sent.toName,
+    );
+    if (!mounted) return;
+    if (accepted) {
+      await showMessage(
+        context,
+        '${sent.toName} accepted the trade',
+        title: 'Trade complete',
+      );
+      if (mounted) _refreshRoster();
+    }
   }
 
   // ---------------------------------------------------------------------
@@ -611,6 +860,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
     required List<PlayerCard> myCards,
     required VoidCallback onBuilt,
   }) async {
+    if (_guardLifecycle()) return;
+
     final String? bankId = _bankerPlayerId;
     if (bankId == null || bankId.isEmpty) {
       if (!mounted) return;
@@ -658,8 +909,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
       await showMessage(context, 'Could not ask to mortgage ${space.name}');
       return;
     }
-    final bool approved =
-        await _waitForDeal(dealId: dealId, what: 'mortgage');
+    final bool approved = await _waitForDeal(dealId: dealId, what: 'mortgage');
     if (approved && mounted) {
       // Write to myCards, refresh the sheet, then close the deed one frame
       // later. Without the deferred pop the sheet's rebuild could race the
@@ -682,6 +932,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
     required List<PlayerCard> myCards,
     required VoidCallback onBuilt,
   }) async {
+    if (_guardLifecycle()) return;
+
     final String? bankId = _bankerPlayerId;
     if (bankId == null || bankId.isEmpty) return;
     final String id = playerID ?? '';
@@ -728,6 +980,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
     required List<PlayerCard> myCards,
     required VoidCallback onBuilt,
   }) async {
+    if (_guardLifecycle()) return;
+
     final String? bankId = _bankerPlayerId;
     if (bankId == null || bankId.isEmpty) return;
     final String id = playerID ?? '';
@@ -777,6 +1031,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
     required List<PlayerCard> myCards,
     required VoidCallback onBuilt,
   }) async {
+    if (_guardLifecycle()) return;
+
     final String? bankId = _bankerPlayerId;
     if (bankId == null || bankId.isEmpty) return;
     final String id = playerID ?? '';
@@ -824,6 +1080,9 @@ class _PlayersScreenState extends State<PlayersScreen> {
   Future<bool> _waitForDeal({
     required int dealId,
     required String what,
+    String title = 'Waiting for the banker',
+    String? body,
+    String declinedBy = 'The banker',
   }) async {
     if (!mounted) return false;
     String? outcome;
@@ -842,13 +1101,13 @@ class _PlayersScreenState extends State<PlayersScreen> {
         });
         return AlertDialog(
           backgroundColor: const Color(0xFFFFF8E1),
-          title: const Text('Waiting for the banker'),
+          title: Text(title),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
               const CircularProgressIndicator(color: Color(0xFF689F38)),
               const SizedBox(height: 14),
-              Text('The banker is reviewing your $what.'),
+              Text(body ?? 'The banker is reviewing your $what.'),
             ],
           ),
           actions: <Widget>[
@@ -870,12 +1129,13 @@ class _PlayersScreenState extends State<PlayersScreen> {
     if (outcome == 'rejected') {
       await showMessage(
         context,
-        'The banker turned down your $what.',
+        '$declinedBy turned down your $what.',
         title: 'Not approved',
       );
     }
     return false;
   }
+
   /// The properties this player has bought, newest first.
   ///
   /// The table stores the board index, so the name and group colour are looked
@@ -890,8 +1150,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
 
     final List<PlayerCard> cards;
     try {
-      cards =
-          await PlayerCards.forPlayer(gameId: widget.gameId, playerId: id);
+      cards = await PlayerCards.forPlayer(gameId: widget.gameId, playerId: id);
     } catch (error) {
       debugPrint('Could not load cards: $error');
       if (!mounted) return;
@@ -914,8 +1173,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
       ),
       builder: (BuildContext sheetContext) {
         return StatefulBuilder(
-          builder: (BuildContext context, void Function(void Function())
-              setSheetState) {
+          builder: (BuildContext context,
+              void Function(void Function()) setSheetState) {
             return DraggableScrollableSheet(
               expand: false,
               initialChildSize: 0.6,
@@ -1001,7 +1260,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
     List<PlayerCard> mine,
     Map<int, BankpopSpace> spaces,
   ) {
-    final Map<String?, List<PlayerCard>> byColour = <String?, List<PlayerCard>>{};
+    final Map<String?, List<PlayerCard>> byColour =
+        <String?, List<PlayerCard>>{};
     final Map<String?, int> order = <String?, int>{};
 
     // Board order, so the groups come out as they do on the board itself.
@@ -1209,47 +1469,50 @@ class _PlayersScreenState extends State<PlayersScreen> {
               mortgaged: live.mortgaged,
             ),
           ),
-          const SizedBox(height: 6),
-          _CardManageBar(
-            card: live,
-            onMortgage: () => _mortgageCard(
-              space: space,
+          if (!_viewOnly) const SizedBox(height: 6),
+          if (!_viewOnly)
+            _CardManageBar(
               card: live,
-              myCards: myCards,
-              onBuilt: onBuilt,
+              onMortgage: () => _mortgageCard(
+                space: space,
+                card: live,
+                myCards: myCards,
+                onBuilt: onBuilt,
+              ),
+              onUnmortgage: () => _unmortgageCard(
+                card: live,
+                myCards: myCards,
+                onBuilt: onBuilt,
+              ),
+              onSellHouse: () =>
+                  _sellHouse(card: live, myCards: myCards, onBuilt: onBuilt),
+              onSellHotel: () =>
+                  _sellHotel(card: live, myCards: myCards, onBuilt: onBuilt),
             ),
-            onUnmortgage: () => _unmortgageCard(
-              card: live,
-              myCards: myCards,
-              onBuilt: onBuilt,
-            ),
-            onSellHouse: () =>
-                _sellHouse(card: live, myCards: myCards, onBuilt: onBuilt),
-            onSellHotel: () =>
-                _sellHotel(card: live, myCards: myCards, onBuilt: onBuilt),
-          ),
         ],
       ),
       houses: live.houses,
       hotels: live.hotels,
-      onBuild: (int step) async {
-        final int idx = myCards
-            .indexWhere((PlayerCard c) => c.cardIndex == card.cardIndex);
-        final PlayerCard liveCard = idx == -1 ? card : myCards[idx];
-        final bool approved = await _buyBuilding(
-          space: space,
-          card: liveCard,
-          myCards: myCards,
-          step: step,
-        );
-        if (!approved || idx == -1) return approved;
-        myCards[idx] = liveCard.copyWith(
-          houses: step >= 5 ? liveCard.houses : liveCard.houses + 1,
-          hotels: step >= 5 ? 1 : liveCard.hotels,
-        );
-        onBuilt();
-        return true;
-      },
+      onBuild: _viewOnly
+          ? null
+          : (int step) async {
+              final int idx = myCards
+                  .indexWhere((PlayerCard c) => c.cardIndex == card.cardIndex);
+              final PlayerCard liveCard = idx == -1 ? card : myCards[idx];
+              final bool approved = await _buyBuilding(
+                space: space,
+                card: liveCard,
+                myCards: myCards,
+                step: step,
+              );
+              if (!approved || idx == -1) return approved;
+              myCards[idx] = liveCard.copyWith(
+                houses: step >= 5 ? liveCard.houses : liveCard.houses + 1,
+                hotels: step >= 5 ? 1 : liveCard.hotels,
+              );
+              onBuilt();
+              return true;
+            },
     );
   }
 
@@ -1263,6 +1526,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
     required List<PlayerCard> myCards,
     required int step,
   }) async {
+    if (_guardLifecycle()) return false;
+
     final Map<int, BankpopSpace> spaces = await PlayerCards.spaces();
     final List<BankpopSpace> set = spaces.values
         .where((BankpopSpace s) => s.color == space.color)
@@ -1454,670 +1719,78 @@ class _PlayersScreenState extends State<PlayersScreen> {
     }
   }
 
-  Future<void> payPlayer(Player player) async {
-    bool isProcessing = false;
-    final TextEditingController amountController = TextEditingController();
-    isProcessing = false;
-    double? enteredAmount;
-    String statusLabel = "Enter Amount"; // dynamic label
-    enteredAmount = await showDialog<double>(
-      barrierDismissible: false,
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return Stack(
-              children: [
-                Positioned(
-                  bottom: 27.h,
-                  right: 0,
-                  left: 0,
-                  child: Transform.rotate(
-                    angle: 1.5708, // 90 degrees in radians
-                    child: Card(
-                      margin: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 10),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20)),
-                      color: Colors.blueGrey.shade500,
-                      elevation: 2,
-                      child: Stack(
-                        children: [
-                          Positioned(
-                            bottom: 0,
-                            right: 10,
-                            child: Image.asset(
-                              'assets/images/c_logo.png',
-                              fit: BoxFit.contain,
-                              // Decoded at 160px wide. The source is 2456x1612,
-                              // so drawing it at 23.sp used to hold 15 MB of
-                              // bitmap and pay the full decode for a logo this
-                              // size. 160 leaves room for wide phones.
-                              cacheWidth: 160,
-
-                              width: 23
-                                  .sp, // Use MediaQuery or a fixed size if sp is undefined
-                              height: 23.sp,
-                              colorBlendMode: BlendMode
-                                  .srcIn, // Ensures image is tinted red
-                            ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                // Row for Cardholder's Name and Card Number
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        // Cardholder's name
-                                        Row(
-                                          children: [
-                                            Text(
-                                              _cardNameLowered,
-                                              style: TextStyle(
-                                                fontSize: 18.sp,
-                                                fontWeight: FontWeight.bold,
-                                                color: Colors.white,
-                                              ),
-                                            )
-                                          ],
-                                        ),
-                                        const SizedBox(height: 5),
-                                        // Dummy credit card number
-                                        Text(
-                                          '**** **** **** ${_cardDigits.substring(0, 4)}', // First 4 digits of this device's id
-                                          style: TextStyle(
-                                            fontSize: 22.sp,
-                                            fontWeight: FontWeight.w600,
-                                            color: Colors.blueGrey.shade100,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    Lottie.asset(
-                                      positionStatus == "first"
-                                          ? 'assets/lottie/first.json'
-                                          : positionStatus == "second"
-                                              ? 'assets/lottie/second.json'
-                                              : positionStatus == "almostlast"
-                                                  ? 'assets/lottie/almost_last.json'
-                                                  : positionStatus == "last"
-                                                      ? 'assets/lottie/last.json'
-                                                      : 'assets/lottie/neutral.json',
-                                      height: 10.h,
-                                    ),
-                                  ],
-                                ),
-
-                                const SizedBox(height: 15),
-
-                                // Row for Expiration Date and CVV
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    AnimatedFlipCounter(
-                                      value: value,
-                                      fractionDigits: 2,
-                                      textStyle: TextStyle(
-                                        fontSize: 28.sp,
-                                        fontWeight: FontWeight.bold,
-                                        color:
-                                            Colors.white.withValues(alpha: 0.9),
-                                      ),
-                                      duration:
-                                          const Duration(milliseconds: 500),
-                                    ),
-                                    Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 10.0),
-                                      child: Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.start,
-                                        children: [
-                                          Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                'EXPIRY',
-                                                style: TextStyle(
-                                                  fontSize: 12.sp,
-                                                  color: Colors.white
-                                                      .withValues(alpha: 0.7),
-                                                ),
-                                              ),
-                                              const SizedBox(height: 5),
-                                              Text(
-                                                DateFormat('MM/yy')
-                                                    .format(DateTime.now()),
-                                                style: TextStyle(
-                                                  fontSize: 16.sp,
-                                                  fontWeight: FontWeight.bold,
-                                                  color:
-                                                      Colors.blueGrey.shade100,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          const SizedBox(width: 20),
-                                          Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                'CVV',
-                                                style: TextStyle(
-                                                  fontSize: 12.sp,
-                                                  color: Colors.white
-                                                      .withValues(alpha: 0.7),
-                                                ),
-                                              ),
-                                              const SizedBox(height: 5),
-                                              Text(
-                                                '***', // Dummy CVV
-                                                style: TextStyle(
-                                                  fontSize: 16.sp,
-                                                  fontWeight: FontWeight.bold,
-                                                  color:
-                                                      Colors.blueGrey.shade100,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-
-                                const SizedBox(height: 10),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                AlertDialog(
-                  backgroundColor: Colors.grey.shade500,
-                  content: SizedBox(
-                    width: 50.w, // adjust as needed
-                    //  height: 30.h, // adjust as needed
-
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Column(
-                          children: [
-                            const SizedBox(height: 10),
-                            Container(
-                              margin: const EdgeInsets.symmetric(
-                                  vertical: 0, horizontal: 10),
-                              padding: const EdgeInsets.symmetric(
-                                  vertical: 10, horizontal: 10),
-                              width: double.infinity,
-                              // height: 7.h,
-                              decoration: BoxDecoration(
-                                color: Colors.green.shade400,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  /*  Align(alignment: Alignment.topLeft,
-                                    child: Text(
-                                      "Paying to ${player.name}",
-                                      style: const TextStyle(color: Colors.black),
-                                    ),
-                                  ), */
-                                  Text(
-                                    statusLabel,
-                                    style: TextStyle(
-                                        color: Colors.black, fontSize: 16.sp),
-                                  ),
-                                  const SizedBox(height: 5),
-                                  Text(
-                                    amountController.text.isEmpty
-                                        ? '0'
-                                        : amountController.text,
-                                    style: TextStyle(
-                                        color: Colors.black, fontSize: 16.sp),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 20),
-
-                            // Row 1
-                            GridView.count(
-                              childAspectRatio: 2,
-                              shrinkWrap: true,
-                              crossAxisCount: 3,
-                              crossAxisSpacing: 10,
-                              mainAxisSpacing: 10,
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 10),
-                              children: [
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.text += '1';
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Text(
-                                    '1',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.text += '2';
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Text(
-                                    '2',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.text += '3';
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Text(
-                                    '3',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.text += '4';
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Text(
-                                    '4',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.text += '5';
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Text(
-                                    '5',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.text += '6';
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Text(
-                                    '6',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.text += '7';
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Text(
-                                    '7',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.text += '8';
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Text(
-                                    '8',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.text += '9';
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Text(
-                                    '9',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing ||
-                                          amountController.text.contains('.')
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.text += '.';
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Text(
-                                    '.',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.text += '0';
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Text(
-                                    '0',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            if (amountController
-                                                .text.isNotEmpty) {
-                                              amountController.text =
-                                                  amountController.text
-                                                      .substring(
-                                                          0,
-                                                          amountController
-                                                                  .text.length -
-                                                              1);
-                                            }
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Icon(Icons.backspace,
-                                      color: Colors.grey),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          Navigator.of(context).pop();
-                                        },
-                                  style: ElevatedButton.styleFrom(
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      backgroundColor: Colors.red,
-                                      foregroundColor: Colors.white),
-                                  child: const Text('X'),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.clear();
-                                          });
-                                        },
-                                  style: ElevatedButton.styleFrom(
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      backgroundColor: Colors.yellow,
-                                      foregroundColor: Colors.black),
-                                  child: const Text('C'),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () async {
-                                          final value = double.tryParse(
-                                              amountController.text);
-                                          if (value != null && value > 0) {
-                                            setState(() {
-                                              isProcessing = true;
-                                              statusLabel =
-                                                  "Processing payment...";
-                                            });
-
-                                            // Simulate the processing delay
-                                            await Future.delayed(
-                                                const Duration(seconds: 2));
-
-                                            // Perform the actual payment logic
-                                            final prefs =
-                                                await SharedPreferences
-                                                    .getInstance();
-                                            final payerPlayerID =
-                                                prefs.getString('playerID') ??
-                                                    'UnknownPlayer';
-                                            enteredAmount =
-                                                value; // Set enteredAmount here
-
-                                            // Fetch player and banker wallet data from Supabase
-                                            final payerResponse = await Supabase
-                                                .instance.client
-                                                .from('players_test')
-                                                .select('wallet')
-                                                .eq('game_id', widget.gameId)
-                                                .eq('player_id', payerPlayerID)
-                                                .maybeSingle();
-
-                                            final receiverResponse =
-                                                await Supabase.instance.client
-                                                    .from('players_test')
-                                                    .select('wallet')
-                                                    .eq('game_id',
-                                                        widget.gameId)
-                                                    .eq('player_id',
-                                                        player.playerID)
-                                                    .maybeSingle();
-
-                                            if (payerResponse != null &&
-                                                receiverResponse != null &&
-                                                payerResponse['wallet'] !=
-                                                    null &&
-                                                receiverResponse['wallet'] !=
-                                                    null) {
-                                              double payerWallet =
-                                                  (payerResponse['wallet']
-                                                          as num)
-                                                      .toDouble();
-                                              if (payerWallet >=
-                                                  enteredAmount!) {
-                                                // One atomic call: the database
-                                                // locks both rows, re-checks the
-                                                // funds and writes both wallets,
-                                                // so a payment landing at the same
-                                                // moment can no longer lose this
-                                                // one.
-                                                final TransferOutcome transfer =
-                                                    await WalletTransfer.pay(
-                                                  gameId: widget.gameId,
-                                                  fromId: payerPlayerID,
-                                                  fromRole:
-                                                      WalletTransfer.playerRole,
-                                                  toId: player.playerID,
-                                                  toRole:
-                                                      WalletTransfer.playerRole,
-                                                  amount: enteredAmount!,
-                                                );
-
-                                                if (!transfer.ok) {
-                                                  setState(() {
-                                                    statusLabel =
-                                                        "Insufficient balance X";
-                                                    isProcessing =
-                                                        false; // Allow retry
-                                                  });
-                                                  return;
-                                                }
-                                                await Supabase.instance.client
-                                                    .from('transactions')
-                                                    .insert({
-                                                  'game_id': widget.gameId,
-                                                  'value': enteredAmount!,
-                                                  'from': currentPlayerName,
-                                                  'to': player.name,
-                                                  'code':
-                                                      "${payerPlayerID}_${player.playerID}",
-                                                  'date': DateFormat(
-                                                          'yyyy-MM-dd')
-                                                      .format(DateTime.now()),
-                                                  'time': DateFormat('HH:mm:ss')
-                                                      .format(DateTime.now()),
-                                                });
-                                                // Show success message
-                                                setState(() {
-                                                  statusLabel =
-                                                      "Payment Successful ✓";
-                                                });
-
-                                                // Close the dialog after a delay
-                                                await Future.delayed(
-                                                    const Duration(seconds: 2));
-                                                Navigator.of(context).pop();
-                                              } else {
-                                                // Insufficient funds
-                                                setState(() {
-                                                  statusLabel =
-                                                      "Insufficient balance X";
-                                                  isProcessing =
-                                                      false; // Allow retry
-                                                });
-                                              }
-                                            } else {
-                                              // Failed to fetch wallet data
-                                              setState(() {
-                                                statusLabel =
-                                                    "Failed to fetch wallet data ⊘";
-                                              });
-
-                                              /*  await Future.delayed(
-                                                  const Duration(seconds: 2));
-                                              Navigator.of(context).pop(); */
-                                            }
-                                          } else {
-                                            // Invalid amount entered
-                                            setState(() {
-                                              statusLabel = "Invalid amount !!";
-                                            });
-                                          }
-                                        },
-                                  style: ElevatedButton.styleFrom(
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      backgroundColor: Colors.green,
-                                      foregroundColor: Colors.white),
-                                  child: const Icon(Icons.keyboard_arrow_right),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
+  /// Moves money from this device to [toId] and writes the ledger row.
+  ///
+  /// Returns null when the money moved, or the sentence to show when it did
+  /// not. [WalletTransfer.pay] is one atomic call, so two payments landing at
+  /// the same moment cannot both spend the same balance.
+  Future<String?> _moveMoney({
+    required String fromId,
+    required String toId,
+    required String toRole,
+    required String toName,
+    required double amount,
+  }) async {
+    final TransferOutcome transfer = await WalletTransfer.pay(
+      gameId: widget.gameId,
+      fromId: fromId,
+      fromRole: WalletTransfer.playerRole,
+      toId: toId,
+      toRole: toRole,
+      amount: amount,
     );
+    if (!transfer.ok) {
+      return transfer.failure == TransferFailure.insufficientFunds
+          ? 'Insufficient balance'
+          : 'The payment did not go through - try again';
+    }
 
-    if (enteredAmount == null) return; // user cancelled or invalid input
+    try {
+      await Supabase.instance.client.from('transactions').insert({
+        'game_id': widget.gameId,
+        'value': amount,
+        'from': currentPlayerName,
+        'to': toName,
+        'code': '${fromId}_$toId',
+        'date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
+        'time': DateFormat('HH:mm:ss').format(DateTime.now()),
+      });
+    } catch (error) {
+      // The money has already moved; this row is the history of it.
+      debugPrint('Could not record the payment: $error');
+    }
+    return null;
+  }
+
+  /// Pays another player at the table.
+  Future<void> payPlayer(Player player) async {
+    if (_guardLifecycle()) return;
+
+    final String id = playerID ??
+        (await SharedPreferences.getInstance()).getString('playerID') ??
+        '';
+    if (id.isEmpty) {
+      if (!mounted) return;
+      await showMessage(context, 'This device has no player id');
+      return;
+    }
+
+    final bool paid = await showAmountKeypad(
+      context,
+      title: 'Pay ${player.name}',
+      payee: player.name,
+      holderName: _cardName,
+      cardDigits: _cardDigits,
+      onPay: (double amount) => _moveMoney(
+        fromId: id,
+        toId: player.playerID,
+        toRole: WalletTransfer.playerRole,
+        toName: player.name,
+        amount: amount,
+      ),
+    );
+    if (!paid || !mounted) return;
+    _refreshRoster();
   }
 
   Widget _buildPlayerRow(Player player) {
@@ -2169,7 +1842,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
             ),
           ),
           const SizedBox(width: 10),
-          if (payOption != 'ScanPay')
+          if (payOption != 'ScanPay' && !player.standing.isGone && !_viewOnly)
             Padding(
               padding: const EdgeInsets.all(5.0),
               child: ElevatedButton(
@@ -2260,717 +1933,81 @@ class _PlayersScreenState extends State<PlayersScreen> {
   }
 
   Future<bool> _onWillPop() async {
-    // Show confirmation dialog before leaving the game
-    final shouldLeave = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFFFFF8E1),
-          title: const Text("Leave Game"),
-          content: const Text("Are you sure you want to leave the game?"),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text("Cancel"),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text("Leave"),
-            ),
-          ],
-        );
-      },
+    return showAppConfirm(
+      context,
+      title: 'Leave game?',
+      icon: Icons.logout,
+      confirmLabel: 'Leave game',
+      cancelLabel: 'Stay',
+      destructive: true,
+      message: 'The game keeps going without you. Your balance and your cards '
+          'stay on the board, so you can come back to the same game by joining '
+          'with the same Game ID.',
     );
-
-    return shouldLeave ??
-        false; // If the user cancels, return false, else return true to pop
   }
 
+  /// Pays the bank: the stake, a fine, or anything else the rules hand it.
   Future<void> payBank() async {
-    bool isProcessing = false;
-    final TextEditingController amountController = TextEditingController();
-    isProcessing = false;
-    double? enteredAmount;
-    String statusLabel = "Enter Amount"; // dynamic label
-    enteredAmount = await showDialog<double>(
-      barrierDismissible: false,
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return Stack(
-              children: [
-                Positioned(
-                  bottom: 27.h,
-                  right: 0,
-                  left: 0,
-                  child: Transform.rotate(
-                    angle: 1.5708, // 90 degrees in radians
-                    child: Card(
-                      margin: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 10),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20)),
-                      color: Colors.blueGrey.shade500,
-                      elevation: 2,
-                      child: Stack(
-                        children: [
-                          Positioned(
-                            bottom: 0,
-                            right: 10,
-                            child: Image.asset(
-                              'assets/images/c_logo.png',
-                              fit: BoxFit.contain,
-                              // Decoded at 160px wide. The source is 2456x1612,
-                              // so drawing it at 23.sp used to hold 15 MB of
-                              // bitmap and pay the full decode for a logo this
-                              // size. 160 leaves room for wide phones.
-                              cacheWidth: 160,
+    if (_guardLifecycle()) return;
 
-                              width: 23
-                                  .sp, // Use MediaQuery or a fixed size if sp is undefined
-                              height: 23.sp,
-                              colorBlendMode: BlendMode
-                                  .srcIn, // Ensures image is tinted red
-                            ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                // Row for Cardholder's Name and Card Number
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        // Cardholder's name
-                                        Row(
-                                          children: [
-                                            Text(
-                                              _cardName,
-                                              style: TextStyle(
-                                                fontSize: 18.sp,
-                                                fontWeight: FontWeight.bold,
-                                                color: Colors.white,
-                                              ),
-                                            )
-                                          ],
-                                        ),
-                                        const SizedBox(height: 5),
-                                        // Dummy credit card number
-                                        Text(
-                                          '**** **** **** ${_cardDigits.substring(0, 4)}', // First 4 digits of this device's id
-                                          style: TextStyle(
-                                            fontSize: 22.sp,
-                                            fontWeight: FontWeight.w600,
-                                            color: Colors.blueGrey.shade100,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    Lottie.asset(
-                                      positionStatus == "first"
-                                          ? 'assets/lottie/first.json'
-                                          : positionStatus == "second"
-                                              ? 'assets/lottie/second.json'
-                                              : positionStatus == "almostlast"
-                                                  ? 'assets/lottie/almost_last.json'
-                                                  : positionStatus == "last"
-                                                      ? 'assets/lottie/last.json'
-                                                      : 'assets/lottie/neutral.json',
-                                      height: 10.h,
-                                    ),
-                                  ],
-                                ),
+    final String id = playerID ??
+        (await SharedPreferences.getInstance()).getString('playerID') ??
+        '';
+    if (id.isEmpty) {
+      if (!mounted) return;
+      await showMessage(context, 'This device has no player id');
+      return;
+    }
 
-                                const SizedBox(height: 15),
+    final Map<String, dynamic>? bankRow = await Supabase.instance.client
+        .from('players_test')
+        .select('player_id, name')
+        .eq('game_id', widget.gameId)
+        .eq('role', WalletTransfer.bankerRole)
+        .maybeSingle();
+    if (!mounted) return;
+    if (bankRow == null || bankRow['player_id'] == null) {
+      await showMessage(context, 'Cannot find the bank in this game');
+      return;
+    }
+    final String bankName = bankRow['name']?.toString() ?? 'the bank';
 
-                                // Row for Expiration Date and CVV
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    AnimatedFlipCounter(
-                                      value: value,
-                                      fractionDigits: 2,
-                                      textStyle: TextStyle(
-                                        fontSize: 28.sp,
-                                        fontWeight: FontWeight.bold,
-                                        color:
-                                            Colors.white.withValues(alpha: 0.9),
-                                      ),
-                                      duration:
-                                          const Duration(milliseconds: 500),
-                                    ),
-                                    Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 10.0),
-                                      child: Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.start,
-                                        children: [
-                                          Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                'EXPIRY',
-                                                style: TextStyle(
-                                                  fontSize: 12.sp,
-                                                  color: Colors.white
-                                                      .withValues(alpha: 0.7),
-                                                ),
-                                              ),
-                                              const SizedBox(height: 5),
-                                              Text(
-                                                DateFormat('MM/yy')
-                                                    .format(DateTime.now()),
-                                                style: TextStyle(
-                                                  fontSize: 16.sp,
-                                                  fontWeight: FontWeight.bold,
-                                                  color:
-                                                      Colors.blueGrey.shade100,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          const SizedBox(width: 20),
-                                          Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                'CVV',
-                                                style: TextStyle(
-                                                  fontSize: 12.sp,
-                                                  color: Colors.white
-                                                      .withValues(alpha: 0.7),
-                                                ),
-                                              ),
-                                              const SizedBox(height: 5),
-                                              Text(
-                                                _cardDigits.substring(
-                                                    _cardDigits.length -
-                                                        3), // Dummy CVV
-                                                style: TextStyle(
-                                                  fontSize: 16.sp,
-                                                  fontWeight: FontWeight.bold,
-                                                  color:
-                                                      Colors.blueGrey.shade100,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-
-                                const SizedBox(height: 10),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                AlertDialog(
-                  backgroundColor: Colors.grey.shade500,
-                  content: SizedBox(
-                    width: 50.w, // adjust as needed
-                    //  height: 30.h, // adjust as needed
-
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Column(
-                          children: [
-                            const SizedBox(height: 10),
-                            Container(
-                              margin: const EdgeInsets.symmetric(
-                                  vertical: 0, horizontal: 10),
-                              padding: const EdgeInsets.symmetric(
-                                  vertical: 10, horizontal: 10),
-                              width: double.infinity,
-                              // height: 7.h,
-                              decoration: BoxDecoration(
-                                color: Colors.green.shade400,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  /*  Align(alignment: Alignment.topLeft,
-                                    child: Text(
-                                      "Paying to ${player.name}",
-                                      style: const TextStyle(color: Colors.black),
-                                    ),
-                                  ), */
-                                  Text(
-                                    statusLabel,
-                                    style: TextStyle(
-                                        color: Colors.black, fontSize: 16.sp),
-                                  ),
-                                  const SizedBox(height: 5),
-                                  Text(
-                                    amountController.text.isEmpty
-                                        ? '0'
-                                        : amountController.text,
-                                    style: TextStyle(
-                                        color: Colors.black, fontSize: 16.sp),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 20),
-
-                            // Row 1
-                            GridView.count(
-                              childAspectRatio: 2,
-                              shrinkWrap: true,
-                              crossAxisCount: 3,
-                              crossAxisSpacing: 10,
-                              mainAxisSpacing: 10,
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 10),
-                              children: [
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.text += '1';
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Text(
-                                    '1',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.text += '2';
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Text(
-                                    '2',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.text += '3';
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Text(
-                                    '3',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.text += '4';
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Text(
-                                    '4',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.text += '5';
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Text(
-                                    '5',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.text += '6';
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Text(
-                                    '6',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.text += '7';
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Text(
-                                    '7',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.text += '8';
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Text(
-                                    '8',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.text += '9';
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Text(
-                                    '9',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing ||
-                                          amountController.text.contains('.')
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.text += '.';
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Text(
-                                    '.',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.text += '0';
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Text(
-                                    '0',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            if (amountController
-                                                .text.isNotEmpty) {
-                                              amountController.text =
-                                                  amountController.text
-                                                      .substring(
-                                                          0,
-                                                          amountController
-                                                                  .text.length -
-                                                              1);
-                                            }
-                                          });
-                                        },
-                                  style: _buttonStyle(),
-                                  child: const Icon(Icons.backspace,
-                                      color: Colors.grey),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          Navigator.of(context).pop();
-                                        },
-                                  style: ElevatedButton.styleFrom(
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      backgroundColor: Colors.red,
-                                      foregroundColor: Colors.white),
-                                  child: const Text('X'),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            amountController.clear();
-                                          });
-                                        },
-                                  style: ElevatedButton.styleFrom(
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      backgroundColor: Colors.yellow,
-                                      foregroundColor: Colors.black),
-                                  child: const Text('C'),
-                                ),
-                                ElevatedButton(
-                                  onPressed: isProcessing
-                                      ? null
-                                      : () async {
-                                          final value = double.tryParse(
-                                              amountController.text);
-                                          if (value != null && value > 0) {
-                                            setState(() {
-                                              isProcessing = true;
-                                              statusLabel =
-                                                  "Processing payment...";
-                                            });
-
-                                            // Simulate the processing delay
-                                            await Future.delayed(
-                                                const Duration(seconds: 2));
-
-                                            // Perform the actual payment logic
-                                            final prefs =
-                                                await SharedPreferences
-                                                    .getInstance();
-                                            final payerPlayerID =
-                                                prefs.getString('playerID') ??
-                                                    'UnknownPlayer';
-                                            enteredAmount =
-                                                value; // Set enteredAmount here
-
-                                            // Fetch player and banker wallet data from Supabase
-                                            final payerResponse = await Supabase
-                                                .instance.client
-                                                .from('players_test')
-                                                .select('wallet')
-                                                .eq('game_id', widget.gameId)
-                                                .eq('player_id', payerPlayerID)
-                                                .maybeSingle();
-
-                                            final receiverResponse =
-                                                await Supabase
-                                                    .instance.client
-                                                    .from('players_test')
-                                                    .select(
-                                                        'wallet, player_id, name')
-                                                    .eq('game_id',
-                                                        widget.gameId)
-                                                    .eq('role', "banker")
-                                                    .maybeSingle();
-
-                                            if (payerResponse != null &&
-                                                receiverResponse != null &&
-                                                payerResponse['wallet'] !=
-                                                    null &&
-                                                receiverResponse['wallet'] !=
-                                                    null) {
-                                              double payerWallet =
-                                                  (payerResponse['wallet']
-                                                          as num)
-                                                      .toDouble();
-
-                                              if (payerWallet >=
-                                                  enteredAmount!) {
-                                                // One atomic call: the database
-                                                // locks both rows, re-checks the
-                                                // funds and writes both wallets,
-                                                // so a payment landing at the same
-                                                // moment can no longer lose this
-                                                // one.
-                                                final TransferOutcome transfer =
-                                                    await WalletTransfer.pay(
-                                                  gameId: widget.gameId,
-                                                  fromId: payerPlayerID,
-                                                  fromRole:
-                                                      WalletTransfer.playerRole,
-                                                  toId: receiverResponse[
-                                                          'player_id']
-                                                      .toString(),
-                                                  toRole:
-                                                      WalletTransfer.bankerRole,
-                                                  amount: enteredAmount!,
-                                                );
-
-                                                if (!transfer.ok) {
-                                                  setState(() {
-                                                    statusLabel =
-                                                        "Insufficient balance X";
-                                                    isProcessing =
-                                                        false; // Allow retry
-                                                  });
-                                                  return;
-                                                }
-
-                                                // Log the transaction
-                                                await Supabase.instance.client
-                                                    .from('transactions')
-                                                    .insert({
-                                                  'game_id': widget.gameId,
-                                                  'value': enteredAmount!,
-                                                  'from': currentPlayerName,
-                                                  'to':
-                                                      receiverResponse['name'],
-                                                  'code':
-                                                      "${payerPlayerID}_${receiverResponse['player_id']}",
-                                                  'date': DateFormat(
-                                                          'yyyy-MM-dd')
-                                                      .format(DateTime.now()),
-                                                  'time': DateFormat('HH:mm:ss')
-                                                      .format(DateTime.now()),
-                                                });
-
-                                                // Show success message
-                                                setState(() {
-                                                  statusLabel =
-                                                      "Payment Successful ✓";
-                                                });
-
-                                                // Close the dialog after a delay
-                                                await Future.delayed(
-                                                    const Duration(seconds: 2));
-                                                // ignore: use_build_context_synchronously
-                                                Navigator.of(context).pop();
-                                              } else {
-                                                // Insufficient funds
-                                                setState(() {
-                                                  statusLabel =
-                                                      "Insufficient balance X";
-                                                  isProcessing =
-                                                      false; // Allow retry
-                                                });
-                                              }
-                                            } else {
-                                              // Failed to fetch wallet data
-                                              setState(() {
-                                                statusLabel =
-                                                    "Failed to fetch wallet data ⊘";
-                                              });
-
-                                              /*  await Future.delayed(
-                                                const Duration(seconds: 2));
-                                            Navigator.of(context).pop(); */
-                                            }
-                                          } else {
-                                            // Invalid amount entered
-                                            setState(() {
-                                              statusLabel = "Invalid amount !!";
-                                            });
-                                          }
-                                        },
-                                  style: ElevatedButton.styleFrom(
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      backgroundColor: Colors.green,
-                                      foregroundColor: Colors.white),
-                                  child: const Icon(Icons.keyboard_arrow_right),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-
-    if (enteredAmount == null) return; // user cancelled or invalid input
-  }
-
-  // Button style helper
-  ButtonStyle _buttonStyle() {
-    return ElevatedButton.styleFrom(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
+    final bool paid = await showAmountKeypad(
+      context,
+      title: 'Pay the bank',
+      payee: bankName,
+      holderName: _cardName,
+      cardDigits: _cardDigits,
+      onPay: (double amount) => _moveMoney(
+        fromId: id,
+        toId: bankRow['player_id'].toString(),
+        toRole: WalletTransfer.bankerRole,
+        toName: bankName,
+        amount: amount,
       ),
     );
+    if (!paid || !mounted) return;
+    _refreshRoster();
   }
+
+  /// A ScanPay game has one scanner: it reads a player's pay QR and the bank's
+  /// card QR alike, so paying and buying are the same button. An InstantPay
+  /// game has no QR at all, so its action pays the bank directly. The icon and
+  /// the legend sentence follow the mode.
+  GameControl get _payControl =>
+      payOption == 'ScanPay' ? GameControls.scan : GameControls.payBank;
+
+  /// Exactly the icons this screen is showing, so the info sheet never explains
+  /// a button that is not there.
+  List<GameControl> get _screenControls => <GameControl>[
+        GameControls.history,
+        if (_playWithCards) GameControls.board,
+        GameControls.leave,
+        if (payOption == 'ScanPay') GameControls.receive,
+        GameControls.myCards,
+        if (_playWithCards) GameControls.trade,
+        _payControl,
+      ];
 
   @override
   Widget build(BuildContext context) {
@@ -2980,7 +2017,10 @@ class _PlayersScreenState extends State<PlayersScreen> {
       onPopInvokedWithResult: (bool didPop, Object? result) async {
         if (didPop) return;
         final bool shouldLeave = await _onWillPop();
-        if (shouldLeave && mounted) Navigator.of(context).pop();
+        // A game screen can be the only route (Continue game replaces the
+        // title screen), so popping it would leave an empty navigator. Going
+        // back to the title screen is the same place from either route.
+        if (shouldLeave && mounted) await _returnToTitle();
       },
       child: Scaffold(
         backgroundColor: const Color(0xFFFFF8E1),
@@ -2995,35 +2035,44 @@ class _PlayersScreenState extends State<PlayersScreen> {
               color: const Color(0xFF689F38), // deep green icon
             ),
           ),
+          // Icon-only, in the same sticker style as the actions under the
+          // wallet. Each one keeps its name in a tooltip, and the info button
+          // lists them all for a first-time player.
           actions: [
-            IconButton(
-                onPressed: () async {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => TransactionHistoryPage(
-                        gameId: widget.gameId,
-                        playerId: playerID ?? '-',
+            Row(
+              children: <Widget>[
+                GameIconButton(
+                  control: GameControls.history,
+                  size: 36,
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => TransactionHistoryPage(
+                          gameId: widget.gameId,
+                          playerId: playerID ?? '-',
+                        ),
                       ),
-                    ),
-                  );
-                },
-                icon: const Icon(FontAwesomeIcons.clockRotateLeft)),
-            const SizedBox(width: 5),
-            // The board itself, to check who owns what. A tap only opens a deed.
-            // Only there is anything to look at in a cards game.
-            if (_playWithCards)
-              IconButton(
-                onPressed: _showBoard,
-                icon: const Icon(Icons.grid_on),
-                tooltip: 'Board',
-              ),
-            const SizedBox(width: 5),
-            IconButton(
-                onPressed: () async {
-                  bool shouldLeave = await _onWillPop();
-                  if (shouldLeave) {
-                    SharedPreferences prefs =
+                    );
+                  },
+                ),
+                if (_playWithCards) const SizedBox(width: 4),
+                // The board itself, to check who owns what. A tap only opens a
+                // deed, and only a cards game has anything to look at.
+                if (_playWithCards)
+                  GameIconButton(
+                    control: GameControls.board,
+                    size: 36,
+                    onPressed: _showBoard,
+                  ),
+                const SizedBox(width: 4),
+                GameIconButton(
+                  control: GameControls.leave,
+                  size: 36,
+                  onPressed: () async {
+                    final bool shouldLeave = await _onWillPop();
+                    if (!shouldLeave) return;
+                    final SharedPreferences prefs =
                         await SharedPreferences.getInstance();
                     await prefs.remove('gameID');
 
@@ -3033,11 +2082,17 @@ class _PlayersScreenState extends State<PlayersScreen> {
                       MaterialPageRoute(
                           builder: (context) => const WelcomePage()),
                       (Route<dynamic> route) => false,
-                    ); // or your custom logic to leave the game
-                  }
-                },
-                icon: const Icon(FontAwesomeIcons.rightFromBracket)),
-            const SizedBox(width: 5),
+                    );
+                  },
+                ),
+                const SizedBox(width: 4),
+                GameInfoButton(
+                  title: 'Player controls',
+                  controls: _screenControls,
+                ),
+              ],
+            ),
+            const SizedBox(width: 6),
           ],
         ),
         // playerID comes from local prefs, so this gate clears within a frame or
@@ -3046,318 +2101,300 @@ class _PlayersScreenState extends State<PlayersScreen> {
             ? const Center(
                 child: CircularProgressIndicator(color: Color(0xFF689F38)),
               )
-            : ListView.builder(
-                itemCount: players.length + 1, // +1 for the top item
-                itemBuilder: (context, index) {
-                  if (index == 0) {
-                    // Return the top item
-                    return Column(
-                      children: [
-                        const SizedBox(height: 10),
-                        Card(
-                          margin: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 10),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(20)),
-                          color: Colors.blueGrey.shade500,
-                          elevation: 5,
-                          child: Stack(
+            : Column(
+                children: <Widget>[
+                  // Paused or ended: the band explains why the pay, trade and
+                  // building controls are gone, and who can lift the pause.
+                  if (_session != null && _session!.blocksPlay)
+                    GameStatusBanner(
+                      session: _session!,
+                      onDetails: () => _showGameStatusDialog(
+                        suspended: _session!.isSuspended,
+                      ),
+                    ),
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: players.length + 1, // +1 for the top item
+                      itemBuilder: (context, index) {
+                        if (index == 0) {
+                          // Return the top item
+                          return Column(
                             children: [
-                              Positioned(
-                                bottom: 0,
-                                right: 10,
-                                child: Image.asset(
-                                  'assets/images/c_logo.png',
-                                  fit: BoxFit.contain,
-                                  cacheWidth: 160, // see the note on the other two
-                                  width: 23
-                                      .sp, // Use MediaQuery or a fixed size if sp is undefined
-                                  height: 23.sp,
-                                  colorBlendMode: BlendMode
-                                      .srcIn, // Ensures image is tinted red
-                                ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                              const SizedBox(height: 10),
+                              Card(
+                                margin: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 10),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(20)),
+                                color: Colors.blueGrey.shade500,
+                                elevation: 5,
+                                child: Stack(
                                   children: [
-                                    // Row for Cardholder's Name and Card Number
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            // Cardholder's name
-                                            Row(
-                                              children: [
-                                                Text(
-                                                  _cardName,
-                                                  style: TextStyle(
-                                                    fontSize: 20.sp,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: Colors.white,
-                                                  ),
-                                                )
-                                              ],
-                                            ),
-                                            const SizedBox(height: 5),
-                                            // Dummy credit card number
-                                            Text(
-                                              '**** **** **** ${_cardDigits.substring(0, 4)}', // First 4 digits of this device's id
-                                              style: TextStyle(
-                                                fontSize: 22.sp,
-                                                fontWeight: FontWeight.w600,
-                                                color: Colors.blueGrey.shade100,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        Lottie.asset(
-                                          positionStatus == "first"
-                                              ? 'assets/lottie/first.json'
-                                              : positionStatus == "second"
-                                                  ? 'assets/lottie/second.json'
-                                                  : positionStatus ==
-                                                          "almostlast"
-                                                      ? 'assets/lottie/almost_last.json'
-                                                      : positionStatus == "last"
-                                                          ? 'assets/lottie/last.json'
-                                                          : 'assets/lottie/neutral.json',
-                                          height: 10.h,
-                                        ),
-                                      ],
+                                    Positioned(
+                                      bottom: 0,
+                                      right: 10,
+                                      child: Image.asset(
+                                        'assets/images/c_logo.png',
+                                        fit: BoxFit.contain,
+                                        cacheWidth:
+                                            160, // see the note on the other two
+                                        width: 23
+                                            .sp, // Use MediaQuery or a fixed size if sp is undefined
+                                        height: 23.sp,
+                                        colorBlendMode: BlendMode
+                                            .srcIn, // Ensures image is tinted red
+                                      ),
                                     ),
-
-                                    const SizedBox(height: 15),
-
-                                    // Row for Expiration Date and CVV
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        AnimatedFlipCounter(
-                                          value: value,
-                                          fractionDigits: 2,
-                                          textStyle: TextStyle(
-                                            fontSize: 28.sp,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.white
-                                                .withValues(alpha: 0.9),
-                                          ),
-                                          duration:
-                                              const Duration(milliseconds: 500),
-                                        ),
-                                        Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 10.0),
-                                          child: Row(
+                                    Padding(
+                                      padding: const EdgeInsets.all(16),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          // Row for Cardholder's Name and Card Number
+                                          Row(
                                             mainAxisAlignment:
-                                                MainAxisAlignment.start,
+                                                MainAxisAlignment.spaceBetween,
                                             children: [
-                                              Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(
-                                                    'EXPIRY',
-                                                    style: TextStyle(
-                                                      fontSize: 12.sp,
-                                                      color: Colors.white
-                                                          .withValues(
-                                                              alpha: 0.7),
+                                              // Expanded so the number shrinks instead of
+                                              // pushing the position Lottie off a narrow
+                                              // phone's card.
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    // Cardholder's name
+                                                    Row(
+                                                      children: [
+                                                        Text(
+                                                          _cardName,
+                                                          style: TextStyle(
+                                                            fontSize: 20.sp,
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                            color: Colors.white,
+                                                          ),
+                                                        )
+                                                      ],
                                                     ),
-                                                  ),
-                                                  const SizedBox(height: 5),
-                                                  Text(
-                                                    DateFormat('MM/yy')
-                                                        .format(DateTime.now()),
-                                                    style: TextStyle(
-                                                      fontSize: 16.sp,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: Colors
-                                                          .blueGrey.shade100,
+                                                    const SizedBox(height: 5),
+                                                    // Dummy credit card number
+                                                    FittedBox(
+                                                      fit: BoxFit.scaleDown,
+                                                      alignment:
+                                                          Alignment.centerLeft,
+                                                      child: Text(
+                                                        '**** **** **** ${_cardDigits.substring(0, 4)}', // First 4 digits of this device's id
+                                                        style: TextStyle(
+                                                          fontSize: 22.sp,
+                                                          fontWeight:
+                                                              FontWeight.w600,
+                                                          color: Colors.blueGrey
+                                                              .shade100,
+                                                        ),
+                                                      ),
                                                     ),
-                                                  ),
-                                                ],
+                                                  ],
+                                                ),
                                               ),
-                                              const SizedBox(width: 20),
-                                              Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(
-                                                    'CVV',
-                                                    style: TextStyle(
-                                                      fontSize: 12.sp,
-                                                      color: Colors.white
-                                                          .withValues(
-                                                              alpha: 0.7),
-                                                    ),
-                                                  ),
-                                                  const SizedBox(height: 5),
-                                                  Text(
-                                                    _cardDigits.substring(
-                                                        _cardDigits.length -
-                                                            3), // Dummy CVV
-                                                    style: TextStyle(
-                                                      fontSize: 16.sp,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: Colors
-                                                          .blueGrey.shade100,
-                                                    ),
-                                                  ),
-                                                ],
+                                              const SizedBox(width: 8),
+                                              Lottie.asset(
+                                                positionStatus == "first"
+                                                    ? 'assets/lottie/first.json'
+                                                    : positionStatus == "second"
+                                                        ? 'assets/lottie/second.json'
+                                                        : positionStatus ==
+                                                                "almostlast"
+                                                            ? 'assets/lottie/almost_last.json'
+                                                            : positionStatus ==
+                                                                    "last"
+                                                                ? 'assets/lottie/last.json'
+                                                                : 'assets/lottie/neutral.json',
+                                                height: 10.h,
                                               ),
                                             ],
                                           ),
-                                        ),
-                                      ],
-                                    ),
 
-                                    const SizedBox(height: 10),
+                                          const SizedBox(height: 15),
+
+                                          // Row for Expiration Date and CVV
+                                          Row(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.spaceBetween,
+                                            children: [
+                                              Expanded(
+                                                child: FittedBox(
+                                                  fit: BoxFit.scaleDown,
+                                                  alignment:
+                                                      Alignment.centerLeft,
+                                                  child: AnimatedFlipCounter(
+                                                    value: value,
+                                                    fractionDigits: 2,
+                                                    textStyle: TextStyle(
+                                                      fontSize: 28.sp,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      color: Colors.white
+                                                          .withValues(
+                                                              alpha: 0.9),
+                                                    ),
+                                                    duration: const Duration(
+                                                        milliseconds: 500),
+                                                  ),
+                                                ),
+                                              ),
+                                              Padding(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 10.0),
+                                                child: Row(
+                                                  mainAxisAlignment:
+                                                      MainAxisAlignment.start,
+                                                  children: [
+                                                    Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        Text(
+                                                          'EXPIRY',
+                                                          style: TextStyle(
+                                                            fontSize: 12.sp,
+                                                            color: Colors.white
+                                                                .withValues(
+                                                                    alpha: 0.7),
+                                                          ),
+                                                        ),
+                                                        const SizedBox(
+                                                            height: 5),
+                                                        Text(
+                                                          DateFormat('MM/yy')
+                                                              .format(DateTime
+                                                                  .now()),
+                                                          style: TextStyle(
+                                                            fontSize: 16.sp,
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                            color: Colors
+                                                                .blueGrey
+                                                                .shade100,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    const SizedBox(width: 20),
+                                                    Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        Text(
+                                                          'CVV',
+                                                          style: TextStyle(
+                                                            fontSize: 12.sp,
+                                                            color: Colors.white
+                                                                .withValues(
+                                                                    alpha: 0.7),
+                                                          ),
+                                                        ),
+                                                        const SizedBox(
+                                                            height: 5),
+                                                        Text(
+                                                          _cardDigits.substring(
+                                                              _cardDigits
+                                                                      .length -
+                                                                  3), // Dummy CVV
+                                                          style: TextStyle(
+                                                            fontSize: 16.sp,
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                            color: Colors
+                                                                .blueGrey
+                                                                .shade100,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+
+                                          const SizedBox(height: 10),
+                                        ],
+                                      ),
+                                    ),
                                   ],
                                 ),
                               ),
-                            ],
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                          // Three buttons no longer fit on one line on a narrow
-                          // phone, so they wrap instead of overflowing.
-                          child: Wrap(
-                            alignment: WrapAlignment.end,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            spacing: 10,
-                            runSpacing: 6,
-                            children: [
-                              if (payOption == 'ScanPay') const ReceiveButton(),
-                              // Always available: a player should be able to look
-                              // at what they hold, cards game or not.
-                              ElevatedButton.icon(
-                                onPressed: _showMyCards,
-                                icon: Icon(Icons.credit_card, size: 16.sp),
-                                label: Text(
-                                  'My Cards',
-                                  style: TextStyle(fontSize: 16.sp),
-                                ),
-                                style: ElevatedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 5),
-                                  backgroundColor: const Color(0xFF1565C0),
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                ),
-                              ),
-                              if (_playWithCards)
-                                ElevatedButton.icon(
-                                  onPressed: () => _openTradeBuilder(),
-                                  icon: Icon(Icons.swap_horiz, size: 16.sp),
-                                  label: Text(
-                                    'Trade',
-                                    style: TextStyle(fontSize: 16.sp),
-                                  ),
-                                  style: ElevatedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 10, vertical: 5),
-                                    backgroundColor: const Color(0xFF7B1FA2),
-                                    foregroundColor: Colors.white,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius:
-                                          BorderRadius.circular(10),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 16.0),
+                                // Three buttons no longer fit on one line on a narrow
+                                // phone, so they wrap instead of overflowing.
+                                child: Wrap(
+                                  alignment: WrapAlignment.end,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  spacing: 10,
+                                  runSpacing: 6,
+                                  children: [
+                                    if (payOption == 'ScanPay' && !_viewOnly)
+                                      const ReceiveButton(),
+                                    // Always available: a player should be able to look
+                                    // at what they hold, cards game or not.
+                                    GameIconButton(
+                                      control: GameControls.myCards,
+                                      onPressed: _showMyCards,
                                     ),
-                                  ),
-                                ),
-                              if (_playWithCards && payOption == 'ScanPay')
-                                ElevatedButton.icon(
-                                  onPressed: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => QRPayScanner(
-                                          gameId: widget.gameId,
-                                          isCardMode: true,
-                                        ),
+                                    if (_playWithCards && !_viewOnly)
+                                      GameIconButton(
+                                        control: GameControls.trade,
+                                        onPressed: _openTradeBuilder,
                                       ),
-                                    );
-                                  },
-                                  icon: Icon(Icons.qr_code_scanner,
-                                      size: 16.sp),
-                                  label: Text(
-                                    'Buy Card',
-                                    style: TextStyle(fontSize: 16.sp),
-                                  ),
-                                  style: ElevatedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 10, vertical: 5),
-                                    backgroundColor: const Color(0xFF689F38),
-                                    foregroundColor: Colors.white,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                  ),
-                                ),
-                              ElevatedButton.icon(
-                                onPressed: () {
-                                  payOption == 'ScanPay'
-                                      ? Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (_) => QRPayScanner(
-                                                gameId: widget.gameId),
-                                          ),
-                                        )
-                                      : payBank();
-                                },
-                                icon: Icon(FontAwesomeIcons.moneyBill,
-                                    size: 16.sp),
-                                label: Text(
-                                  payOption == 'ScanPay'
-                                      ? 'Pay'
-                                      : 'Pay To Bank',
-                                  style: TextStyle(fontSize: 16.sp),
-                                ),
-                                style: ElevatedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 5),
-                                  backgroundColor: Colors.red.shade600,
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
+                                    if (!_viewOnly)
+                                      GameIconButton(
+                                        control: _payControl,
+                                        onPressed: () {
+                                          if (payOption == 'ScanPay') {
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) => QRPayScanner(
+                                                    gameId: widget.gameId),
+                                              ),
+                                            );
+                                          } else {
+                                            payBank();
+                                          }
+                                        },
+                                      ),
+                                  ],
                                 ),
                               ),
+                              const SizedBox(
+                                height: 5,
+                              )
                             ],
-                          ),
-                        ),
-                        const SizedBox(
-                          height: 5,
-                        )
-                      ],
-                    );
-                  } else {
-                    // Return the list items (shifted by -1)
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16.0, vertical: 5),
-                      child: _buildPlayerRow(players[index - 1]),
-                    );
-                  }
-                },
+                          );
+                        } else {
+                          // Return the list items (shifted by -1)
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16.0, vertical: 5),
+                            child: _buildPlayerRow(players[index - 1]),
+                          );
+                        }
+                      },
+                    ),
+                  ),
+                ],
               ),
       ),
     );
   }
 }
-
 
 /// The manage bar shown in a deed opened from the player's own hand: mortgage,
 /// unmortgage, sell a house, or sell a hotel, each subject to the bank's
@@ -3385,8 +2422,7 @@ class _CardManageBar extends StatelessWidget {
       spacing: 6,
       runSpacing: 4,
       children: <Widget>[
-        if (canMortgage)
-          _chip('Mortgage', const Color(0xFF616161), onMortgage),
+        if (canMortgage) _chip('Mortgage', const Color(0xFF616161), onMortgage),
         if (card.mortgaged)
           _chip('Unmortgage', const Color(0xFF2E7D32), onUnmortgage),
         if (card.houses > 0 && !card.hasHotel)

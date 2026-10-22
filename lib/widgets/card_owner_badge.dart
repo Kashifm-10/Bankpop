@@ -18,9 +18,8 @@ class CardOwnerBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final String? raw = owner.avatar;
     final String path = (raw == null || raw.isEmpty) ? _fallbackAvatar : raw;
-    final String initial = owner.name.trim().isEmpty
-        ? '?'
-        : owner.name.trim()[0].toUpperCase();
+    final String initial =
+        owner.name.trim().isEmpty ? '?' : owner.name.trim()[0].toUpperCase();
 
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -40,9 +39,9 @@ class CardOwnerBadge extends StatelessWidget {
               // The source avatars are 500-1200px; decoding at 56 keeps this
               // footer badge cheap.
               cacheWidth: 56,
-              errorBuilder:
-                  (BuildContext context, Object error, StackTrace? stackTrace) =>
-                      Container(
+              errorBuilder: (BuildContext context, Object error,
+                      StackTrace? stackTrace) =>
+                  Container(
                 width: 28,
                 height: 28,
                 color: const Color(0xFF689F38),

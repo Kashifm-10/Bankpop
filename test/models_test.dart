@@ -28,18 +28,24 @@ void main() {
   test('a moved wallet or a new avatar is a different player', () {
     final Player original = Player.fromMap(playerRow());
 
-    expect(Player.fromMap(<String, dynamic>{
-      ...playerRow(),
-      'wallet': 101,
-    }), isNot(equals(original)));
-    expect(Player.fromMap(<String, dynamic>{
-      ...playerRow(),
-      'avatar': 'assets/avatars/girl2.jpg',
-    }), isNot(equals(original)));
-    expect(Player.fromMap(<String, dynamic>{
-      ...playerRow(),
-      'name': 'Someone else',
-    }), isNot(equals(original)));
+    expect(
+        Player.fromMap(<String, dynamic>{
+          ...playerRow(),
+          'wallet': 101,
+        }),
+        isNot(equals(original)));
+    expect(
+        Player.fromMap(<String, dynamic>{
+          ...playerRow(),
+          'avatar': 'assets/avatars/girl2.jpg',
+        }),
+        isNot(equals(original)));
+    expect(
+        Player.fromMap(<String, dynamic>{
+          ...playerRow(),
+          'name': 'Someone else',
+        }),
+        isNot(equals(original)));
   });
 
   test('a sparse transaction row parses without throwing', () {

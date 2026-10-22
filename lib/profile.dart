@@ -1,9 +1,12 @@
-import 'dart:io';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:mon/pages/auth/auth_screen.dart';
 import 'package:mon/pages/home.dart';
 import 'package:mon/pages/profile_edit.dart';
+import 'package:mon/services/account.dart';
+import 'package:mon/services/profile_avatar.dart';
 import 'package:mon/widgets/app_message.dart';
+import 'package:mon/widgets/how_to_play_dialog.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -17,11 +20,13 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> {
-  File? _profileImage;
+  /// The bundled asset this device picked. A path in the bundle works on every
+  /// platform we ship; the old `dart:io` file copy did not exist on the web.
+  String _avatarAsset = ProfileAvatar.appIcon;
   String _appVersion = "Loading...";
   String _userName = "Player Name";
+  String? _accountEmail;
   bool _isEditing = false;
-  bool showHelp = false;
   late TextEditingController _controller;
 
   @override
@@ -32,9 +37,55 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> load() async {
-    await _loadProfileImage();
+    await _loadAvatar();
     await _loadAppVersion();
     await _loadUserName();
+    final String? email = await Account.signedInEmail();
+    if (!mounted) return;
+    setState(() => _accountEmail = email);
+  }
+
+  Future<void> _signOut() async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('Sign out?'),
+        content: const Text(
+          'Your games stay linked to this account. Sign in again on any device '
+          'to see them.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Sign out'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await Account.signOut();
+    if (!mounted) return;
+    // Signing out drops back to a guest on this device, not back to the
+    // introduction: the local player and its games are still here.
+    setState(() => _accountEmail = null);
+    showMessage(context, 'Signed out. Playing as a guest on this device.');
+  }
+
+  /// Opens the same sign-in screen the first run offers, but comes back here on
+  /// success so the name, avatar and games reload in place.
+  Future<void> _signIn() async {
+    final bool? signedIn = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute<bool>(
+        builder: (_) => const AuthScreen(returnOnSuccess: true),
+      ),
+    );
+    if (signedIn != true || !mounted) return;
+    await load();
   }
 
   Future<void> _loadUserName() async {
@@ -46,9 +97,11 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Future<void> _saveUserName() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.setString('profile_name', _controller.text);
+    final String name = _controller.text.trim();
+    await prefs.setString('profile_name', name);
+    await Account.updateProfile(name: name);
     setState(() {
-      _userName = _controller.text;
+      _userName = name;
       _isEditing = false;
     });
   }
@@ -66,12 +119,10 @@ class _ProfilePageState extends State<ProfilePage> {
     });
   }
 
-  Future<void> _loadProfileImage() async {
+  Future<void> _loadAvatar() async {
     final prefs = await SharedPreferences.getInstance();
-    String? path = prefs.getString('profile_image');
-    if (path != null && File(path).existsSync()) {
-      setState(() => _profileImage = File(path));
-    }
+    if (!mounted) return;
+    setState(() => _avatarAsset = ProfileAvatar.saved(prefs));
   }
 
   void _contactSupport() async {
@@ -99,77 +150,12 @@ class _ProfilePageState extends State<ProfilePage> {
       "Whether you're buying a theme park, collecting rent from your siblings, or making a million-dollar deal (in-game, of course 😄), BankPop keeps the action fast, fair, and way more fun.\n\n"
       "Made for families, kids, and anyone who loves game night without the money mess!";
 
-  Widget roleContent({
-    required String role,
-    required List<String> scanPayPoints,
-    required List<String> instantPayPoints,
-  }) {
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            "ScanPay",
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-              color: Color(0xFFF57F17), // calm green
-            ),
-          ),
-          const SizedBox(height: 8),
-          ...scanPayPoints.map(bullet),
-          const SizedBox(height: 16),
-          const Text(
-            "InstantPay",
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-              color: Color(0xFFF57F17), // darker green
-            ),
-          ),
-          const SizedBox(height: 8),
-          ...instantPayPoints.map(bullet),
-        ],
-      ),
-    );
-  }
-
-  Widget bullet(String text) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            "•  ",
-            style: TextStyle(
-              fontSize: 16,
-              color: Color(0xFF827717), // deep green bullet
-            ),
-          ),
-          Expanded(
-            child: Text(
-              text,
-              style: const TextStyle(
-                fontSize: 14,
-                color: Color(0xFF827717), // main text green
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<bool> _onWillPop(BuildContext context) async {
-    // Perform any logic you need here before popping.
-    // In this case, navigate to the WelcomePage using pushReplacement.
+    // Navigating home replaces this route, so the default pop is suppressed.
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(builder: (_) => const WelcomePage()),
     );
-
-    // Returning false to prevent the default pop behavior, as we've already handled the navigation.
     return false;
   }
 
@@ -213,7 +199,6 @@ class _ProfilePageState extends State<ProfilePage> {
             setState(() {
               _isEditing = false;
               _isExpanded = false;
-              showHelp = false;
             });
             FocusScope.of(context).unfocus();
           },
@@ -229,11 +214,10 @@ class _ProfilePageState extends State<ProfilePage> {
                           0xFFC8E6C9), // pale mint green bg for subtle pop
                       // Drawn at radius 60, so decode whatever the source is
                       // (the packaged icon is 736x736) down to 360px.
-                      backgroundImage: _profileImage != null
-                          ? ResizeImage(FileImage(_profileImage!), width: 360)
-                          : ResizeImage(
-                              const AssetImage('assets/images/play_icon.jpg'),
-                              width: 360),
+                      backgroundImage: ProfileAvatar.provider(
+                        _avatarAsset,
+                        cacheWidth: 360,
+                      ),
                     ),
                     Positioned(
                       bottom: 0,
@@ -346,6 +330,40 @@ class _ProfilePageState extends State<ProfilePage> {
               ),
               const SizedBox(height: 30),
 
+              // The account. This is the thing that keeps the games attached
+              // to a person rather than to a device.
+              Card(
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20)),
+                color: const Color(0xFFE8F5E9),
+                elevation: 2,
+                child: ListTile(
+                  leading: Icon(
+                    _accountEmail == null
+                        ? Icons.person_outline
+                        : Icons.alternate_email,
+                    color: const Color(0xFF689F38),
+                  ),
+                  title: Text(
+                    _accountEmail == null ? 'Playing as a guest' : 'Account',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: Text(
+                    _accountEmail ??
+                        'Your games live on this device only. Sign in to keep '
+                            'them across devices and reinstalls.',
+                  ),
+                  trailing: TextButton(
+                    onPressed: _accountEmail == null ? _signIn : _signOut,
+                    child: Text(
+                      _accountEmail == null ? 'Sign in' : 'Sign out',
+                      style: const TextStyle(color: Color(0xFF2E7D32)),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+
               // Theme selection card
               /* Card(
                 shape: RoundedRectangleBorder(
@@ -446,24 +464,22 @@ class _ProfilePageState extends State<ProfilePage> {
 
               const SizedBox(height: 20),
 
-              // How to Play card
+              // How to Play card: opens the same guide the home screen offers,
+              // so the two entry points cannot disagree about how the game
+              // works now (cards, houses, badges, removing a player).
               GestureDetector(
-                onTap: () {
-                  setState(() {
-                    showHelp = !showHelp;
-                  });
-                },
+                onTap: () => HowToPlayGuide.show(context),
                 child: Card(
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(20)),
                   color: const Color(0xFFC8E6C9), // pale mint green
                   elevation: 3,
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
+                  child: const Padding(
+                    padding: EdgeInsets.all(16),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
+                      children: <Widget>[
+                        Text(
                           "How to Play",
                           style: TextStyle(
                             fontSize: 18,
@@ -471,85 +487,22 @@ class _ProfilePageState extends State<ProfilePage> {
                             color: Color(0xFF2E7D32), // deep green
                           ),
                         ),
-                        const SizedBox(height: 8),
-                        if (!showHelp)
-                          const Text(
-                            "Tap to start a new game, manage your in-game money easily, and enjoy the seamless experience without any mess. Just follow the intuitive prompts and have fun!",
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Color(0xFF388E3C), // medium green
-                            ),
+                        SizedBox(height: 8),
+                        Text(
+                          "Joining, paying, cards and houses, pausing a game, "
+                          "and what the badges beside a name mean - a short "
+                          "guide for players and for the banker.",
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Color(0xFF388E3C), // medium green
                           ),
-                        if (showHelp)
-                          SizedBox(
-                            width: double.maxFinite,
-                            child: DefaultTabController(
-                              length: 2,
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const TabBar(
-                                    labelColor: Color(0xFF33691E),
-                                    unselectedLabelColor: Colors.grey,
-                                    indicatorColor: Color(0xFF689F38),
-                                    tabs: [
-                                      Tab(text: "Player"),
-                                      Tab(text: "Banker"),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 10),
-                                  SizedBox(
-                                    height: 50.h,
-                                    child: TabBarView(
-                                      children: [
-                                        // Player tab
-                                        roleContent(
-                                          role: "Player",
-                                          scanPayPoints: [
-                                            "Join a game hosted by the banker.",
-                                            "Manage your in-game balance digitally.",
-                                            "Tap to pay rent, buy property, or collect income.",
-                                            "Use the app instead of paper money or cards.",
-                                            "Keep an eye on your balance and transactions.",
-                                          ],
-                                          instantPayPoints: [
-                                            "Join a game instantly without scanning.",
-                                            "Manage your in-game balance digitally.",
-                                            "Tap to pay rent, buy property, or collect income.",
-                                            "Use the app instead of paper money or cards.",
-                                            "Monitor your balance at all times.",
-                                          ],
-                                        ),
-                                        // Banker tab
-                                        roleContent(
-                                          role: "Banker",
-                                          scanPayPoints: [
-                                            "Start a new game and assign starting balances.",
-                                            "Oversee all player transactions digitally.",
-                                            "Adjust balances manually if needed.",
-                                            "Ensure fair play and assist players.",
-                                            "End the game when a winner is declared.",
-                                          ],
-                                          instantPayPoints: [
-                                            "Quickly start a game without scanning.",
-                                            "Oversee all player transactions digitally.",
-                                            "Adjust balances manually if needed.",
-                                            "Ensure fair play and assist players.",
-                                            "End the game when a winner is declared.",
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
+                        ),
+                        SizedBox(height: 6),
                         Align(
                           alignment: Alignment.bottomRight,
                           child: Text(
-                            showHelp ? "Tap to close" : "Tap to know more",
-                            style: const TextStyle(
+                            "Tap to know more",
+                            style: TextStyle(
                               color: Color(0xFF2E7D32),
                               fontWeight: FontWeight.w300,
                             ),
@@ -560,8 +513,6 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                 ),
               ),
-
-              const SizedBox(height: 20),
 
               // Version and update check card
               Card(

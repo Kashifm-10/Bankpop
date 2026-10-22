@@ -1,8 +1,8 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:mon/services/account.dart';
+import 'package:mon/services/profile_avatar.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:path_provider/path_provider.dart';
 
 class ProfileDialog extends StatefulWidget {
   final bool first;
@@ -17,25 +17,10 @@ class ProfileDialog extends StatefulWidget {
 class _ProfileDialogState extends State<ProfileDialog> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _nameController = TextEditingController();
-  File? _profileImage;
-  int? _selectedAvatarIndex;
 
-  final List<String> avatarPaths = [
-    'assets/avatars/girl1.jpg',
-    'assets/avatars/girl2.jpg',
-    'assets/avatars/girl3.jpg',
-    'assets/avatars/girl4.jpg',
-    'assets/avatars/girl5.jpg',
-    'assets/avatars/girl6.jpg',
-    'assets/avatars/girl7.jpg',
-    'assets/avatars/boy1.jpg',
-    'assets/avatars/boy2.jpg',
-    'assets/avatars/boy3.jpg',
-    'assets/avatars/boy4.jpg',
-    'assets/avatars/boy5.jpg',
-    'assets/avatars/boy6.jpg',
-    'assets/avatars/boy7.jpg',
-  ];
+  /// The bundled asset this player picked, or null before any pick.
+  String? _avatarAsset;
+  int _selectedAvatarIndex = 0;
 
   @override
   void initState() {
@@ -45,59 +30,66 @@ class _ProfileDialogState extends State<ProfileDialog> {
 
   Future<void> _loadSavedData() async {
     final prefs = await SharedPreferences.getInstance();
-    _nameController.text = prefs.getString('profile_name') ?? '';
-    final avatar = prefs.getString('avatar_path');
-    final avatarIndex = prefs.getInt('selected_avatar_index');
-    String? path = prefs.getString("profile_image");
-    if (path != null && File(path).existsSync()) {
-      setState(() => _profileImage = File(path));
-    }
-    // First launch has neither key saved yet: keep the defaults instead of
-    // asserting on prefs that do not exist (this used to blank the dialog).
-    selap = avatar ?? selap;
-    selindex = avatarIndex ?? selindex;
-  }
-
-  Future<void> _selectAvatarFromAssets(String assetPath, int index) async {
-    final byteData = await rootBundle.load(assetPath);
-    final Uint8List bytes = byteData.buffer.asUint8List();
-
-    final directory = await getApplicationDocumentsDirectory();
-    final filePath = '${directory.path}/profile_avatar_$index.png';
-    final file = File(filePath);
-
-    // Remove old profile image file if needed
-    if (await file.exists()) {
-      await file.delete();
-    }
-
-    // Save selected avatar to file
-    await file.writeAsBytes(bytes);
-
-    // Save the selected avatar file path to SharedPreferences
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString("profile_image", file.path);
-    await prefs.setString("avatar_path", assetPath);
-    await prefs.setInt("selected_avatar_index", index); // optional
-
+    final String? avatar = prefs.getString('avatar_path');
+    final int? avatarIndex = prefs.getInt('selected_avatar_index');
+    if (!mounted) return;
     setState(() {
-      _selectedAvatarIndex = index;
-      _profileImage = file;
+      _nameController.text = prefs.getString('profile_name') ?? '';
+      // No saved avatar is not the same as "no avatar chosen". The sheet draws
+      // a tick on the first avatar either way, so the first avatar has to be
+      // the real selection - otherwise Save stored nothing and the player was
+      // left with the app icon after a dialog that said an avatar was picked.
+      final bool hasAvatar = avatar != null && avatar.isNotEmpty;
+      final int fallback = (widget.prevIndex >= 0 &&
+              widget.prevIndex < ProfileAvatar.choices.length)
+          ? widget.prevIndex
+          : 0;
+      _avatarAsset = hasAvatar ? avatar : ProfileAvatar.choices[fallback];
+      _selectedAvatarIndex = hasAvatar
+          ? (avatarIndex ?? ProfileAvatar.choices.indexOf(avatar))
+          : fallback;
     });
   }
 
-  Future<void> _saveProfile() async {
-    if (_formKey.currentState!.validate()) {
-      final prefs = await SharedPreferences.getInstance();
-      if (_nameController.text.isNotEmpty) {
-        await prefs.setString('profile_name', _nameController.text);
-      }
-      Navigator.pop(context, true);
-    }
+  /// Remembers the pick locally; nothing is written until Save, so Cancel
+  /// really cancels. The asset itself is drawn straight from the bundle, which
+  /// is why this works on the web too.
+  void _selectAvatar(String assetPath, int index) {
+    setState(() {
+      _avatarAsset = assetPath;
+      _selectedAvatarIndex = index;
+    });
+    // A tap is a decent haptic on a phone; on the web it is a no-op.
+    HapticFeedback.selectionClick();
   }
 
-  int selindex = 0;
-  String selap = '';
+  Future<void> _saveProfile() async {
+    if (!_formKey.currentState!.validate()) return;
+    final prefs = await SharedPreferences.getInstance();
+    final String name = _nameController.text.trim();
+    if (name.isNotEmpty) {
+      await prefs.setString('profile_name', name);
+    }
+    final String? avatar = _avatarAsset;
+    if (avatar != null) {
+      await ProfileAvatar.save(
+        prefs,
+        asset: avatar,
+        index: _selectedAvatarIndex,
+      );
+    }
+    // The account row is what follows the player to a new device, so the same
+    // edit has to reach it, not just this device's prefs.
+    await Account.updateProfile(name: name, avatar: avatar);
+    if (mounted) Navigator.pop(context, true);
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -113,19 +105,18 @@ class _ProfileDialogState extends State<ProfileDialog> {
       ),
       content: SingleChildScrollView(
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            GestureDetector(
-             // onTap: _pickAndCropImage,
-              child: CircleAvatar(
-                radius: 40,
-                backgroundImage:
-                    _profileImage != null ? FileImage(_profileImage!) : null,
-                backgroundColor: const Color(0xFFC8E6C9), // pale mint green
-                child: _profileImage == null
-                    ? const Icon(Icons.camera_alt,
-                        size: 30, color: Color(0xFF689F38))
-                    : null,
-              ),
+            CircleAvatar(
+              radius: 40,
+              backgroundImage: _avatarAsset == null
+                  ? null
+                  : ProfileAvatar.provider(_avatarAsset!, cacheWidth: 240),
+              backgroundColor: const Color(0xFFC8E6C9), // pale mint green
+              child: _avatarAsset == null
+                  ? const Icon(Icons.camera_alt,
+                      size: 30, color: Color(0xFF689F38))
+                  : null,
             ),
             const SizedBox(height: 10),
             Form(
@@ -177,51 +168,29 @@ class _ProfileDialogState extends State<ProfileDialog> {
             const SizedBox(height: 20),
             Wrap(
               spacing: 10,
+              runSpacing: 10,
+              alignment: WrapAlignment.center,
               children: List.generate(
-                avatarPaths.length,
+                ProfileAvatar.choices.length,
                 (index) {
-                  _selectedAvatarIndex ??= widget.prevIndex;
-                  final isSelected = _selectedAvatarIndex == index;
+                  final bool isSelected = _selectedAvatarIndex == index;
                   return GestureDetector(
-                    onTap: () async {
-                      final byteData =
-                          await rootBundle.load(avatarPaths[index]);
-                      final Uint8List bytes = byteData.buffer.asUint8List();
-
-                      final directory =
-                          await getApplicationDocumentsDirectory();
-                      final filePath =
-                          '${directory.path}/profile_avatar_$index.png';
-                      final file = File(filePath);
-
-                      // Remove old profile image file if needed
-                      if (await file.exists()) {
-                        await file.delete();
-                      }
-
-                      // Save selected avatar to file
-                      await file.writeAsBytes(bytes);
-
-                      // Save the selected avatar file path to SharedPreferences
-
-                      setState(() {
-                        _selectedAvatarIndex = index;
-                        _profileImage = file;
-                        selindex = index;
-                        selap = avatarPaths[index];
-                      });
-                    },
+                    onTap: () => _selectAvatar(
+                      ProfileAvatar.choices[index],
+                      index,
+                    ),
                     child: Stack(
                       children: [
                         CircleAvatar(
                           radius: 25,
-                          // 14 avatars are on screen at once and the sources are
-                          // 520-1200 px square (up to 5.5 MB decoded each), for
-                          // a 50 px circle. Decoding at 144px is the difference
-                          // between ~40 MB and ~1 MB of bitmap memory here.
-                          backgroundImage: ResizeImage(
-                              AssetImage(avatarPaths[index]),
-                              width: 144),
+                          // The 14 avatars are on screen at once and the
+                          // sources are 520-1200 px square, for a 50 px
+                          // circle. Decoding at 144px keeps this sheet's
+                          // bitmap memory around 1 MB instead of ~40 MB.
+                          backgroundImage: ProfileAvatar.provider(
+                            ProfileAvatar.choices[index],
+                            cacheWidth: 144,
+                          ),
                           backgroundColor: Colors.grey[200],
                         ),
                         if (isSelected)
@@ -230,8 +199,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 border: Border.all(
-                                  color:
-                                      const Color(0xFF689F38), // green border
+                                  color: const Color(0xFF689F38),
                                   width: 3,
                                 ),
                               ),
@@ -254,19 +222,6 @@ class _ProfileDialogState extends State<ProfileDialog> {
                 },
               ),
             ),
-            /* const SizedBox(height: 16),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.image),
-              label: const Text("Pick Custom Image"),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF689F38),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              onPressed: _pickAndCropImage,
-            ), */
           ],
         ),
       ),
@@ -287,14 +242,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
               borderRadius: BorderRadius.circular(12),
             ),
           ),
-          onPressed: () async {
-            // `selap` is empty until an avatar has actually been picked; loading
-            // "" as an asset would throw and the name would never be saved.
-            if (selap.isNotEmpty) {
-              await _selectAvatarFromAssets(selap, selindex);
-            }
-            await _saveProfile();
-          },
+          onPressed: _saveProfile,
           child: const Text("Save"),
         ),
       ],

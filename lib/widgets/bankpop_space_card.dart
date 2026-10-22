@@ -89,12 +89,19 @@ class _SpaceCardDialogState extends State<_SpaceCardDialog> {
         ? const Color.fromARGB(255, 0, 0, 0)
         : Color(BankpopBoard.colorForGroup(space.color));
 
+    // The deed was a fixed 320x520 dialog. That is wider than the content box
+    // of a 320 px phone and taller than a landscape phone window, so it now
+    // shrinks to whatever the window can actually show; the body scrolls.
+    final Size screen = MediaQuery.sizeOf(context);
+    final double cardWidth = (screen.width - 40).clamp(180.0, 320.0);
+    final double cardHeight = (screen.height - 40).clamp(220.0, 520.0);
+
     return Dialog(
       insetPadding: const EdgeInsets.all(20),
       backgroundColor: Colors.transparent, // Let the Container handle the shape
       child: Container(
-        width: 320,
-        height: 520, // FIXED HEIGHT: fits full properties perfectly
+        width: cardWidth,
+        height: cardHeight,
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
@@ -269,8 +276,8 @@ Widget _rentRow(
           if (built)
             const Padding(
               padding: EdgeInsets.only(right: 8),
-              child: Icon(Icons.check_circle,
-                  size: 16, color: Color(0xFF689F38)),
+              child:
+                  Icon(Icons.check_circle, size: 16, color: Color(0xFF689F38)),
             )
           else if (buy != null)
             Padding(

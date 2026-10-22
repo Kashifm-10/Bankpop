@@ -8,6 +8,36 @@ class CustomTheme {
       colorScheme: MaterialTheme.lightScheme().toColorScheme(),
       scaffoldBackgroundColor: MaterialTheme.lightScheme().background,
       useMaterial3: true,
+      // Every dialog in the app is drawn from this one definition: the cream
+      // card, the round corner and the green title. Screens that used to set
+      // their own grey / pale yellow background now inherit it, so a dialog
+      // looks the same whichever screen opened it.
+      dialogTheme: DialogThemeData(
+        backgroundColor: const Color(0xFFFFF8E1),
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        titleTextStyle: const TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.w800,
+          color: Color(0xFF33691E),
+          fontFamily: 'Quicksand',
+        ),
+        contentTextStyle: const TextStyle(
+          fontSize: 14.5,
+          height: 1.4,
+          color: Color(0xFF33691E),
+          fontFamily: 'Quicksand',
+        ),
+      ),
+      // Dialog actions (Cancel / Continue) used to come out in the scheme's
+      // blue while the dialog around them was green. One green action colour
+      // instead, with the weight of a button rather than a link.
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: const Color(0xFF2E7D32),
+          textStyle: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+      ),
     );
   }
 
@@ -17,6 +47,29 @@ class CustomTheme {
       colorScheme: MaterialTheme.darkScheme().toColorScheme(),
       scaffoldBackgroundColor: MaterialTheme.darkScheme().background,
       useMaterial3: true,
+      // Same shape and weight as the light theme, on a card that belongs in a
+      // dark room rather than a white flash.
+      dialogTheme: DialogThemeData(
+        backgroundColor: const Color(0xFF26291F),
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        titleTextStyle: const TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.w800,
+          color: Color(0xFFC5E1A5),
+        ),
+        contentTextStyle: const TextStyle(
+          fontSize: 14.5,
+          height: 1.4,
+          color: Color(0xFFE0E0E0),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: const Color(0xFF9CCC65),
+          textStyle: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+      ),
     );
   }
 }

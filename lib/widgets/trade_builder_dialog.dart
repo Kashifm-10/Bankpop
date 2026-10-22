@@ -4,6 +4,15 @@ import 'package:mon/services/player_cards.dart';
 import 'package:mon/services/deals.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 
+/// What the builder hands back once an offer has been written: the row id the
+/// caller polls, and who has to answer it.
+class SentTradeOffer {
+  const SentTradeOffer({required this.id, required this.toName});
+
+  final int id;
+  final String toName;
+}
+
 class TradeBuilderDialog extends StatefulWidget {
   final String gameId;
   final String myId;
@@ -26,6 +35,14 @@ class TradeBuilderDialog extends StatefulWidget {
 
   @override
   State<TradeBuilderDialog> createState() => _TradeBuilderDialogState();
+}
+
+/// One colour group of a hand, for the card picker.
+class _TradeGroup {
+  const _TradeGroup(this.colour, this.cards);
+
+  final String colour;
+  final List<PlayerCard> cards;
 }
 
 class _TradeBuilderDialogState extends State<TradeBuilderDialog> {
@@ -73,15 +90,16 @@ class _TradeBuilderDialogState extends State<TradeBuilderDialog> {
     final theirCash = double.tryParse(_theirCash.text) ?? 0;
 
     final String giveDesc = _describe(
-      _mySelectedCards.length, myCash,
+      _mySelectedCards.length,
+      myCash,
     );
     final String getDesc = _describe(
-      _theirSelectedCards.length, theirCash,
+      _theirSelectedCards.length,
+      theirCash,
     );
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (BuildContext ctx) => AlertDialog(
-        backgroundColor: const Color(0xFFFFF8E1),
         title: const Text('Send this trade?'),
         content: Text(
           'You give: $giveDesc\n'
@@ -115,7 +133,14 @@ class _TradeBuilderDialogState extends State<TradeBuilderDialog> {
       wantsCash: theirCash,
     );
     if (id != null) {
-      if (mounted) Navigator.pop(context, true);
+      // The caller waits on this id and offers a cancel button, so the sender
+      // is not left wondering whether the offer went out.
+      if (mounted) {
+        Navigator.pop(
+          context,
+          SentTradeOffer(id: id, toName: _selectedPlayerName ?? 'the player'),
+        );
+      }
     } else {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -123,6 +148,200 @@ class _TradeBuilderDialogState extends State<TradeBuilderDialog> {
         );
       }
     }
+  }
+
+  /// The player's cards, laid out the way My Cards lays them out: grouped by
+  /// colour in board order, one tile per card. A tile carries the group colour
+  /// so a set is recognisable before it is read, and a card with buildings on
+  /// it says why it cannot be traded instead of silently refusing the tap.
+  Widget _cardPicker({
+    required List<PlayerCard> cards,
+    required Set<int> selected,
+  }) {
+    if (cards.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Text(
+            'No cards here yet.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12.sp, color: Colors.black45),
+          ),
+        ),
+      );
+    }
+
+    final List<_TradeGroup> groups = _groups(cards);
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 8),
+      children: <Widget>[
+        for (final _TradeGroup group in groups) ...<Widget>[
+          _groupHeader(group),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: <Widget>[
+              for (final PlayerCard card in group.cards)
+                _pickTile(card, selected),
+            ],
+          ),
+          const SizedBox(height: 10),
+        ],
+      ],
+    );
+  }
+
+  /// Cards grouped by colour, the groups themselves in board order.
+  List<_TradeGroup> _groups(List<PlayerCard> cards) {
+    final Map<String, List<PlayerCard>> byColour = <String, List<PlayerCard>>{};
+    for (final PlayerCard card in cards) {
+      final String colour = widget.spaces[card.cardIndex]?.color ?? 'Other';
+      (byColour[colour] ??= <PlayerCard>[]).add(card);
+    }
+    byColour.forEach((String _, List<PlayerCard> group) {
+      group.sort(
+          (PlayerCard a, PlayerCard b) => a.cardIndex.compareTo(b.cardIndex));
+    });
+    final List<String> colours = byColour.keys.toList()
+      ..sort((String a, String b) => _groupStart(a).compareTo(_groupStart(b)));
+    return <_TradeGroup>[
+      for (final String colour in colours)
+        _TradeGroup(colour, byColour[colour]!),
+    ];
+  }
+
+  /// The lowest board index in a colour group, so groups sort as they sit on
+  /// the board rather than alphabetically.
+  int _groupStart(String colour) {
+    int best = 1 << 30;
+    for (final BankpopSpace space in widget.spaces.values) {
+      if ((space.color ?? 'Other') == colour && space.index < best) {
+        best = space.index;
+      }
+    }
+    return best;
+  }
+
+  Widget _groupHeader(_TradeGroup group) {
+    final Color colour = Color(BankpopBoard.colorForGroup(group.colour));
+    final String label = group.colour.isEmpty
+        ? 'Other'
+        : group.colour[0].toUpperCase() + group.colour.substring(1);
+    return Padding(
+      padding: const EdgeInsets.only(top: 2, bottom: 6),
+      child: Row(
+        children: <Widget>[
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: colour),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12.sp,
+              fontWeight: FontWeight.bold,
+              color: const Color(0xFF33691E),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            '${group.cards.length}',
+            style: TextStyle(fontSize: 10.sp, color: Colors.black45),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// One selectable card. The tick is always visible, so a set that is half
+  /// picked reads at a glance.
+  Widget _pickTile(PlayerCard card, Set<int> selected) {
+    final BankpopSpace? space = widget.spaces[card.cardIndex];
+    final Color colour = Color(BankpopBoard.colorForGroup(space?.color));
+    final bool hasBuildings = card.houses > 0 || card.hotels > 0;
+    final bool picked = selected.contains(card.cardIndex);
+
+    return Opacity(
+      opacity: hasBuildings ? 0.45 : 1,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: hasBuildings
+            ? null
+            : () {
+                setState(() {
+                  if (picked) {
+                    selected.remove(card.cardIndex);
+                  } else {
+                    selected.add(card.cardIndex);
+                  }
+                });
+              },
+        child: Container(
+          width: 116,
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: picked ? colour.withValues(alpha: 0.14) : Colors.white,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: picked ? colour : colour.withValues(alpha: 0.45),
+              width: picked ? 2 : 1,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Container(
+                    width: 5,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      color: colour,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Text(
+                      space?.name ?? 'Card #${card.cardIndex}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 10.sp,
+                        fontWeight: FontWeight.w600,
+                        height: 1.15,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    picked ? Icons.check_circle : Icons.circle_outlined,
+                    size: 13,
+                    color: picked ? colour : Colors.black26,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                hasBuildings
+                    ? 'Sell buildings first'
+                    : card.mortgaged
+                        ? 'Mortgaged'
+                        : '\u00a3${space?.price ?? 0}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 9.sp,
+                  color: hasBuildings ? Colors.red : Colors.black54,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   /// "2 cards and \u00a3150" - the summary line in the confirm dialog.
@@ -140,15 +359,17 @@ class _TradeBuilderDialogState extends State<TradeBuilderDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final otherPlayers = widget.players
-        .where((p) => p['player_id'] != widget.myId)
-        .toList();
+    final otherPlayers =
+        widget.players.where((p) => p['player_id'] != widget.myId).toList();
 
     return Dialog(
       insetPadding: const EdgeInsets.all(16),
       child: Container(
         width: 90.w,
-        height: 85.h,
+        // The frame caps the design height used by `.h`, but a dialog still has
+        // to fit the window it is drawn in: on a 400 px landscape phone 85.h
+        // would be taller than the screen.
+        height: MediaQuery.sizeOf(context).height * 0.85,
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: Colors.yellow.shade50,
@@ -157,10 +378,18 @@ class _TradeBuilderDialogState extends State<TradeBuilderDialog> {
         child: Column(
           children: [
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Trade Builder',
-                    style: TextStyle(fontSize: 20.sp, fontWeight: FontWeight.bold)),
+                // Flexible so a long font, a large text scale or a narrow
+                // phone wraps the title instead of overflowing the row.
+                Expanded(
+                  child: Text(
+                    'Trade Builder',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        TextStyle(fontSize: 20.sp, fontWeight: FontWeight.bold),
+                  ),
+                ),
                 IconButton(
                     onPressed: () => Navigator.pop(context),
                     icon: const Icon(Icons.close)),
@@ -178,7 +407,8 @@ class _TradeBuilderDialogState extends State<TradeBuilderDialog> {
               }).toList(),
               onChanged: (val) {
                 if (val != null) {
-                  final p = otherPlayers.firstWhere((p) => p['player_id'] == val);
+                  final p =
+                      otherPlayers.firstWhere((p) => p['player_id'] == val);
                   setState(() {
                     _selectedPlayerId = val;
                     _selectedPlayerName = p['name'].toString();
@@ -200,36 +430,16 @@ class _TradeBuilderDialogState extends State<TradeBuilderDialog> {
                         const Text('You Give',
                             style: TextStyle(fontWeight: FontWeight.bold)),
                         Expanded(
-                          child: ListView(
-                            children: widget.myCards.map((c) {
-                              final space = widget.spaces[c.cardIndex];
-                              final hasBuildings = c.houses > 0 || c.hotels > 0;
-                              return CheckboxListTile(
-                                title: Text(space?.name ?? 'Card #${c.cardIndex}'),
-                                subtitle: hasBuildings
-                                    ? const Text('Sell buildings first',
-                                        style: TextStyle(color: Colors.red, fontSize: 10))
-                                    : null,
-                                value: _mySelectedCards.contains(c.cardIndex),
-                                onChanged: hasBuildings
-                                    ? null
-                                    : (v) {
-                                        setState(() {
-                                          if (v == true) {
-                                            _mySelectedCards.add(c.cardIndex);
-                                          } else {
-                                            _mySelectedCards.remove(c.cardIndex);
-                                          }
-                                        });
-                                      },
-                              );
-                            }).toList(),
+                          child: _cardPicker(
+                            cards: widget.myCards,
+                            selected: _mySelectedCards,
                           ),
                         ),
                         TextField(
                           controller: _myCash,
                           keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(labelText: 'Cash to give'),
+                          decoration:
+                              const InputDecoration(labelText: 'Cash to give'),
                         ),
                       ],
                     ),
@@ -244,36 +454,16 @@ class _TradeBuilderDialogState extends State<TradeBuilderDialog> {
                         Expanded(
                           child: _loadingTheirCards
                               ? const Center(child: CircularProgressIndicator())
-                              : ListView(
-                                  children: _theirCards.map((c) {
-                                    final space = widget.spaces[c.cardIndex];
-                                    final hasBuildings = c.houses > 0 || c.hotels > 0;
-                                    return CheckboxListTile(
-                                      title: Text(space?.name ?? 'Card #${c.cardIndex}'),
-                                      subtitle: hasBuildings
-                                          ? const Text('Sell buildings first',
-                                              style: TextStyle(color: Colors.red, fontSize: 10))
-                                          : null,
-                                      value: _theirSelectedCards.contains(c.cardIndex),
-                                      onChanged: hasBuildings
-                                          ? null
-                                          : (v) {
-                                              setState(() {
-                                                if (v == true) {
-                                                  _theirSelectedCards.add(c.cardIndex);
-                                                } else {
-                                                  _theirSelectedCards.remove(c.cardIndex);
-                                                }
-                                              });
-                                            },
-                                    );
-                                  }).toList(),
+                              : _cardPicker(
+                                  cards: _theirCards,
+                                  selected: _theirSelectedCards,
                                 ),
                         ),
                         TextField(
                           controller: _theirCash,
                           keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(labelText: 'Cash to get'),
+                          decoration:
+                              const InputDecoration(labelText: 'Cash to get'),
                         ),
                       ],
                     ),

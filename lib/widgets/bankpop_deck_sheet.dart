@@ -31,8 +31,7 @@ Future<void> showBankpopDeckSheet(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Text(
               title,
-              style: const TextStyle(
-                  fontSize: 20, fontWeight: FontWeight.bold),
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
           ),
           const Divider(height: 1),
@@ -53,8 +52,7 @@ Future<void> showBankpopDeckSheet(
                           fontSize: 12, fontWeight: FontWeight.bold),
                     ),
                   ),
-                  title: Text(cards[i],
-                      style: const TextStyle(fontSize: 14)),
+                  title: Text(cards[i], style: const TextStyle(fontSize: 14)),
                 );
               },
             ),

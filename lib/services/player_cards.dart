@@ -14,7 +14,7 @@ class PlayerCard {
     required this.from,
     required this.to,
     required this.date,
-    required    this.time,
+    required this.time,
     this.houses = 0,
     this.hotels = 0,
     this.mortgaged = false,
@@ -287,16 +287,19 @@ class PlayerCards {
   }) async {
     final DateTime now = DateTime.now();
     try {
-      final Map<String, dynamic> row =
-          await Supabase.instance.client.from(_table).insert(<String, dynamic>{
-        'game_id': gameId,
-        'card_index': cardIndex,
-        'from': fromName,
-        'to': toName,
-        'code': '${payerId}_$receiverId',
-        'date': DateFormat('yyyy-MM-dd').format(now),
-        'time': DateFormat('HH:mm:ss').format(now),
-      }).select('id').single();
+      final Map<String, dynamic> row = await Supabase.instance.client
+          .from(_table)
+          .insert(<String, dynamic>{
+            'game_id': gameId,
+            'card_index': cardIndex,
+            'from': fromName,
+            'to': toName,
+            'code': '${payerId}_$receiverId',
+            'date': DateFormat('yyyy-MM-dd').format(now),
+            'time': DateFormat('HH:mm:ss').format(now),
+          })
+          .select('id')
+          .single();
       return ClaimResult.ok((row['id'] as num?)?.toInt());
     } on PostgrestException catch (error) {
       // 23505 is the unique index on (game_id, card_index): the other device won
@@ -325,10 +328,12 @@ class PlayerCards {
 
   /// This player's cards in this game, newest first.
   ///
-  /// The indexed filter matches the two id columns the trigger fills. Until the
-  /// trigger is deployed those columns are null, so an undefined-column reply
-  /// falls back to matching the ids inside `code` - the same arrangement the
-  /// transaction history uses.
+  /// Only the receiver side counts. `payer_id` is whoever paid for the card,
+  /// and the bank pays on every card it sells, so matching it would put every
+  /// issued property into the banker's own hand. The indexed filter uses the
+  /// id columns the trigger fills; until the trigger is deployed those are
+  /// null, so an undefined-column reply falls back to reading the ids inside
+  /// `code` - the same arrangement the transaction history uses.
   static Future<List<PlayerCard>> forPlayer({
     required String gameId,
     required String playerId,
@@ -342,7 +347,7 @@ class PlayerCards {
           .from(_table)
           .select()
           .eq('game_id', gameId)
-          .or('receiver_id.eq.$playerId,payer_id.eq.$playerId')
+          .eq('receiver_id', playerId)
           .order('date', ascending: false)
           .order('time', ascending: false)
           .limit(200);
@@ -354,16 +359,23 @@ class PlayerCards {
           .from(_table)
           .select()
           .eq('game_id', gameId)
-          .like('code', '%$playerId%')
+          .like('code', '%${playerId}_%')
           .order('date', ascending: false)
           .order('time', ascending: false)
           .limit(200);
     }
 
-    return rows
-        .map((dynamic row) =>
-            PlayerCard.fromMap(row as Map<String, dynamic>))
-        .toList();
+    // Both queries can also match the payer's half of `code` (the fallback is
+    // a LIKE, and a trigger-less project may hold a stale receiver_id), so the
+    // final say is the receiver half of each row.
+    final List<PlayerCard> mine = <PlayerCard>[];
+    for (final dynamic raw in rows) {
+      final Map<String, dynamic> row = raw as Map<String, dynamic>;
+      if (_receiverIdOf(row) != playerId) continue;
+      if (row['to']?.toString() == 'Bank') continue;
+      mine.add(PlayerCard.fromMap(row));
+    }
+    return mine;
   }
 
   static bool _columnsMissing(PostgrestException error) {

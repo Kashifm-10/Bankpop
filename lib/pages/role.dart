@@ -6,6 +6,9 @@ import 'package:lottie/lottie.dart';
 import 'package:mon/pages/banker/bank_details.dart';
 import 'package:mon/pages/player/player_details.dart';
 import 'package:mon/pages/player/player_screen.dart';
+import 'package:mon/services/game_session.dart';
+import 'package:mon/services/player_exit.dart';
+import 'package:mon/widgets/app_dialog.dart';
 import 'package:mon/widgets/app_message.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -13,6 +16,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 class SelectRoleScreen extends StatelessWidget {
   const SelectRoleScreen({super.key});
+
+  /// Set when the join was refused for a reason that was already explained in
+  /// its own dialog (a player the banker removed). The generic "approval not
+  /// received" box must not then appear on top of that explanation.
+  static bool _explainedRefusal = false;
 
   void _goToBanker(BuildContext context) {
     Navigator.push(
@@ -22,6 +30,7 @@ class SelectRoleScreen extends StatelessWidget {
   }
 
   void _goToPlayer(BuildContext context) async {
+    _explainedRefusal = false;
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     final String? playerID = prefs.getString('playerID');
 
@@ -54,7 +63,7 @@ class SelectRoleScreen extends StatelessWidget {
     if (result != null) {
       // ignore: use_build_context_synchronously
       _navigateToPlayersScreen(context, result);
-    } else {
+    } else if (!_explainedRefusal) {
       // ignore: use_build_context_synchronously
       _showUnableToJoinDialog(context);
     }
@@ -65,7 +74,6 @@ class SelectRoleScreen extends StatelessWidget {
     return showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: Color(0xFFFFF8E1),
         title: const Text('Join Game'),
         content: const Text(
             'Do you want to scan a QR code or enter the Game ID manually?'),
@@ -100,7 +108,6 @@ class SelectRoleScreen extends StatelessWidget {
       builder: (context) {
         String input = '';
         return AlertDialog(
-          backgroundColor: Color(0xFFFFF8E1),
           title: const Text('Enter Game ID'),
           content: TextField(
             autofocus: true,
@@ -158,6 +165,15 @@ class SelectRoleScreen extends StatelessWidget {
       return null;
     }
 
+    // A finished game must not take new players. A suspended one can still be
+    // joined: the player is told it is paused and can come back when the
+    // banker resumes it.
+    final GameSession? session = await GameSession.fetch(gameId);
+    if (session != null && session.isEnded) {
+      if (context.mounted) showMessage(context, 'That game has already ended.');
+      return null;
+    }
+
     // The name now comes from the profile saved on this device.
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     String? playerName =
@@ -190,6 +206,35 @@ class SelectRoleScreen extends StatelessWidget {
         .limit(1);
 
     final existingPlayerData = existingPlayerResponse;
+
+    // A removed player has no seat left to rejoin - their cash and cards are
+    // the bank's now.
+    for (final dynamic raw in existingPlayerData) {
+      final Map<String, dynamic> row = (raw as Map).cast<String, dynamic>();
+      if (PlayerStanding.fromRow(row) != PlayerStanding.kicked) continue;
+      _explainedRefusal = true;
+      if (context.mounted) {
+        await showAppDialog<void>(
+          context,
+          title: 'You were removed',
+          icon: Icons.person_remove_alt_1,
+          accent: const Color(0xFFC62828),
+          message: 'The banker removed you from this game, so there is no seat '
+              'to rejoin. Ask them to put you back - they can do that from the '
+              'table, and you will start again with an empty wallet and no '
+              'cards - or to start a new game.',
+          actions: <Widget>[
+            AppDialogButton(
+              label: 'OK',
+              primary: true,
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+          ],
+        );
+      }
+      return null;
+    }
+
     if (existingPlayerData.isEmpty) {
       // If player doesn't exist, insert a new record
       try {
@@ -206,13 +251,15 @@ class SelectRoleScreen extends StatelessWidget {
       }
     }
 
-    // Show waiting dialog while waiting for approval
-    // ignore: use_build_context_synchronously
-    _showWaitingDialog(context);
-
     final stopwatch = Stopwatch()..start();
     const pollInterval = Duration(seconds: 2);
     const maxWait = Duration(seconds: 10);
+
+    // Show waiting dialog while waiting for approval. It counts down the same
+    // window the poll waits for, so it never outlives the poll (which used to
+    // leave a stray `pop` closing the screen behind it).
+    // ignore: use_build_context_synchronously
+    _showWaitingDialog(context, maxWait);
 
     Map<String, dynamic>? approvedPlayer;
 
@@ -228,18 +275,18 @@ class SelectRoleScreen extends StatelessWidget {
           .stream(primaryKey: const ['id'])
           .eq('game_id', gameId)
           .listen(
-        (List<Map<String, dynamic>> rows) {
-          if (approved.isCompleted) return;
-          for (final Map<String, dynamic> row in rows) {
-            if (row['role'] == 'player' && row['player_id'] == playerID) {
-              approved.complete(row);
-              return;
-            }
-          }
-        },
-        onError: (Object error) =>
-            debugPrint('Approval stream error, still polling: $error'),
-      );
+            (List<Map<String, dynamic>> rows) {
+              if (approved.isCompleted) return;
+              for (final Map<String, dynamic> row in rows) {
+                if (row['role'] == 'player' && row['player_id'] == playerID) {
+                  approved.complete(row);
+                  return;
+                }
+              }
+            },
+            onError: (Object error) =>
+                debugPrint('Approval stream error, still polling: $error'),
+          );
     } catch (e) {
       debugPrint('Could not subscribe to approval updates: $e');
     }
@@ -275,25 +322,55 @@ class SelectRoleScreen extends StatelessWidget {
       await approvalUpdates?.cancel();
     }
 
+    // Nothing came back inside the window: the request is withdrawn so the
+    // banker's queue does not hold a seat nobody is waiting for any more.
+    if (approvedPlayer == null) {
+      try {
+        await supabase
+            .from('request_test')
+            .delete()
+            .eq('game_id', gameId)
+            .eq('player_id', playerID);
+      } catch (error) {
+        debugPrint('Could not withdraw the join request: $error');
+      }
+    }
+
     // ignore: use_build_context_synchronously
     Navigator.of(context).pop(); // Close waiting dialog
+
+    if (approvedPlayer == null) {
+      // Already said, so the caller's own "unable to join" dialog does not
+      // stack a second copy on top of it.
+      _explainedRefusal = true;
+      if (context.mounted) {
+        showMessage(
+          context,
+          'The banker did not approve in time, so the request was withdrawn. '
+          'Ask them to watch for it, then join again.',
+          title: 'Not approved yet',
+        );
+      }
+    }
 
     return approvedPlayer;
   }
 
-  void _showWaitingDialog(BuildContext context) {
-    int secondsRemaining = 15;
+  void _showWaitingDialog(BuildContext context, Duration window) {
+    int secondsRemaining = window.inSeconds;
     late StateSetter setState;
+    bool open = true;
 
-    Timer? timer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (secondsRemaining > 0) {
-        setState(() {
-          secondsRemaining--;
-        });
-      } else {
+    final Timer timer = Timer.periodic(const Duration(seconds: 1), (t) {
+      // The poll closes this dialog; the countdown only keeps the player
+      // informed and stops once there is nothing left to count.
+      if (!open || secondsRemaining <= 0) {
         t.cancel();
-        Navigator.of(context).pop(); // auto-close the dialog when timer ends
+        return;
       }
+      setState(() {
+        secondsRemaining--;
+      });
     });
 
     showDialog(
@@ -304,7 +381,7 @@ class SelectRoleScreen extends StatelessWidget {
           builder: (BuildContext context, StateSetter stateSetter) {
             setState = stateSetter;
             return AlertDialog(
-backgroundColor: Color(0xFFFFF8E1),              title: const Text("Waiting for Approval"),
+              title: const Text("Waiting for Approval"),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -321,8 +398,9 @@ backgroundColor: Color(0xFFFFF8E1),              title: const Text("Waiting for 
         );
       },
     ).then((_) {
-      timer
-          .cancel(); // Ensure timer is cancelled if dialog is dismissed manually
+      // The dialog is gone (the poll closed it); stop repainting it.
+      open = false;
+      timer.cancel();
     });
   }
 
@@ -330,8 +408,9 @@ backgroundColor: Color(0xFFFFF8E1),              title: const Text("Waiting for 
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-backgroundColor: Color(0xFFFFF8E1),        title: const Text("Unable to Join"),
-        content: const Text("Approval not received within 1 minute."),
+        title: const Text("Unable to Join"),
+        content:
+            const Text("The banker did not approve the join request in time."),
         actions: [
           TextButton(
             onPressed: () =>
@@ -381,89 +460,99 @@ backgroundColor: Color(0xFFFFF8E1),        title: const Text("Unable to Join"),
             end: Alignment.bottomRight,
           ),
         ),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.start,
-            children: [
-              SizedBox(height: 5.5.h),
-              Container(
-                padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 0.h),
-                margin: EdgeInsets.symmetric(horizontal: 6.w),
-                decoration: BoxDecoration(
-                  color: Colors.transparent,
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: Padding(
-                  padding: EdgeInsets.only(bottom: 8.h),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(right: 15.0),
-                        child: SizedBox(
-                          height: 45.sp,
-                          child: Lottie.asset(
-                            "assets/lottie/thinking.json",
-                            fit: BoxFit.contain,
-                            repeat: true,
-                          ),
-                        ),
+        // The role picker used to be a bare Column, so a short screen (a
+        // landscape tablet, a browser window, a phone with a large text scale)
+        // overflowed with no way to scroll. It now scrolls, and stays centred
+        // while it still fits.
+        child: LayoutBuilder(
+          builder: (BuildContext context, BoxConstraints constraints) =>
+              SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  children: [
+                    SizedBox(height: 5.5.h),
+                    Container(
+                      padding:
+                          EdgeInsets.symmetric(horizontal: 6.w, vertical: 0.h),
+                      margin: EdgeInsets.symmetric(horizontal: 6.w),
+                      decoration: BoxDecoration(
+                        color: Colors.transparent,
+                        borderRadius: BorderRadius.circular(24),
                       ),
-                      Text(
-                        'Time to Pick a Role!',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 20.sp,
-                          fontWeight: FontWeight.w700,
-                          color: const Color(0xFF33691E), // medium green
-                        ),
-                      ),
-                      SizedBox(height: 2.5.h),
-                      RoleButtonCard(
-                        title: "Become a\nBanker",
-                        gradientColors: const [
-                          Color(0xFF81C784), // light green
-                          Color(0xFF388E3C), // deep green
-                        ],
-                        lottieAssetPath: "assets/lottie/bank_role.json",
-                        overlayImageUrl:
-                            "https://i.pinimg.com/736x/ba/71/9d/ba719dbedd1f8a0291a5415710f9ca53.jpg",
-                        onTap: () => _goToBanker(context),
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        'Be the Banker — the money master keeping track of the cash flow.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 16.sp,
-                          fontWeight: FontWeight.w500,
-                          color: const Color(0xFF558B2F), // medium green
-                        ),
-                      ),
-                      const SizedBox(height: 25),
-                      RoleButtonCard(
-                        title: "Play as a\nPlayer",
-                        gradientColors: const [
-                          Color(0xFFAED581), // soft green
-                          Color(0xFF558B2F), // rich green
-                        ],
-                        lottieAssetPath: "assets/lottie/player_role.json",
-                        overlayImageUrl:
-                            "https://i.pinimg.com/1200x/ec/64/53/ec64534337b9832dcee5e7a4ab8f816d.jpg",
-                        onTap: () => _goToPlayer(context),
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        'Or be a Player — the risk-taker, deal-maker, and future millionaire!',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 16.sp,
-                          fontWeight: FontWeight.w500,
-                          color: const Color(0xFF558B2F), // medium green
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      /*  Padding(
+                      child: Padding(
+                        padding: EdgeInsets.only(bottom: 8.h),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.only(right: 15.0),
+                              child: SizedBox(
+                                height: 45.sp,
+                                child: Lottie.asset(
+                                  "assets/lottie/thinking.json",
+                                  fit: BoxFit.contain,
+                                  repeat: true,
+                                ),
+                              ),
+                            ),
+                            Text(
+                              'Time to Pick a Role!',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 20.sp,
+                                fontWeight: FontWeight.w700,
+                                color: const Color(0xFF33691E), // medium green
+                              ),
+                            ),
+                            SizedBox(height: 2.5.h),
+                            RoleButtonCard(
+                              title: "Become a\nBanker",
+                              gradientColors: const [
+                                Color(0xFF81C784), // light green
+                                Color(0xFF388E3C), // deep green
+                              ],
+                              lottieAssetPath: "assets/lottie/bank_role.json",
+                              overlayImageUrl:
+                                  "https://i.pinimg.com/736x/ba/71/9d/ba719dbedd1f8a0291a5415710f9ca53.jpg",
+                              onTap: () => _goToBanker(context),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              'Be the Banker — the money master keeping track of the cash flow.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 16.sp,
+                                fontWeight: FontWeight.w500,
+                                color: const Color(0xFF558B2F), // medium green
+                              ),
+                            ),
+                            const SizedBox(height: 25),
+                            RoleButtonCard(
+                              title: "Play as a\nPlayer",
+                              gradientColors: const [
+                                Color(0xFFAED581), // soft green
+                                Color(0xFF558B2F), // rich green
+                              ],
+                              lottieAssetPath: "assets/lottie/player_role.json",
+                              overlayImageUrl:
+                                  "https://i.pinimg.com/1200x/ec/64/53/ec64534337b9832dcee5e7a4ab8f816d.jpg",
+                              onTap: () => _goToPlayer(context),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              'Or be a Player — the risk-taker, deal-maker, and future millionaire!',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 16.sp,
+                                fontWeight: FontWeight.w500,
+                                color: const Color(0xFF558B2F), // medium green
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            /*  Padding(
                         padding: const EdgeInsets.all(10.0),
                         child: Align(
                           alignment: Alignment.bottomLeft,
@@ -494,17 +583,19 @@ backgroundColor: Color(0xFFFFF8E1),        title: const Text("Unable to Join"),
                           ),
                         ),
                       ) */
-                    ],
-                  ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
-
 }
 
 class RoleButtonCard extends StatelessWidget {
@@ -527,68 +618,86 @@ class RoleButtonCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Card(
-        elevation: 1,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(15),
-        ),
-        color: Colors.transparent,
-        child: Container(
-          width: 70.w,
-          height: 15.h,
-          decoration: BoxDecoration(
+    return Semantics(
+      button: true,
+      label: title.replaceAll('\n', ' '),
+      excludeSemantics: true,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Card(
+          elevation: 1,
+          shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(15),
-            gradient: LinearGradient(colors: gradientColors),
           ),
-          child: Stack(
-            children: [
-              if (overlayImageUrl != null)
-                Opacity(
-                  opacity: 0.5,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(
-                        16), // Adjust the radius as needed
-                    child: Image.network(
-                      overlayImageUrl!,
-                      fit: BoxFit.cover,
-                      width: double.infinity,
-                      height: double.infinity,
+          color: Colors.transparent,
+          child: Container(
+            width: 70.w,
+            height: 15.h,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(15),
+              gradient: LinearGradient(colors: gradientColors),
+            ),
+            child: Stack(
+              children: [
+                if (overlayImageUrl != null)
+                  Opacity(
+                    opacity: 0.5,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(
+                          16), // Adjust the radius as needed
+                      child: Image.network(
+                        overlayImageUrl!,
+                        fit: BoxFit.cover,
+                        width: double.infinity,
+                        height: double.infinity,
+                        // The background is decoration: a host that blocks
+                        // hotlinking (or a web build without a CORS header) must
+                        // leave the gradient and the Lottie alone, not throw.
+                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                        loadingBuilder: (BuildContext context, Widget child,
+                                ImageChunkEvent? progress) =>
+                            progress == null ? child : const SizedBox.shrink(),
+                      ),
+                    ),
+                  ),
+
+                // 🔥 Foreground Lottie animation
+                if (lottieAssetPath != null)
+                  Positioned(
+                    left: 0,
+                    bottom: 0,
+                    top: 0,
+                    child: SizedBox(
+                      height: 12.h,
+                      width: 12.h,
+                      child: Lottie.asset(lottieAssetPath!,
+                          fit: BoxFit.contain, repeat: true),
+                    ),
+                  ),
+
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Padding(
+                    // Vertical padding used to be 25, which left less room than
+                    // two lines of title on a short window and clipped the second
+                    // one inside the card's Stack.
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 10,
+                    ),
+                    child: Text(
+                      title,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 21.sp,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.right,
                     ),
                   ),
                 ),
-
-              // 🔥 Foreground Lottie animation
-              if (lottieAssetPath != null)
-                Positioned(
-                  left: 0,
-                  bottom: 0,
-                  top: 0,
-                  child: SizedBox(
-                    height: 12.h,
-                    width: 12.h,
-                    child: Lottie.asset(lottieAssetPath!,
-                        fit: BoxFit.contain, repeat: true),
-                  ),
-                ),
-
-              Align(
-                alignment: Alignment.centerRight,
-                child: Padding(
-                  padding: const EdgeInsets.all(25.0),
-                  child: Text(
-                    title,
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 21.sp,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    textAlign: TextAlign.right,
-                  ),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

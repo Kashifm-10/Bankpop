@@ -170,7 +170,8 @@ class Deals {
           .eq('status', 'pending')
           .order('id');
       return rows
-          .map((dynamic row) => DealRequest.fromMap(row as Map<String, dynamic>))
+          .map(
+              (dynamic row) => DealRequest.fromMap(row as Map<String, dynamic>))
           .toList();
     } catch (error) {
       // The table is optional until supabase/mortgage_trades.sql is run.
@@ -333,10 +334,12 @@ class Deals {
     if (deal.kind == DealKind.unmortgage && card['mortgaged'] != true) {
       return const DealOutcome.rejected('that property is not mortgaged');
     }
-    if (deal.kind == DealKind.sellHouse && ((card['houses'] as num?) ?? 0) < 1) {
+    if (deal.kind == DealKind.sellHouse &&
+        ((card['houses'] as num?) ?? 0) < 1) {
       return const DealOutcome.rejected('that property has no house to sell');
     }
-    if (deal.kind == DealKind.sellHotel && ((card['hotels'] as num?) ?? 0) < 1) {
+    if (deal.kind == DealKind.sellHotel &&
+        ((card['hotels'] as num?) ?? 0) < 1) {
       return const DealOutcome.rejected('that property has no hotel to sell');
     }
 
@@ -348,7 +351,8 @@ class Deals {
     final TransferOutcome transfer = await WalletTransfer.pay(
       gameId: deal.gameId,
       fromId: bankPays ? deal.toId : deal.fromId,
-      fromRole: bankPays ? WalletTransfer.bankerRole : WalletTransfer.playerRole,
+      fromRole:
+          bankPays ? WalletTransfer.bankerRole : WalletTransfer.playerRole,
       toId: bankPays ? deal.fromId : deal.toId,
       toRole: bankPays ? WalletTransfer.playerRole : WalletTransfer.bankerRole,
       amount: amount,
@@ -375,13 +379,16 @@ class Deals {
       await WalletTransfer.pay(
         gameId: deal.gameId,
         fromId: bankPays ? deal.fromId : deal.toId,
-        fromRole: bankPays ? WalletTransfer.playerRole : WalletTransfer.bankerRole,
+        fromRole:
+            bankPays ? WalletTransfer.playerRole : WalletTransfer.bankerRole,
         toId: bankPays ? deal.toId : deal.fromId,
-        toRole: bankPays ? WalletTransfer.bankerRole : WalletTransfer.playerRole,
+        toRole:
+            bankPays ? WalletTransfer.bankerRole : WalletTransfer.playerRole,
         amount: amount,
       );
       await _setStatus(deal.id, 'rejected');
-      return const DealOutcome.rejected('it did not go through, so nothing moved');
+      return const DealOutcome.rejected(
+          'it did not go through, so nothing moved');
     }
 
     await _record(supabase, deal.gameId,
@@ -421,7 +428,8 @@ class Deals {
             '$needed no longer owns ${_nameOf(spaces, index)}');
       }
       // Buildings cannot be traded; they go back to the bank first.
-      if (((row['houses'] as num?) ?? 0) > 0 || ((row['hotels'] as num?) ?? 0) > 0) {
+      if (((row['houses'] as num?) ?? 0) > 0 ||
+          ((row['hotels'] as num?) ?? 0) > 0) {
         return DealOutcome.rejected(
             'Sell the buildings on ${_nameOf(spaces, index)} first');
       }
@@ -483,13 +491,25 @@ class Deals {
     }
 
     // Then the properties move, and only then is the deal done.
+    //
+    // A `player_cards` row is also that card's history, and `from`/`to` are the
+    // two hands it last passed between. A trade therefore has to overwrite
+    // `from` as well as `to`: leaving it alone made a card that was traded from
+    // another player still claim it came from the bank.
     try {
+      final DateTime now = DateTime.now();
+      final String date = DateFormat('yyyy-MM-dd').format(now);
+      final String time = DateFormat('HH:mm:ss').format(now);
       if (theirs.isNotEmpty) {
         await supabase
             .from(_cardsTable)
             .update(<String, dynamic>{
+              'from': deal.fromName,
               'to': deal.toName,
+              'code': '${deal.fromId}_${deal.toId}',
               'receiver_id': deal.toId,
+              'date': date,
+              'time': time,
             })
             .eq('game_id', deal.gameId)
             .inFilter('card_index', theirs);
@@ -498,8 +518,12 @@ class Deals {
         await supabase
             .from(_cardsTable)
             .update(<String, dynamic>{
+              'from': deal.toName,
               'to': deal.fromName,
+              'code': '${deal.toId}_${deal.fromId}',
               'receiver_id': deal.fromId,
+              'date': date,
+              'time': time,
             })
             .eq('game_id', deal.gameId)
             .inFilter('card_index', mine);
@@ -597,9 +621,7 @@ class Deals {
         .from(_cardsTable)
         .select('card_index, houses, hotels, to')
         .eq('game_id', gameId);
-    return rows
-        .cast<Map<String, dynamic>>()
-        .where((Map<String, dynamic> row) {
+    return rows.cast<Map<String, dynamic>>().where((Map<String, dynamic> row) {
       final int? index = (row['card_index'] as num?)?.toInt();
       final BankpopSpace? space = index == null ? null : spaces[index];
       return space?.color == colour && row['to']?.toString() == ownerName;
@@ -629,5 +651,4 @@ class Deals {
       debugPrint('Could not record a deal payment: $error');
     }
   }
-
 }

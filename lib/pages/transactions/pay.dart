@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:mon/services/camera_access.dart';
 import 'package:mon/services/player_cards.dart';
 import 'package:mon/widgets/app_message.dart';
+import 'package:mon/widgets/scanner_error_view.dart';
 import 'package:mon/services/wallet_transfer.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -14,8 +17,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 class QRPayScanner extends StatefulWidget {
   final String gameId;
 
-  /// Opened from "Buy Card": the scanner reads the same payloads, so this only
-  /// changes what the screen says it is for.
+  /// The scanner always reads both payloads - a player's pay QR and the bank's
+  /// card QR - so this only changes the instruction it shows.
   final bool isCardMode;
 
   const QRPayScanner({
@@ -32,37 +35,88 @@ class _QRPayScannerState extends State<QRPayScanner> {
   final MobileScannerController _controller = MobileScannerController();
   bool _scanned = false;
 
+  /// The web needs a tap before it may open the camera (see ScannerStartView),
+  /// but only the first time - once the camera has been allowed, it starts by
+  /// itself instead of asking again.
+  bool _cameraOn = false;
+  bool _checkedCamera = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _prepareCamera();
+  }
+
+  Future<void> _prepareCamera() async {
+    final bool granted = await CameraAccess.isGranted();
+    if (!mounted) return;
+    setState(() {
+      _cameraOn = granted;
+      _checkedCamera = true;
+    });
+  }
+
+  void _startCamera() {
+    CameraAccess.remember();
+    setState(() => _cameraOn = true);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.isCardMode ? "Scan Card QR" : "Scan QR to Pay"),
+        title: const Text('Scan QR'),
       ),
       body: Stack(
         children: [
-          MobileScanner(
-            controller: _controller,
-            onDetect: _onDetect,
-          ),
-          if (widget.isCardMode)
-            Positioned(
-              left: 24,
-              right: 24,
-              bottom: 32,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  "Scan the bank's property card QR to buy it",
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white, fontSize: 14.sp),
-                ),
+          if (!_checkedCamera)
+            const Center(
+              child: CircularProgressIndicator(color: Color(0xFF689F38)),
+            )
+          else if (!_cameraOn)
+            ScannerStartView(
+              title: widget.isCardMode ? 'Scan the card QR' : 'Scan to pay',
+              body: 'Turn on the camera to scan the other side\'s code. This '
+                  'is only asked the first time.',
+              onStart: _startCamera,
+            )
+          else
+            MobileScanner(
+              controller: _controller,
+              onDetect: _onDetect,
+              errorBuilder: (BuildContext context, MobileScannerException error,
+                  Widget? child) {
+                // The camera it was allowed before is gone now, so the next
+                // visit should explain the permission again.
+                CameraAccess.forget();
+                return ScannerErrorView(
+                  error: error,
+                  onRetry: () => _controller.start(),
+                  manualLabel: 'Close',
+                  onManualEntry: () => Navigator.of(context).maybePop(),
+                );
+              },
+            ),
+          Positioned(
+            left: 24,
+            right: 24,
+            bottom: 32,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                widget.isCardMode
+                    ? "Scan the bank's property card QR to buy it"
+                    : "Scan a player's QR to pay them, or the bank's card QR "
+                        'to buy a property',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white, fontSize: 14.sp),
               ),
             ),
+          ),
         ],
       ),
     );
@@ -247,7 +301,6 @@ class _QRPayScannerState extends State<QRPayScanner> {
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialogContext) => AlertDialog(
-        backgroundColor: const Color(0xFFFFF8E1),
         title: const Text('Buy Card'),
         content: Text(
           'Buy $cardName for £$price?\nThe money goes to the bank.',
@@ -313,6 +366,48 @@ class _QRPayScannerState extends State<QRPayScanner> {
       return;
     }
 
+    // The claim and the payment are two steps, so the card can have left the
+    // board in between - the banker removing its owner hands every card back to
+    // the market. Nothing may be charged for a card that is not there, so the
+    // buyer is paid back before the receipt is shown.
+    final String? stillOwned =
+        await PlayerCards.ownerOf(widget.gameId, cardIndex);
+    if (!mounted) return;
+    if (stillOwned == null) {
+      final TransferOutcome refund = await WalletTransfer.pay(
+        gameId: widget.gameId,
+        fromId: bankerId,
+        fromRole: WalletTransfer.bankerRole,
+        toId: payerId,
+        toRole: WalletTransfer.playerRole,
+        amount: price,
+      );
+      if (refund.ok) {
+        try {
+          await Supabase.instance.client.from('transactions').insert({
+            'game_id': widget.gameId,
+            'value': price,
+            'from': 'Bank',
+            'to': payerName,
+            'code': '${bankerId}_$payerId',
+            'date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
+            'time': DateFormat('HH:mm:ss').format(DateTime.now()),
+          });
+        } catch (error) {
+          debugPrint('Could not record the card refund: $error');
+        }
+      }
+      if (!mounted) return;
+      navigator.pop();
+      notify(
+        'failed',
+        detail: refund.ok
+            ? 'That card left the board as you paid - your money was returned'
+            : 'That card left the board as you paid - ask the bank for a refund',
+      );
+      return;
+    }
+
     // The card row is the card history; this keeps the money history too, the
     // way an ordinary ScanPay payment does.
     try {
@@ -336,7 +431,6 @@ class _QRPayScannerState extends State<QRPayScanner> {
     await showDialog<void>(
       context: navigator.context,
       builder: (BuildContext dialogContext) => AlertDialog(
-        backgroundColor: const Color(0xFFFFF8E1),
         title: const Text('Card purchased'),
         content: Text('You now own $cardName.'),
         actions: <Widget>[
@@ -417,7 +511,6 @@ class _QRPayScannerState extends State<QRPayScanner> {
     return await showDialog<bool>(
           context: context,
           builder: (_) => AlertDialog(
-            backgroundColor: Color(0xFFFFF8E1),
             title: const Text('Confirm Payment'),
             content: Text('Pay $value to Player ID: $playerID?'),
             actions: [

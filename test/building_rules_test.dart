@@ -124,8 +124,7 @@ void main() {
   });
 
   test('Stations and Utilities take no buildings', () {
-    final BankpopSpace station =
-        _space(5, 'Station One', color: 'Station');
+    final BankpopSpace station = _space(5, 'Station One', color: 'Station');
     final BuildingDecision decision = BuildingRules.next(
       space: station,
       set: <BankpopSpace>[station],

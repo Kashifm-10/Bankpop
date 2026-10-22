@@ -133,7 +133,8 @@ void main() {
     expect(find.text('Show QR'), findsNothing);
   });
 
-  testWidgets('a sold tile carries the owner name', (WidgetTester tester) async {
+  testWidgets('a sold tile carries the owner name',
+      (WidgetTester tester) async {
     await tester.pumpWidget(_tile(ownerName: 'Ameen'));
     await tester.pumpAndSettle();
 
