@@ -3,11 +3,11 @@ import 'package:animated_flip_counter/animated_flip_counter.dart';
 import 'package:awesome_snackbar_content/awesome_snackbar_content.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lottie/lottie.dart';
 import 'package:mon/models/bankpop_board.dart';
-import 'package:mon/pages/banker/banker_screen.dart';
-import 'package:mon/pages/transactions/pay.dart';
+import 'package:mon/routes.dart';
 import 'package:mon/services/building_rules.dart';
 import 'package:mon/services/card_requests.dart';
 import 'package:mon/services/deals.dart';
@@ -16,7 +16,6 @@ import 'package:mon/services/player_cards.dart';
 import 'package:mon/services/player_exit.dart';
 import 'package:mon/services/wallet_transfer.dart';
 import 'package:mon/pages/transactions/receive.dart';
-import 'package:mon/pages/transactions/transactions.dart';
 import 'package:mon/widgets/amount_keypad.dart';
 import 'package:mon/widgets/app_dialog.dart';
 import 'package:mon/widgets/app_message.dart';
@@ -29,8 +28,6 @@ import 'package:mon/widgets/trade_builder_dialog.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
-import '../home.dart';
 
 class Player {
   final String playerID;
@@ -237,11 +234,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.remove('gameID');
     if (!mounted) return;
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute<void>(builder: (_) => const WelcomePage()),
-      (Route<dynamic> route) => false,
-    );
+    context.go(AppRoutes.home);
   }
 
   void _subscribeToSession() {
@@ -317,11 +310,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
     );
     if (!open || !mounted) return;
 
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(
-        builder: (_) => BankerGameScreen(bankValue: 0, gameId: widget.gameId),
-      ),
-    );
+    context.pushReplacement(AppRoutes.banker(widget.gameId));
   }
 
   /// The banker paused (or ended) the game. A paused game is resumable and
@@ -344,14 +333,14 @@ class _PlayersScreenState extends State<PlayersScreen> {
   /// Leaves the table for the title screen. The game itself is untouched: a
   /// pause can still be resumed, and an ended game is still in Your Games to
   /// look at.
+  ///
+  /// `pushReplacement` so the browser's back button does not reopen the table
+  /// this button just closed.
   Future<void> _returnToTitle() async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.remove('gameID');
     if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute<void>(builder: (_) => const WelcomePage()),
-      (Route<dynamic> route) => false,
-    );
+    context.pushReplacement(AppRoutes.home);
   }
 
   /// Live roster for this game. Supabase Realtime pushes a change the moment a
@@ -2044,17 +2033,12 @@ class _PlayersScreenState extends State<PlayersScreen> {
                 GameIconButton(
                   control: GameControls.history,
                   size: 36,
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => TransactionHistoryPage(
-                          gameId: widget.gameId,
-                          playerId: playerID ?? '-',
-                        ),
-                      ),
-                    );
-                  },
+                  onPressed: () => context.push(
+                    AppRoutes.history(
+                      widget.gameId,
+                      playerId: playerID ?? '-',
+                    ),
+                  ),
                 ),
                 if (_playWithCards) const SizedBox(width: 4),
                 // The board itself, to check who owns what. A tap only opens a
@@ -2075,14 +2059,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
                     final SharedPreferences prefs =
                         await SharedPreferences.getInstance();
                     await prefs.remove('gameID');
-
-                    // ignore: use_build_context_synchronously
-                    Navigator.pushAndRemoveUntil(
-                      context,
-                      MaterialPageRoute(
-                          builder: (context) => const WelcomePage()),
-                      (Route<dynamic> route) => false,
-                    );
+                    if (!mounted) return;
+                    context.pushReplacement(AppRoutes.home);
                   },
                 ),
                 const SizedBox(width: 4),
@@ -2358,12 +2336,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                         control: _payControl,
                                         onPressed: () {
                                           if (payOption == 'ScanPay') {
-                                            Navigator.push(
-                                              context,
-                                              MaterialPageRoute(
-                                                builder: (_) => QRPayScanner(
-                                                    gameId: widget.gameId),
-                                              ),
+                                            context.push(
+                                              AppRoutes.scanPay(widget.gameId),
                                             );
                                           } else {
                                             payBank();

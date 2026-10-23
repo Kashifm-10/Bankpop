@@ -1,8 +1,6 @@
-import 'dart:convert';
-import 'dart:math';
-
-import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
+import 'package:mon/services/account_mail.dart';
+import 'package:mon/services/password.dart';
 import 'package:mon/services/profile_avatar.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -15,6 +13,7 @@ class AccountProfile {
     required this.email,
     this.name,
     this.avatar,
+    this.verified = false,
   });
 
   /// The stable player id. This is the same id the game rows use, which is what
@@ -23,21 +22,59 @@ class AccountProfile {
   final String email;
   final String? name;
   final String? avatar;
+
+  /// False until the link in the verification mail has been opened. Accounts
+  /// created before verification existed are marked verified by the migration
+  /// in supabase/email.sql.
+  final bool verified;
 }
 
-/// The outcome of a sign-up or sign-in, small enough for a screen to render
-/// directly.
+/// The outcome of a sign-in, small enough for a screen to render directly.
 class AuthResult {
-  const AuthResult.ok(this.profile, {this.created = false}) : error = null;
-  const AuthResult.failed(String this.error)
-      : profile = null,
-        created = false;
+  const AuthResult.ok(this.profile, {this.usedResetPassword = false})
+      : error = null,
+        needsVerification = false,
+        email = null;
+
+  const AuthResult.failed(
+    String this.error, {
+    this.needsVerification = false,
+    this.email,
+  })  : profile = null,
+        usedResetPassword = false;
 
   final AccountProfile? profile;
   final String? error;
-  final bool created;
+
+  /// The password was the temporary one from a reset mail. The caller must
+  /// send the player to the new-password screen before anything else.
+  final bool usedResetPassword;
+
+  /// The address is right and the password was right, but the account has not
+  /// opened its verification link yet - the sign-in screen offers a resend.
+  final bool needsVerification;
+
+  /// The address the verification mail should go to, when [needsVerification].
+  final String? email;
 
   bool get ok => profile != null;
+}
+
+/// The outcome of creating an account.
+///
+/// A created account is not signed in: the verification link has to be opened
+/// first. [SignUpResult.failed] is also what a player sees when the account row
+/// was written but the verification mail could not be sent - the row is then
+/// removed, so a retry starts clean instead of leaving an account nobody can
+/// enter.
+class SignUpResult {
+  const SignUpResult.created(this.email) : error = null;
+  const SignUpResult.failed(this.error) : email = null;
+
+  final String? email;
+  final String? error;
+
+  bool get ok => error == null;
 }
 
 /// Email + password accounts, kept entirely in `players_profile`.
@@ -65,10 +102,15 @@ class Account {
   /// lives here because the splash screen asks both questions in one place.
   static const String onboardingDoneKey = 'onboarding_done';
 
+  /// True between signing in with a temporary password and choosing a new one.
+  /// The splash screen reads it so closing the app mid-way does not skip the
+  /// step.
+  static const String passwordChangeKey = 'password_change_required';
+
   /// The PBKDF2 work factor. High enough that a stolen hash is not a password,
   /// low enough that a phone (or a browser compiling Dart to JavaScript) can
   /// derive it in well under a second.
-  static const int iterations = 20000;
+  static const int iterations = PasswordHash.iterations;
 
   static final RegExp _emailPattern = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
 
@@ -90,18 +132,24 @@ class Account {
     return prefs.getString(emailKey);
   }
 
-  /// Creates the account for [email] and adopts its id on this device.
+  /// Whether the splash screen has to detour through "choose a new password".
+  static Future<bool> passwordChangeRequired() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(passwordChangeKey) ?? false;
+  }
+
+  /// Creates the account for [email] and sends its verification mail.
   ///
   /// A device that already played games before signing up keeps its existing
-  /// player id, so those games become this account's games instead of being
-  /// abandoned by the new profile.
-  static Future<AuthResult> signUp({
+  /// player id, so those games become this account's games once the address is
+  /// verified and the account is signed in.
+  static Future<SignUpResult> signUp({
     required String email,
     required String password,
   }) async {
     final String address = email.trim().toLowerCase();
     final String? invalid = _validate(address, password);
-    if (invalid != null) return AuthResult.failed(invalid);
+    if (invalid != null) return SignUpResult.failed(invalid);
 
     final SupabaseClient supabase = Supabase.instance.client;
     try {
@@ -111,14 +159,14 @@ class Account {
           .eq('email', address)
           .maybeSingle();
       if (existing != null) {
-        return const AuthResult.failed(
+        return const SignUpResult.failed(
             'An account with this email already exists. Sign in instead.');
       }
 
       final SharedPreferences prefs = await SharedPreferences.getInstance();
       final String id = prefs.getString('playerID') ?? const Uuid().v4();
-      final String salt = _newSalt();
-      final String hash = _derive(password, salt, iterations);
+      final String salt = PasswordHash.newSalt();
+      final String hash = PasswordHash.derive(password, salt, iterations);
 
       final Map<String, dynamic> row = <String, dynamic>{
         'id': id,
@@ -128,44 +176,73 @@ class Account {
         'iterations': iterations,
         'name': prefs.getString('profile_name'),
         'avatar': prefs.getString('avatar_path'),
+        'verified': false,
       };
-      await supabase.from('players_profile').insert(row);
 
-      await _adopt(
-        prefs,
-        AccountProfile(
-          id: id,
-          email: address,
-          name: row['name'] as String?,
-          avatar: row['avatar'] as String?,
-        ),
+      bool supportsVerification = true;
+      try {
+        await supabase.from('players_profile').insert(row);
+      } on PostgrestException catch (error) {
+        if (!_isMissingColumn(error)) rethrow;
+        // supabase/email.sql has not been run yet. The account is still worth
+        // creating; it simply cannot be verified until the columns exist.
+        supportsVerification = false;
+        row.remove('verified');
+        await supabase.from('players_profile').insert(row);
+      }
+
+      if (!supportsVerification) {
+        // The row was written by the retry above. Reporting a failure while
+        // leaving it behind would make the next attempt collide with an
+        // account nobody can sign in to.
+        await supabase.from('players_profile').delete().eq('id', id);
+        return const SignUpResult.failed(
+          'Verification is not set up on this database yet. Run '
+          'supabase/email.sql in the Supabase SQL editor, then create the '
+          'account again.',
+        );
+      }
+
+      final MailResult mail = await AccountMail.sendVerification(
+        profileId: id,
+        email: address,
       );
-      return AuthResult.ok(
-        AccountProfile(
-          id: id,
-          email: address,
-          name: row['name'] as String?,
-          avatar: row['avatar'] as String?,
-        ),
-        created: true,
-      );
+      if (!mail.ok) {
+        // No mail means no way to verify, so the account would be a dead end.
+        // Removing it lets the player try again once the mail is fixed.
+        try {
+          await supabase.from('players_profile').delete().eq('id', id);
+        } catch (cleanupError) {
+          debugPrint(
+              'Could not remove the unverifiable account: $cleanupError');
+        }
+        return SignUpResult.failed(mail.message);
+      }
+
+      return SignUpResult.created(address);
     } on PostgrestException catch (error) {
       // A racing sign-up hits the unique index first; both clients should see
       // the same sentence.
       if (error.code == '23505') {
-        return const AuthResult.failed(
+        return const SignUpResult.failed(
             'An account with this email already exists. Sign in instead.');
       }
       debugPrint('Sign-up failed: $error');
-      return AuthResult.failed(_migrationHint(error));
+      return SignUpResult.failed(_migrationHint(error));
     } catch (error) {
       debugPrint('Sign-up failed: $error');
-      return const AuthResult.failed(
+      return const SignUpResult.failed(
           'Could not create the account. Check your connection and try again.');
     }
   }
 
   /// Signs in and adopts the profile's id (and name/avatar) on this device.
+  ///
+  /// Two passwords are accepted: the real one, and the temporary one a reset
+  /// mail carried. The temporary one signs the player in but reports
+  /// [AuthResult.usedResetPassword], so the screen can force a new password
+  /// before the app is used - which is also the moment the real password is
+  /// replaced and the temporary one cleared.
   static Future<AuthResult> signIn({
     required String email,
     required String password,
@@ -188,9 +265,36 @@ class Account {
       final String salt = row['password_salt']?.toString() ?? '';
       final int rounds = (row['iterations'] as num?)?.toInt() ?? iterations;
       final String expected = row['password_hash']?.toString() ?? '';
-      final String actual = _derive(password, salt, rounds);
-      if (expected.isEmpty || !_constantTimeEquals(expected, actual)) {
-        return const AuthResult.failed('Email or password is incorrect.');
+      final bool realPassword = PasswordHash.matches(
+        password: password,
+        salt: salt,
+        rounds: rounds,
+        expected: expected,
+      );
+
+      bool temporaryPassword = false;
+      if (!realPassword) {
+        temporaryPassword = PasswordHash.matches(
+          password: password,
+          salt: row['reset_password_salt']?.toString() ?? '',
+          rounds:
+              (row['reset_password_iterations'] as num?)?.toInt() ?? iterations,
+          expected: row['reset_password_hash']?.toString() ?? '',
+        );
+        if (!temporaryPassword) {
+          return const AuthResult.failed('Email or password is incorrect.');
+        }
+      }
+
+      // The column is absent on a project that has not run email.sql, and an
+      // account made before it existed is treated as verified.
+      if (!temporaryPassword && row['verified'] == false) {
+        return AuthResult.failed(
+          'Verify your email before signing in. We sent a link to $address - '
+          'tap it, then come back.',
+          needsVerification: true,
+          email: address,
+        );
       }
 
       final AccountProfile profile = AccountProfile(
@@ -198,6 +302,7 @@ class Account {
         email: address,
         name: row['name']?.toString(),
         avatar: row['avatar']?.toString(),
+        verified: row['verified'] == true,
       );
       if (profile.id.isEmpty) {
         return const AuthResult.failed(
@@ -206,7 +311,8 @@ class Account {
 
       final SharedPreferences prefs = await SharedPreferences.getInstance();
       await _adopt(prefs, profile);
-      return AuthResult.ok(profile);
+      await prefs.setBool(passwordChangeKey, temporaryPassword);
+      return AuthResult.ok(profile, usedResetPassword: temporaryPassword);
     } on PostgrestException catch (error) {
       debugPrint('Sign-in failed: $error');
       return AuthResult.failed(_migrationHint(error));
@@ -214,6 +320,117 @@ class Account {
       debugPrint('Sign-in failed: $error');
       return const AuthResult.failed(
           'Could not sign in. Check your connection and try again.');
+    }
+  }
+
+  /// Replaces the account's password.
+  ///
+  /// Used by two screens: changing it from the profile (which passes the
+  /// current password) and finishing a reset (which does not - the temporary
+  /// password already proved the address). Either way the new password must
+  /// satisfy [PasswordRules] and must not be one of the two passwords the
+  /// account currently accepts, so "change" cannot put the same secret back.
+  static Future<String?> setNewPassword({
+    required String newPassword,
+    String? currentPassword,
+  }) async {
+    final String? invalid = PasswordRules.problem(newPassword);
+    if (invalid != null) return invalid;
+
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String? id = prefs.getString(idKey);
+    if (id == null || id.isEmpty) {
+      return 'Sign in before changing the password.';
+    }
+
+    try {
+      final Map<String, dynamic>? row = await Supabase.instance.client
+          .from('players_profile')
+          .select()
+          .eq('id', id)
+          .maybeSingle();
+      if (row == null) return 'This account no longer exists.';
+
+      if (currentPassword != null) {
+        final bool currentOk = PasswordHash.matches(
+          password: currentPassword,
+          salt: row['password_salt']?.toString() ?? '',
+          rounds: (row['iterations'] as num?)?.toInt() ?? iterations,
+          expected: row['password_hash']?.toString() ?? '',
+        );
+        if (!currentOk) return 'Your current password is incorrect.';
+      }
+
+      final bool sameAsReal = PasswordHash.matches(
+        password: newPassword,
+        salt: row['password_salt']?.toString() ?? '',
+        rounds: (row['iterations'] as num?)?.toInt() ?? iterations,
+        expected: row['password_hash']?.toString() ?? '',
+      );
+      final bool sameAsTemporary = PasswordHash.matches(
+        password: newPassword,
+        salt: row['reset_password_salt']?.toString() ?? '',
+        rounds:
+            (row['reset_password_iterations'] as num?)?.toInt() ?? iterations,
+        expected: row['reset_password_hash']?.toString() ?? '',
+      );
+      if (sameAsReal || sameAsTemporary) {
+        return 'Choose a password you have not used on this account before.';
+      }
+
+      final String salt = PasswordHash.newSalt();
+      final String hash =
+          PasswordHash.derive(newPassword, salt, PasswordHash.iterations);
+      await Supabase.instance.client
+          .from('players_profile')
+          .update(<String, dynamic>{
+        'password_hash': hash,
+        'password_salt': salt,
+        'iterations': PasswordHash.iterations,
+        // The temporary password has done its job.
+        'reset_password_hash': null,
+        'reset_password_salt': null,
+        'reset_password_iterations': null,
+        'reset_requested_at': null,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', id);
+      await prefs.setBool(passwordChangeKey, false);
+      return null;
+    } catch (error) {
+      debugPrint('Could not change the password: $error');
+      return 'Could not save the new password. Check your connection and try '
+          'again.';
+    }
+  }
+
+  /// Changing the password from the profile: the current one has to be typed
+  /// first, so a phone left unlocked cannot be re-keyed by anyone holding it.
+  static Future<String?> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) =>
+      setNewPassword(
+        newPassword: newPassword,
+        currentPassword: currentPassword,
+      );
+
+  /// Whether this device's account has opened its verification link. Null when
+  /// nobody is signed in or the column has not been added yet.
+  static Future<bool?> verificationState() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String? id = prefs.getString(idKey);
+    if (id == null || id.isEmpty) return null;
+    try {
+      final Map<String, dynamic>? row = await Supabase.instance.client
+          .from('players_profile')
+          .select('verified')
+          .eq('id', id)
+          .maybeSingle();
+      final dynamic value = row?['verified'];
+      return value is bool ? value : null;
+    } catch (error) {
+      debugPrint('Could not read the verification state: $error');
+      return null;
     }
   }
 
@@ -232,6 +449,13 @@ class Account {
     return 'Could not reach the account service. Check your connection and try '
         'again.';
   }
+
+  /// 42703 is "undefined_column"; PGRST204 is PostgREST saying the column is
+  /// not in its schema cache.
+  static bool _isMissingColumn(PostgrestException error) =>
+      error.code == '42703' ||
+      error.code == 'PGRST204' ||
+      error.message.contains('schema cache');
 
   /// Writes the account's name/avatar back to its profile row.
   ///
@@ -263,6 +487,7 @@ class Account {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.remove(idKey);
     await prefs.remove(emailKey);
+    await prefs.setBool(passwordChangeKey, false);
   }
 
   static Future<void> _adopt(
@@ -290,59 +515,16 @@ class Account {
     }
   }
 
-  static String _newSalt() {
-    final Random random = Random.secure();
-    final List<int> bytes = List<int>.generate(16, (_) => random.nextInt(256));
-    return base64UrlEncode(bytes);
-  }
-
   /// Exposed so a test can prove the derivation itself is stable and salted;
   /// nothing in the app calls it directly.
   @visibleForTesting
   static String deriveForTesting(String password, String salt, int rounds) =>
-      _derive(password, salt, rounds);
-
-  /// PBKDF2-HMAC-SHA256. One 100-byte block is all SHA-256 needs for a 32-byte
-  /// key, so the loop is the straightforward version rather than a general one.
-  static String _derive(String password, String salt, int rounds) {
-    final Hmac hmac = Hmac(sha256, utf8.encode(password));
-    final List<int> block = <int>[
-      ...utf8.encode(salt),
-      0,
-      0,
-      0,
-      1,
-    ];
-    List<int> u = hmac.convert(block).bytes;
-    final List<int> result = List<int>.from(u);
-    for (int i = 1; i < rounds; i++) {
-      u = hmac.convert(u).bytes;
-      for (int j = 0; j < result.length; j++) {
-        result[j] ^= u[j];
-      }
-    }
-    return base64Encode(result);
-  }
-
-  /// The comparison itself is not a secret-dependent branch that could leak a
-  /// usable prefix over the network - it is local - but comparing every byte
-  /// keeps the shape of the check constant.
-  static bool _constantTimeEquals(String a, String b) {
-    if (a.length != b.length) return false;
-    int diff = 0;
-    for (int i = 0; i < a.length; i++) {
-      diff |= a.codeUnitAt(i) ^ b.codeUnitAt(i);
-    }
-    return diff == 0;
-  }
+      PasswordHash.derive(password, salt, rounds);
 
   static String? _validate(String email, String password) {
     if (!_emailPattern.hasMatch(email)) {
       return 'Enter a valid email address.';
     }
-    if (password.length < 6) {
-      return 'Password must be at least 6 characters.';
-    }
-    return null;
+    return PasswordRules.problem(password);
   }
 }

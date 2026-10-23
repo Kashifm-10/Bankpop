@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:lottie/lottie.dart';
-import 'package:mon/pages/auth/auth_screen.dart';
-import 'package:mon/pages/home.dart';
+import 'package:mon/routes.dart';
 import 'package:mon/services/account.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 
@@ -56,18 +56,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   Future<void> _playAsGuest() async {
     await Account.markOnboarded();
     if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(builder: (_) => const WelcomePage()),
-    );
+    context.go(AppRoutes.home);
   }
 
   /// The optional way in: an account, so the games are not tied to this device.
   Future<void> _signIn() async {
     await Account.markOnboarded();
     if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(builder: (_) => const AuthScreen()),
-    );
+    // `go`, not `push`: the story is finished, and the back button should walk
+    // back through the account screen, not into the slides again.
+    context.go(AppRoutes.auth);
   }
 
   void _next() {

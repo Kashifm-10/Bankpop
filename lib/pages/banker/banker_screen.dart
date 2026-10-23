@@ -3,18 +3,18 @@ import 'dart:async';
 import 'package:animated_flip_counter/animated_flip_counter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lottie/lottie.dart';
 import 'package:mon/models/bankpop_board.dart';
-import 'package:mon/pages/home.dart';
 import 'package:mon/pages/transactions/receive.dart';
+import 'package:mon/routes.dart';
 import 'package:mon/services/card_requests.dart';
 import 'package:mon/services/deals.dart';
 import 'package:mon/services/game_session.dart';
 import 'package:mon/services/player_cards.dart';
 import 'package:mon/services/player_exit.dart';
 import 'package:mon/services/wallet_transfer.dart';
-import 'package:mon/pages/transactions/transactions.dart';
 import 'package:mon/widgets/app_dialog.dart';
 import 'package:mon/widgets/app_message.dart';
 import 'package:mon/widgets/bankpop_board_popup.dart';
@@ -2096,14 +2096,14 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
 
   /// Leaves for the title screen and forgets the stored game id, so the next
   /// launch asks what to play instead of reopening this table.
+  ///
+  /// `pushReplacement`: leaving is a decision, so the browser's back button
+  /// must not walk straight back into the table that was just left.
   Future<void> _returnToTitle() async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.remove('gameID');
     if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute<void>(builder: (_) => const WelcomePage()),
-      (Route<dynamic> route) => false,
-    );
+    context.pushReplacement(AppRoutes.home);
   }
 
   Future<bool> _onWillPop() async {
@@ -2178,18 +2178,13 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                 GameIconButton(
                   control: GameControls.history,
                   size: 36,
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => TransactionHistoryPage(
-                          gameId: widget.gameId,
-                          playerId: ID,
-                          showAllPlayers: true,
-                        ),
-                      ),
-                    );
-                  },
+                  onPressed: () => context.push(
+                    AppRoutes.history(
+                      widget.gameId,
+                      playerId: ID,
+                      showAllPlayers: true,
+                    ),
+                  ),
                 ),
                 if (_playWithCards) const SizedBox(width: 4),
                 // The board itself, to check who owns what. Selling stays in

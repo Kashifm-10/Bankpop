@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:lottie/lottie.dart';
-import 'package:mon/pages/auth/onboarding_screen.dart';
-import 'package:mon/pages/home.dart';
+import 'package:mon/routes.dart';
 import 'package:mon/services/account.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -17,10 +17,18 @@ class SplashScreen extends StatefulWidget {
 class _SplashScreenState extends State<SplashScreen> {
   Timer? _timer;
 
+  /// The story belongs to a cold start. In the browser `/` is also somewhere
+  /// the back button can land, and making the player watch three seconds of it
+  /// again on the way back from a game is not a launch - so the wait only
+  /// happens once per session.
+  static bool _shown = false;
+
   @override
   void initState() {
     super.initState();
-    _timer = Timer(const Duration(seconds: 3), () async {
+    final Duration wait = _shown ? Duration.zero : const Duration(seconds: 3);
+    _shown = true;
+    _timer = Timer(wait, () async {
       // A hot reload (or a very fast back gesture) can tear this screen down
       // before the timer fires; navigating from a disposed state throws.
       if (!mounted) return;
@@ -31,15 +39,21 @@ class _SplashScreenState extends State<SplashScreen> {
       final bool signedIn = await Account.isSignedIn();
       final SharedPreferences prefs = await SharedPreferences.getInstance();
       final bool onboarded = prefs.getBool(Account.onboardingDoneKey) ?? false;
+      // A temporary password only buys a session: choose a real one first,
+      // even if the app was closed in between.
+      final bool mustChangePassword = await Account.passwordChangeRequired();
       if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => signedIn || onboarded
-              ? const WelcomePage()
-              : const OnboardingScreen(),
-        ),
-      );
+
+      // `pushReplacement`, not `go`: the splash is not a place the back button
+      // should be able to return to - a launch should leave the app, not show
+      // the story again.
+      if (mustChangePassword) {
+        context.pushReplacement(AppRoutes.setPassword);
+      } else {
+        context.pushReplacement(
+          signedIn || onboarded ? AppRoutes.home : AppRoutes.onboarding,
+        );
+      }
     });
   }
 

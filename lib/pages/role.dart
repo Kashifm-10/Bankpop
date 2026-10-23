@@ -2,10 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:lottie/lottie.dart';
-import 'package:mon/pages/banker/bank_details.dart';
-import 'package:mon/pages/player/player_details.dart';
-import 'package:mon/pages/player/player_screen.dart';
+import 'package:mon/routes.dart';
 import 'package:mon/services/game_session.dart';
 import 'package:mon/services/player_exit.dart';
 import 'package:mon/widgets/app_dialog.dart';
@@ -23,10 +22,7 @@ class SelectRoleScreen extends StatelessWidget {
   static bool _explainedRefusal = false;
 
   void _goToBanker(BuildContext context) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const BankValueScreen()),
-    );
+    context.push(AppRoutes.newGame);
   }
 
   void _goToPlayer(BuildContext context) async {
@@ -93,12 +89,9 @@ class SelectRoleScreen extends StatelessWidget {
 
 // Extracted method to navigate to QR scanner screen
   Future<Map<String, dynamic>?> _navigateToQRScanner(BuildContext context) {
-    return Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const PlayerQRScannerScreen(scan: true),
-      ),
-    );
+    // The scanner pops its result, and a routed push returns that result just
+    // as a MaterialPageRoute did.
+    return context.push<Map<String, dynamic>>(AppRoutes.joinScan);
   }
 
 // Extracted method to show the dialog for entering Game ID
@@ -132,15 +125,9 @@ class SelectRoleScreen extends StatelessWidget {
 // Extracted method to navigate to PlayersScreen
   void _navigateToPlayersScreen(
       BuildContext context, Map<String, dynamic> result) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => PlayersScreen(
-          bankValue: double.parse(result['wallet'].toString()),
-          gameId: result['game_id'],
-        ),
-      ),
-    );
+    final String gameId = result['game_id']?.toString() ?? '';
+    final double wallet = double.tryParse('${result['wallet']}') ?? 0;
+    context.push(AppRoutes.player(gameId, bankValue: wallet));
   }
 
 // Refactored _checkGameIdAndShowNameDialog to avoid BuildContext cross async

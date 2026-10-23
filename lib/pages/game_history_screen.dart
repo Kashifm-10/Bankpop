@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import 'package:mon/pages/banker/banker_screen.dart';
-import 'package:mon/pages/player/player_screen.dart';
+import 'package:mon/routes.dart';
 import 'package:mon/services/game_session.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -153,13 +153,12 @@ class _GameHistoryScreenState extends State<GameHistoryScreen> {
     await prefs.setString('gameID', entry.gameId);
     if (!mounted) return;
 
-    Navigator.push(
-      context,
-      MaterialPageRoute<void>(
-        builder: (_) => entry.isBanker
-            ? BankerGameScreen(bankValue: 0, gameId: entry.gameId)
-            : PlayersScreen(bankValue: 0, gameId: entry.gameId),
-      ),
+    // The address carries the game and the role, so a refresh on the table
+    // keeps it open and the back button returns to this list.
+    context.push(
+      entry.isBanker
+          ? AppRoutes.banker(entry.gameId)
+          : AppRoutes.player(entry.gameId),
     );
   }
 

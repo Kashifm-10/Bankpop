@@ -2,27 +2,21 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:lottie/lottie.dart';
-import 'package:mon/pages/auth/auth_screen.dart';
-import 'package:mon/pages/game_history_screen.dart';
-import 'package:mon/pages/player/player_screen.dart';
+import 'package:mon/routes.dart';
 import 'package:mon/services/account.dart';
 import 'package:mon/pages/profile_edit.dart';
 import 'package:mon/services/game_session.dart';
 import 'package:mon/services/player_exit.dart';
 import 'package:mon/services/profile_avatar.dart';
-import 'package:mon/pages/role.dart';
-import 'package:mon/profile.dart';
 import 'package:mon/widgets/app_dialog.dart';
-import 'package:mon/widgets/how_to_play_dialog.dart';
 import 'package:mon/widgets/bankpop_board_popup.dart';
 import 'package:mon/widgets/app_message.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
-import 'banker/banker_screen.dart';
 
 class WelcomePage extends StatefulWidget {
   const WelcomePage({super.key});
@@ -51,6 +45,12 @@ class _WelcomePageState extends State<WelcomePage> {
   /// An account is optional: a guest gets the whole app, and this only decides
   /// whether the greeting carries the "sign in to keep your games" banner.
   bool _signedIn = false;
+
+  /// Reopening the last game is what a launch does, not what every return to
+  /// the home screen does. Without this, the browser's back button from a game
+  /// would land on the splash, which lands here, which would push the player
+  /// straight back into the game.
+  static bool _autoResumeHandled = false;
 
   @override
   void initState() {
@@ -141,6 +141,7 @@ class _WelcomePageState extends State<WelcomePage> {
   }
 
   Future<void> _checkForPlayerAndNavigate() async {
+    if (_autoResumeHandled) return;
     showLoadingDialog(context, 'Loading...');
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     final String? playerID = prefs.getString('playerID');
@@ -192,38 +193,24 @@ class _WelcomePageState extends State<WelcomePage> {
         if (mounted) Navigator.pop(context);
         return;
       }
-
-      if (isBanker) {
-        // ignore: use_build_context_synchronously
-        Navigator.pop(context);
-        // Delay navigation slightly to avoid context issues
-        Future.delayed(const Duration(milliseconds: 100), () {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (context) => BankerGameScreen(
-                bankValue: 0,
-                gameId: gameID,
-              ),
-            ),
-          );
-        });
-      } else if (isPlayer) {
-        // ignore: use_build_context_synchronously
-        Navigator.pop(context);
-        // Delay navigation slightly to avoid context issues
-        Future.delayed(const Duration(milliseconds: 100), () {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (context) => PlayersScreen(
-                bankValue: 0,
-                gameId: gameID,
-              ),
-            ),
-          );
-        });
+      // A row that is neither banker nor player is not a seat in this game.
+      if (!isBanker && !isPlayer) {
+        if (mounted) Navigator.pop(context);
+        return;
       }
+
+      // Close the loading box first; replacing the location while it is open
+      // would leave it behind on the game screen.
+      Navigator.pop(context);
+      _autoResumeHandled = true;
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (!mounted) return;
+        // `go` rather than push: the lobby is not somewhere the back button
+        // should return to once the game is open.
+        context.go(
+          isBanker ? AppRoutes.banker(gameID) : AppRoutes.player(gameID),
+        );
+      });
     } catch (e) {
       Navigator.pop(context);
       if (kDebugMode) {
@@ -341,13 +328,7 @@ class _WelcomePageState extends State<WelcomePage> {
                     ),
                     SizedBox(height: 2.h),
                     GestureDetector(
-                      onTap: () {
-                        Navigator.pushReplacement(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => const ProfilePage()),
-                        );
-                      },
+                      onTap: () => context.push(AppRoutes.profile),
                       child: Card(
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(20)),
@@ -387,13 +368,7 @@ class _WelcomePageState extends State<WelcomePage> {
                                 ),
                               ),
                               GestureDetector(
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                        builder: (_) => const ProfilePage()),
-                                  );
-                                },
+                                onTap: () => context.push(AppRoutes.profile),
                                 child: Padding(
                                   padding: const EdgeInsets.all(10.0),
                                   child: CircleAvatar(
@@ -487,7 +462,20 @@ class _WelcomePageState extends State<WelcomePage> {
                           lottieAssetPath: "assets/lottie/help.json",
                           overlayImageUrl:
                               "https://i.pinimg.com/736x/b2/93/53/b293530e766938aeaad897363c9df0eb.jpg",
-                          onTap: () => HowToPlayGuide.show(context),
+                          onTap: () => context.push(AppRoutes.howToUse),
+                        ),
+                        const SizedBox(height: 20),
+                        ButtonCard(
+                          title: "Game rules",
+                          gradientColors: const [
+                            Color.fromARGB(255, 255, 224, 178),
+                            Color.fromARGB(255, 255, 204, 128),
+                            Color.fromARGB(255, 255, 183, 77),
+                            Color.fromARGB(255, 245, 160, 40),
+                          ],
+                          textColor: const Color(0xFFE65100),
+                          lottieAssetPath: "assets/lottie/help.json",
+                          onTap: () => context.push(AppRoutes.gameRules),
                         ),
                         const SizedBox(height: 20),
                         ButtonCard(
@@ -553,21 +541,13 @@ class _WelcomePageState extends State<WelcomePage> {
       return;
     }
     if (!context.mounted) return;
-    Navigator.push(
-      context,
-      MaterialPageRoute<void>(builder: (_) => const GameHistoryScreen()),
-    );
+    context.push(AppRoutes.games);
   }
 
   /// The banner's "Sign in": the same screen the first run offers, and back to
   /// the home screen afterwards so the name and avatar refresh.
   Future<void> _openAccount() async {
-    final bool? signedIn = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute<bool>(
-        builder: (_) => const AuthScreen(returnOnSuccess: true),
-      ),
-    );
+    final bool? signedIn = await context.push<bool>(AppRoutes.authReturning);
     if (signedIn != true || !mounted) return;
     await _loadUser();
     final bool nowSignedIn = await Account.isSignedIn();
@@ -575,13 +555,7 @@ class _WelcomePageState extends State<WelcomePage> {
   }
 
   void _startGame(BuildContext context) {
-    // Push to the next page (GamePage)
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-          builder: (context) =>
-              const SelectRoleScreen()), // Replace GamePage with your actual game page
-    );
+    context.push(AppRoutes.start);
   }
 
   void _exitApp(BuildContext context) async {
@@ -605,11 +579,9 @@ class _WelcomePageState extends State<WelcomePage> {
       final SharedPreferences prefs = await SharedPreferences.getInstance();
       await prefs.remove('gameID');
       if (!context.mounted) return;
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) => const WelcomePage()),
-        (Route<dynamic> route) => false,
-      );
+      // Already the welcome screen; going there again clears the history so
+      // the browser's back button does not walk into the game that was left.
+      context.go(AppRoutes.home);
       return;
     }
 

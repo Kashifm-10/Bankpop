@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mon/pages/how_to_use_screen.dart';
 import 'package:mon/services/player_exit.dart';
 import 'package:mon/widgets/app_dialog.dart';
 import 'package:mon/widgets/app_frame.dart';
-import 'package:mon/widgets/how_to_play_dialog.dart';
 import 'package:mon/widgets/player_badge.dart';
 
 Widget _host(Widget child) => MaterialApp(
@@ -62,36 +62,24 @@ void main() {
     });
   });
 
-  group('How to play', () {
-    testWidgets('opens with both roles and no overflow on a small phone',
+  group('How to use', () {
+    testWidgets('the page opens with both roles and no overflow on a phone',
         (WidgetTester tester) async {
       await _setSize(tester, const Size(320, 568));
-      await tester.pumpWidget(_host(
-        Builder(
-          builder: (BuildContext context) => TextButton(
-            onPressed: () => HowToPlayGuide.show(context),
-            child: const Text('open'),
-          ),
-        ),
-      ));
-
-      await tester.tap(find.text('open'));
+      await tester.pumpWidget(_host(const HowToUseScreen()));
       await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);
-      expect(find.text('How to play'), findsOneWidget);
+      expect(find.text('How to use'), findsOneWidget);
       expect(find.text('As a player'), findsOneWidget);
-      expect(find.text('Join a game'), findsOneWidget);
+      expect(find.text('Getting in'), findsOneWidget);
+      expect(find.textContaining('verification link'), findsWidgets);
 
       // The banker tab describes the things this update added.
       await tester.tap(find.text('As the banker'));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      expect(find.text('Removing a player'), findsOneWidget);
-
-      await tester.tap(find.text('Got it'));
-      await tester.pumpAndSettle();
-      expect(find.text('How to play'), findsNothing);
+      expect(find.text('Start a game'), findsOneWidget);
     });
   });
 

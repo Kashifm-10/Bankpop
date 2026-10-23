@@ -59,6 +59,14 @@ dependencies:
   mailto: ^2.0.0
   permission_handler: ^12.0.1
   awesome_snackbar_content: ^0.1.1
+  go_router: 15.1.2
+  # Sends the verification and reset-password mails from the app on Android
+  # and iOS. The browser has no sockets, so the web build posts to the
+  # `send-mail` edge function instead (see supabase/functions/send-mail).
+  mailer: ^7.2.0
+  # Only used by the web URL strategy (lib/services/url_strategy_web.dart).
+  flutter_web_plugins:
+    sdk: flutter
 
 
 dev_dependencies:

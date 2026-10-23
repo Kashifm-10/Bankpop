@@ -3,7 +3,8 @@ import 'dart:math';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
-import 'package:mon/pages/banker/banker_screen.dart';
+import 'package:go_router/go_router.dart';
+import 'package:mon/routes.dart';
 import 'package:mon/services/game_session.dart';
 import 'package:mon/widgets/app_dialog.dart';
 import 'package:mon/widgets/app_message.dart';
@@ -174,15 +175,9 @@ class _BankValueScreenState extends State<BankValueScreen> {
     await prefs.setString('payOption', _selectedOption);
 
     if (!mounted) return;
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (_) => BankerGameScreen(
-          bankValue: bankValue,
-          gameId: gameId,
-        ),
-      ),
-    );
+    // The setup screen is not somewhere the back button should return to once
+    // the table exists.
+    context.pushReplacement(AppRoutes.banker(gameId, bankValue: bankValue));
   }
 
   @override
