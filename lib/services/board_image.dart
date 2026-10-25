@@ -4,16 +4,16 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:mon/models/bankpop_board.dart';
+import 'package:mon/services/board_download.dart';
 import 'package:mon/widgets/bankpop_board_view.dart';
-import 'package:share_plus/share_plus.dart';
 
 /// The board as a picture a player can print.
 ///
 /// It is the same [BankpopBoardView] the app draws, rendered off-screen at
 /// print size and captured - so the printout and the screen cannot drift apart:
-/// same tiles, same colours, same artwork, same ring. The one addition is the
-/// card's name inside its colour block ([BankpopBoardView.printNames]), because
-/// on paper there is no tap to open a deed.
+/// same tiles, same colours, same names, same artwork, same ring. On paper
+/// there is no tap to open a deed, which is why the name and the price are on
+/// the card itself.
 ///
 /// A PNG is used rather than a PDF on purpose: capturing the board as drawn is
 /// the only way to guarantee the printout matches the screen, and a square PNG
@@ -29,6 +29,26 @@ class BoardImage {
   /// Pixels per logical pixel in the file, so the PNG is 2800x2800.
   static const double pixelRatio = 2;
 
+
+  /// The conditions the board is drawn under for a download.
+  ///
+  /// The board is painted inside an overlay entry, which - unlike a screen -
+  /// has no `Material` above it. Without one, `Text` inherits Flutter's
+  /// fallback default style, and that style carries an underline in yellow:
+  /// every printed card name came out of the PNG with a yellow line under it,
+  /// while the same board on screen (inside a Scaffold) had none. Giving the
+  /// board the screen's own `Material` and default text style is what makes the
+  /// picture match what the player saw.
+  static Widget frame(BuildContext context, Widget child) {
+    final ThemeData theme = Theme.of(context);
+    return Material(
+      type: MaterialType.transparency,
+      child: DefaultTextStyle(
+        style: theme.textTheme.bodyMedium ?? const TextStyle(),
+        child: child,
+      ),
+    );
+  }
 
   /// Draws [board] off-screen and returns its PNG bytes.
   ///
@@ -58,10 +78,12 @@ class BoardImage {
             child: SizedBox(
               width: boardSize,
               height: boardSize,
-              child: BankpopBoardView(
-                board: board,
-                size: boardSize,
-                printNames: true,
+              child: frame(
+                context,
+                BankpopBoardView(
+                  board: board,
+                  size: boardSize,
+                ),
               ),
             ),
           ),
@@ -94,25 +116,12 @@ class BoardImage {
     }
   }
 
-  /// Hands the picture to the platform: the share sheet on a phone (save to
-  /// Files, send to a printer, mail it), a download on the web.
-  static Future<void> share(Uint8List bytes, String boardName) async {
-    await SharePlus.instance.share(
-      ShareParams(
-        files: <XFile>[
-          XFile.fromData(
-            bytes,
-            mimeType: 'image/png',
-            name: fileName(boardName),
-          ),
-        ],
-        fileNameOverrides: <String>[fileName(boardName)],
-        subject: 'Bankpop board: $boardName',
-        text: 'Print "$boardName" at 100% on A4 - the board is square, so it '
-            'fills the shorter side of the sheet.',
-      ),
-    );
-  }
+  /// Saves the picture where downloads go: the browser's downloads folder on
+  /// the web, the platform's downloads (or documents) folder elsewhere.
+  ///
+  /// Returns the path written to, or null when the browser saved it itself.
+  static Future<String?> save(Uint8List bytes, String boardName) =>
+      BoardDownload.image(bytes, fileName(boardName));
 
   /// `bankpop-india-board.png`.
   static String fileName(String boardName) {

@@ -365,6 +365,31 @@ class PlayerCards {
     return mine;
   }
 
+  /// Every card that moved in this game, newest first - the bank's ledger.
+  ///
+  /// The banker never receives a card themselves, so [forPlayer] leaves them
+  /// with an empty page; this is the whole game instead: what the bank sold, to
+  /// whom, and when.
+  static Future<List<PlayerCard>> forGame(String gameId) async {
+    if (gameId.isEmpty) return const <PlayerCard>[];
+    try {
+      final List<dynamic> rows = await Supabase.instance.client
+          .from(_table)
+          .select()
+          .eq('game_id', gameId)
+          .order('date', ascending: false)
+          .order('time', ascending: false)
+          .limit(200);
+      return rows
+          .map((dynamic row) =>
+              PlayerCard.fromMap(row as Map<String, dynamic>))
+          .toList();
+    } catch (error) {
+      debugPrint('Could not read the game\'s cards: $error');
+      return const <PlayerCard>[];
+    }
+  }
+
   static bool _columnsMissing(PostgrestException error) {
     // 42703 is "undefined column"; PGRST204 is the same fact reported from a
     // stale PostgREST schema cache.

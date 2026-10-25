@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mon/widgets/app_content.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mon/routes.dart';
 
@@ -36,8 +37,10 @@ class HowToUseScreen extends StatelessWidget {
             ],
           ),
         ),
-        body: const TabBarView(
-          children: <Widget>[
+        body: const AppContent(
+          maxWidth: 900,
+          child: TabBarView(
+            children: <Widget>[
             _GuideTab(
               lead: 'Joining a table, paying, cards and houses - and what the '
                   'banner at the top of a game means.',
@@ -50,7 +53,8 @@ class HowToUseScreen extends StatelessWidget {
               sections: _bankerSections,
               webNote: false,
             ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -192,8 +196,10 @@ class HowToUseScreen extends StatelessWidget {
         'Pause freezes the table for everyone, including you. The amber banner '
             'names the banker, and Resume sits in that banner on the banker\'s '
             'device.',
-        'Hand over the bank when someone else takes the ledger; the new banker '
-            'gets the same controls.',
+        'Hand over the bank with a QR code from that menu. Only a player who is '
+            'not already in the game can scan it, and you confirm the swap on '
+            'your screen before anything moves. The new banker gets the same '
+            'controls, and you stay as an ex-banker who can watch but not play.',
         'End finishes the game for good. The table becomes read-only and the '
             'red banner keeps the date it ended.',
         'An ended game is not reopened automatically when the app starts.',

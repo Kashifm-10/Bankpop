@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:animated_flip_counter/animated_flip_counter.dart';
 import 'package:flutter/foundation.dart';
@@ -9,7 +10,9 @@ import 'package:lottie/lottie.dart';
 import 'package:mon/models/bankpop_board.dart';
 import 'package:mon/pages/transactions/receive.dart';
 import 'package:mon/routes.dart';
+import 'package:mon/services/bank_handover.dart';
 import 'package:mon/services/board_catalog.dart';
+import 'package:mon/services/card_deck.dart';
 import 'package:mon/services/card_requests.dart';
 import 'package:mon/services/deals.dart';
 import 'package:mon/services/game_session.dart';
@@ -18,13 +21,16 @@ import 'package:mon/services/player_exit.dart';
 import 'package:mon/services/wallet_transfer.dart';
 import 'package:mon/widgets/app_dialog.dart';
 import 'package:mon/widgets/app_message.dart';
-import 'package:mon/widgets/bankpop_board_popup.dart';
+import 'package:mon/widgets/bank_handover_qr.dart';
+import 'package:mon/widgets/banker_board_panel.dart';
+import 'package:mon/widgets/card_effect_flow.dart';
 import 'package:mon/widgets/player_badge.dart';
 import 'package:mon/widgets/game_controls.dart';
+import 'package:mon/widgets/app_content.dart';
+import 'package:mon/widgets/player_palette.dart';
 import 'package:mon/widgets/game_status_banner.dart';
-import 'package:mon/widgets/give_card_flow.dart';
-import 'package:qr_flutter/qr_flutter.dart';
-import 'package:responsive_sizer/responsive_sizer.dart';
+import 'package:mon/widgets/qr_box.dart';
+import 'package:mon/widgets/app_metrics.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -187,114 +193,104 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
     );
   }
 
-  /// Moves the bank to another seat, so a dead phone or a change of referee
-  /// does not end the game. The bank's wallet travels with the role; nothing is
-  /// paid out or taken in.
+  /// Moves the bank to a player who is not at the table yet.
+  ///
+  /// The banker shows a QR; a player who is not already in this game scans it,
+  /// and this screen asks the banker to confirm before anything moves. The
+  /// bank's wallet travels with the role, unchanged, and the previous banker
+  /// keeps a view-only row so they can watch the game - or open it later from
+  /// Your Games - without being able to pay, advance or pause anything.
   Future<void> _handOverBank() async {
     if (_session?.isEnded ?? false) {
       await showMessage(context, 'This game has ended - the bank cannot move.');
       return;
     }
 
-    final String myId = ID.isNotEmpty
-        ? ID
-        : ((await SharedPreferences.getInstance()).getString('playerID') ?? '');
-    final List<Player> candidates = players
-        .where((Player player) =>
-            !player.standing.isGone && player.playerID != myId)
-        .toList();
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String myId =
+        ID.isNotEmpty ? ID : (prefs.getString('playerID') ?? '');
     if (!mounted) return;
+    if (myId.isEmpty) {
+      await showMessage(context, 'This device has no player id.');
+      return;
+    }
+    final String myName = prefs.getString('profile_name') ??
+        prefs.getString('display_name') ??
+        'Ex-banker';
+    final String? myAvatar = prefs.getString('avatar_path');
 
-    if (candidates.isEmpty) {
+    while (mounted) {
+      final HandoverRequest? claim = await showDialog<HandoverRequest>(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext dialogContext) => BankHandoverQrDialog(
+          gameId: widget.gameId,
+          bankerId: myId,
+        ),
+      );
+      if (!mounted || claim == null) return;
+
+      final bool confirmed = await showAppConfirm(
+        context,
+        title: '${claim.name} scanned your code',
+        icon: Icons.swap_horiz,
+        confirmLabel: 'Hand over',
+        message:
+            'Make ${claim.name} the banker? They get the bank balance exactly '
+            'as it is now, and every control that comes with it.\n\n'
+            'You stay at the table as an ex-banker: you can watch the game and '
+            'find it in Your Games, but only the new banker can pay, advance, '
+            'pause or end it.',
+      );
+      if (!mounted) return;
+      if (!confirmed) {
+        // Declined: the claim goes away and the code stays up for somebody
+        // else rather than quietly handing the bank to the next scan.
+        await BankHandover.withdraw(claim);
+        continue;
+      }
+
+      // The code may have been left open on a screen that no longer holds the
+      // bank. Check the live row before moving anything.
+      final bool stillBanker =
+          await BankHandover.holdsBank(widget.gameId, myId);
+      if (!mounted) return;
+      if (!stillBanker) {
+        await BankHandover.withdraw(claim);
+        await showMessage(
+          context,
+          'This device is no longer the banker, so the bank did not move.',
+          title: 'Nothing changed',
+        );
+        return;
+      }
+
+      final bool ok = await BankHandover.complete(
+        gameId: widget.gameId,
+        oldBankerId: myId,
+        oldBankerName: myName,
+        oldBankerAvatar: myAvatar,
+        newBankerId: claim.playerId,
+        newBankerName: claim.name,
+      );
+      if (!mounted) return;
+      if (!ok) {
+        await BankHandover.withdraw(claim);
+        await showMessage(context, 'Could not hand over the bank - try again');
+        return;
+      }
+
       await showMessage(
         context,
-        'There is nobody else at the table to take the bank yet.',
-        title: 'No one to hand it to',
+        '${claim.name} is the banker now. You can watch this table, but only '
+        'they can pay, advance, pause or end it. The game stays in Your Games.',
+        title: 'Bank handed over',
       );
+      if (!mounted) return;
+      // Stay at the table as an ex-banker instead of going home.
+      context.go(AppRoutes.player(widget.gameId));
       return;
     }
-
-    final Player? chosen = await showDialog<Player>(
-      context: context,
-      builder: (BuildContext dialogContext) => AlertDialog(
-        backgroundColor: const Color(0xFFFFF8E1),
-        title: const Text('Hand over the bank'),
-        content: SizedBox(
-          width: 420,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              const Text(
-                'Choose the player who takes over as banker. The bank balance '
-                'moves with the role, unchanged.',
-                style: TextStyle(fontSize: 13.5),
-              ),
-              const SizedBox(height: 8),
-              Flexible(
-                child: ListView(
-                  shrinkWrap: true,
-                  children: <Widget>[
-                    for (final Player player in candidates)
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: CircleAvatar(
-                          backgroundColor: player.color.withValues(alpha: 0.2),
-                          backgroundImage:
-                              ResizeImage(AssetImage(player.avatar), width: 72),
-                        ),
-                        title: Text(player.name),
-                        subtitle: Text(player.value.toStringAsFixed(2)),
-                        onTap: () => Navigator.of(dialogContext).pop(player),
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
-          ),
-        ],
-      ),
-    );
-    if (chosen == null || !mounted) return;
-
-    final bool confirmed = await showAppConfirm(
-      context,
-      title: 'Make ${chosen.name} the banker?',
-      icon: Icons.swap_horiz,
-      confirmLabel: 'Hand over',
-      message:
-          '${chosen.name} will be able to pay, advance, pause and end this '
-          'game, and the bank balance stays exactly as it is now.\n\n'
-          'This device stops being the banker; you can still join as a player '
-          'from Your Games.',
-    );
-    if (!confirmed || !mounted) return;
-
-    final bool ok = await GameSession.handOverBank(
-      gameId: widget.gameId,
-      newBankerId: chosen.playerID,
-      newBankerName: chosen.name,
-    );
-    if (!mounted) return;
-    if (!ok) {
-      await showMessage(context, 'Could not hand over the bank - try again');
-      return;
-    }
-
-    await showMessage(
-      context,
-      '${chosen.name} is the banker now. They can open the banker table from '
-      'their own device.',
-      title: 'Bank handed over',
-    );
-    if (!mounted) return;
-    await _returnToTitle();
   }
 
   void _showGameMenu() {
@@ -564,6 +560,12 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
   Future<void> _processPending(List<Map<String, dynamic>> requests) async {
     // No pending requests is the common case: skip the identity lookup too.
     if (requests.isEmpty) return;
+    // A hand-over claim is answered on the QR dialog, with a confirmation that
+    // says what it does. It must never appear as somebody asking for a seat.
+    final List<Map<String, dynamic>> joins = requests
+        .where((Map<String, dynamic> row) => !BankHandover.isClaim(row))
+        .toList();
+    if (joins.isEmpty) return;
     // A finished game takes no new seats. A paused one still does - a player
     // waiting on approval has not moved any money, so they may sit down and
     // wait for the resume like everyone else.
@@ -572,7 +574,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
     _isAlsoPlayer ??= await _holdsPlayerRow(Supabase.instance.client);
 
     if (!_isAlsoPlayer!) {
-      await _processRequestsSequentially(requests);
+      await _processRequestsSequentially(joins);
     }
   }
 
@@ -936,31 +938,190 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
     return result;
   }
 
-  /// The board as a reference, opened from the app bar: an owned tile carries
-  /// its owner's name, and its deed carries the owner in place of any action.
-  void _showBoard() {
-    showDialog<void>(
-      context: context,
-      builder: (_) => BankpopBoardPopup(gameId: widget.gameId),
-    );
-  }
-
-  /// Board in cards mode, then a deed with a sell action on it.
-  Future<void> _openGiveCardFlow() async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
-    // The bank row's player_id, which is what a card QR has to pay.
-    final String bankerId = prefs.getString('playerID') ?? ID;
-    if (!mounted) return;
-    if (bankerId.isEmpty) {
-      showMessage(context, 'This device has no player id');
+  /// The banker's card draw: pick Chance or Community Chest, and the next card
+  /// of that pack is shown to the table.
+  ///
+  /// The packs are shuffled once when the game starts and then dealt in order,
+  /// so this shows how many cards are left in each. The picks are listed as
+  /// they are dealt; the shuffle option here is for a pack that has been worked
+  /// through (a draw does that on its own) or for a banker who wants a fresh
+  /// order.
+  Future<void> _showCardDecks() async {
+    final BankpopBoard board;
+    try {
+      board = await BoardCatalog.boardForGame(widget.gameId);
+    } catch (error) {
+      debugPrint('Could not read the board for a card draw: $error');
+      if (!mounted) return;
+      showMessage(context, 'The board could not be read - try again.');
       return;
     }
-    await showGiveCardFlow(
-      context: context,
+    if (!mounted) return;
+
+    final int chanceLeft = await CardDeck.left(
       gameId: widget.gameId,
-      payOption: payOption,
-      bankerId: bankerId,
+      kind: CardDeckKind.chance,
+      cards: board.chanceOptions,
     );
+    final int chestLeft = await CardDeck.left(
+      gameId: widget.gameId,
+      kind: CardDeckKind.chest,
+      cards: board.communityChest,
+    );
+    if (!mounted) return;
+
+    final Object? picked = await showModalBottomSheet<Object>(
+      context: context,
+      backgroundColor: const Color(0xFFFFF8E1),
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (BuildContext sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Text(
+                'Draw a card',
+                style: TextStyle(
+                  fontSize: 18.sp,
+                  fontWeight: FontWeight.bold,
+                  color: const Color(0xFF33691E),
+                ),
+              ),
+            ),
+            for (final CardDeckKind option in CardDeckKind.values)
+              ListTile(
+                leading: Icon(
+                  option == CardDeckKind.chance
+                      ? Icons.casino_outlined
+                      : Icons.inventory_2_outlined,
+                  color: const Color(0xFF6A1B9A),
+                ),
+                title: Text(option.label),
+                subtitle: Text(
+                  _packStatus(
+                    option,
+                    option == CardDeckKind.chance ? chanceLeft : chestLeft,
+                    option == CardDeckKind.chance
+                        ? board.chanceOptions.length
+                        : board.communityChest.length,
+                  ),
+                  style: const TextStyle(fontSize: 12),
+                ),
+                onTap: () => Navigator.of(sheetContext).pop(option),
+              ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.shuffle, color: Color(0xFF6A1B9A)),
+              title: const Text('Shuffle both packs'),
+              subtitle: const Text(
+                'Deals a fresh order from the top of each pack.',
+                style: TextStyle(fontSize: 12),
+              ),
+              onTap: () => Navigator.of(sheetContext).pop('shuffle'),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || picked == null) return;
+
+    if (picked == 'shuffle') {
+      await CardDeck.shuffle(
+        gameId: widget.gameId,
+        kind: CardDeckKind.chance,
+        cards: board.chanceOptions,
+      );
+      await CardDeck.shuffle(
+        gameId: widget.gameId,
+        kind: CardDeckKind.chest,
+        cards: board.communityChest,
+      );
+      if (!mounted) return;
+      await showMessage(
+        context,
+        'Both packs are shuffled and ready to be drawn again.',
+        title: 'Packs shuffled',
+      );
+      return;
+    }
+
+    await _drawCard(picked as CardDeckKind);
+  }
+
+  /// What one pack's row says under its name.
+  String _packStatus(CardDeckKind kind, int left, int total) {
+    if (total == 0) {
+      return 'This board has no ${kind.label.toLowerCase()} cards.';
+    }
+    if (left <= 0) {
+      return 'The pack has been worked through: the next draw shuffles it again.';
+    }
+    return '$left of $total left. The next card comes off the top.';
+  }
+
+  /// Deals the next card of [kind]'s pack and shows it. The card is not put
+  /// back in the middle of the pack: the pack is worked through in order, and
+  /// once it has all been seen the next draw shuffles it again.
+  Future<void> _drawCard(CardDeckKind kind) async {
+    final BankpopBoard board;
+    try {
+      board = await BoardCatalog.boardForGame(widget.gameId);
+    } catch (error) {
+      debugPrint('Could not read the board for a card draw: $error');
+      if (!mounted) return;
+      showMessage(context, 'The board could not be read - try again.');
+      return;
+    }
+    if (!mounted) return;
+
+    final List<String> cards = kind == CardDeckKind.chance
+        ? board.chanceOptions
+        : board.communityChest;
+    if (cards.isEmpty) {
+      showMessage(context, 'This board has no ${kind.label.toLowerCase()} cards.');
+      return;
+    }
+
+    final CardDeckDraw? draw = await CardDeck.draw(
+      gameId: widget.gameId,
+      kind: kind,
+      cards: cards,
+    );
+    if (!mounted) return;
+    if (draw == null) {
+      showMessage(context, 'There is no card to draw.');
+      return;
+    }
+
+    // The card is shown with whatever it asks the table to do: a reward, a
+    // fine, repairs billed on what the player built, a collection from every
+    // other player, or a jail-free card that goes into a player's hand.
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String bankerId = prefs.getString('playerID') ?? ID;
+    if (!mounted) return;
+    await showCardEffectFlow(
+      context,
+      gameId: widget.gameId,
+      bankerId: bankerId,
+      cardText: draw.card,
+      kind: kind,
+      currency: board.currency,
+    );
+    if (!mounted) return;
+    if (draw.reshuffled) {
+      await showMessage(
+        context,
+        'The ${kind.label.toLowerCase()} pack had been worked through, so it '
+        'was shuffled again and this was the first card of the new deal.',
+        title: 'Pack reshuffled',
+      );
+    }
   }
 
   void _showQRDialog(BuildContext context) {
@@ -995,11 +1156,9 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
               // patterns blurred together and the scanner never locked on.
               // The pay and card codes, which keep the gap between modules,
               // were read without trouble - so this one does too.
-              QrImageView(
+              QrBox(
                 data: widget.gameId,
-                version: QrVersions.auto,
                 size: 58.w,
-                gapless: false,
                 padding: const EdgeInsets.all(10),
               ),
               Text(
@@ -2143,14 +2302,16 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
       : GameControls.suspend;
 
   /// Exactly the icons this screen is showing.
+  /// The banker's controls, as the info button lists them. The board and Give
+  /// Card are gone: the board is part of the screen now, and a tap on one of
+  /// its cards is the way a card is given.
   List<GameControl> get _screenControls => <GameControl>[
         GameControls.history,
-        if (_playWithCards) GameControls.board,
+        GameControls.drawCard,
         GameControls.showBankQr,
         _suspendControl,
         GameControls.leave,
         if (payOption == 'ScanPay') GameControls.receive,
-        if (_playWithCards) GameControls.giveCard,
       ];
 
   @override
@@ -2191,15 +2352,14 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                     ),
                   ),
                 ),
-                if (_playWithCards) const SizedBox(width: 4),
-                // The board itself, to check who owns what. Selling stays in
-                // Give Card; here a tap only ever opens a deed.
-                if (_playWithCards)
-                  GameIconButton(
-                    control: GameControls.board,
-                    size: 36,
-                    onPressed: _showBoard,
-                  ),
+                const SizedBox(width: 4),
+                // Chance and Community Chest are dealt by the banker, not
+                // shown as a list of the whole pack.
+                GameIconButton(
+                  control: GameControls.drawCard,
+                  size: 36,
+                  onPressed: _showCardDecks,
+                ),
                 const SizedBox(width: 4),
                 GameIconButton(
                   control: GameControls.showBankQr,
@@ -2235,9 +2395,11 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
             const SizedBox(width: 6),
           ],
         ),
-        body: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+        body: AppContent(
+          maxWidth: 1100,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
             // Paused or ended: the same band the players see, with the way
             // out of the pause offered here rather than hidden in the menu.
             if (_session != null && _session!.blocksPlay)
@@ -2255,114 +2417,66 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
               color: const Color(0xFFFFF9C4), // soft pastel yellow
               elevation: 3,
               child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        // Expanded + scaleDown keep a long bank balance inside
-                        // the card on a narrow phone instead of overflowing.
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  Icon(
-                                    FontAwesomeIcons.buildingColumns,
-                                    color: Colors.blueGrey.shade700,
-                                    size: 22.sp,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Flexible(
-                                    child: Text(
-                                      'Bankpop Union',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontSize: 18.sp,
-                                        fontWeight: FontWeight.w600,
-                                        color: Colors.blueGrey.shade800,
-                                      ),
-                                    ),
-                                  ),
-                                ],
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Row(
+                  children: <Widget>[
+                    // What the bank is holding, and the code a player pays it
+                    // with, in the one row above the board.
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: <Widget>[
+                              Icon(
+                                FontAwesomeIcons.buildingColumns,
+                                color: Colors.blueGrey.shade700,
+                                size: 22.sp,
                               ),
-                              const SizedBox(height: 10),
-                              FittedBox(
-                                fit: BoxFit.scaleDown,
-                                alignment: Alignment.centerLeft,
-                                child: AnimatedFlipCounter(
-                                  value: value,
-                                  fractionDigits: 2,
-                                  textStyle: TextStyle(
-                                    fontSize: 28.sp,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.black87,
+                              const SizedBox(width: 10),
+                              Flexible(
+                                child: Text(
+                                  'Bankpop Union',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 18.sp,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.blueGrey.shade800,
                                   ),
-                                  duration: const Duration(
-                                      milliseconds:
-                                          500), // optional: animation speed
                                 ),
                               ),
                             ],
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        SizedBox(
-                          height: 42.sp,
-                          child: Lottie.asset('assets/lottie/coin.json'),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    // Give Card only exists in a game that was started with the
-                    // cards switch on, so it appears with it.
-                    if (payOption == 'ScanPay' || _playWithCards)
-                      Wrap(
-                        alignment: WrapAlignment.end,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        spacing: 8,
-                        runSpacing: 6,
-                        children: [
-                          if (payOption == 'ScanPay' && !_viewOnly)
-                            const ReceiveButton(),
-                          if (_playWithCards && !_viewOnly)
-                            GameIconButton(
-                              control: GameControls.giveCard,
-                              onPressed: _openGiveCardFlow,
+                          const SizedBox(height: 6),
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerLeft,
+                            child: AnimatedFlipCounter(
+                              value: value,
+                              fractionDigits: 2,
+                              textStyle: TextStyle(
+                                fontSize: 26.sp,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black87,
+                              ),
+                              duration: const Duration(milliseconds: 500),
                             ),
-                          /*                           ElevatedButton.icon(
-                            onPressed: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) =>
-                                      QRPayScanner(gameId: widget.gameId),
-                                ),
-                              );
-                            },
-                            icon: Icon(FontAwesomeIcons.moneyBill, size: 16.sp),
-                            label: Text(
-                              'Pay',
-                              style: TextStyle(fontSize: 16.sp),
-                            ),
-                             style: ElevatedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 5),
-                                  backgroundColor: Colors.red.shade600,
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                ),
                           ),
-                         */
                         ],
                       ),
+                    ),
+                    const SizedBox(width: 8),
+                    if (payOption == 'ScanPay' && !_viewOnly) ...<Widget>[
+                      const ReceiveButton(),
+                      const SizedBox(width: 6),
+                    ],
+                    SizedBox(
+                      height: 38.sp,
+                      child: Lottie.asset('assets/lottie/coin.json'),
+                    ),
                   ],
                 ),
               ),
@@ -2370,21 +2484,81 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
             const SizedBox(
               height: 5,
             ),
-            isLoading
-                ? const Center(
-                    child: CircularProgressIndicator(color: Color(0xFF689F38)),
-                  )
-                : Expanded(
-                    child: ListView.builder(
-                      itemCount: players.length,
-                      itemBuilder: (context, index) => Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16.0, vertical: 5),
-                        child: _buildPlayerRow(context, players[index]),
-                      ),
+            const SizedBox(height: 6),
+            // A wide window (a monitor, or a tablet in landscape) has the room
+            // for the board and the players side by side; a phone keeps them
+            // stacked, board over players.
+            Expanded(
+              child: LayoutBuilder(
+                builder: (BuildContext context, BoxConstraints area) {
+                  final Widget board = Padding(
+                    // The inset a player row has, so on a phone the board is
+                    // exactly as wide as the list under it.
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: BankerBoardPanel(
+                      gameId: widget.gameId,
+                      payOption: payOption,
+                      bankerId: ID,
+                      canGiveCards: _playWithCards && !_viewOnly,
+                      // In a row with the players the board starts where they
+                      // start - at the top - instead of hanging below a band
+                      // of empty paper.
+                      alignment: Alignment.topCenter,
                     ),
-                  ),
+                  );
+                  // The key names this half of the screen, so the layout can
+                  // be checked as one region while it is still loading and has
+                  // no player rows in it.
+                  final Widget playerList = KeyedSubtree(
+                    key: const ValueKey<String>('banker-players'),
+                    child: isLoading
+                        ? const Center(
+                            child: CircularProgressIndicator(
+                                color: Color(0xFF689F38)),
+                          )
+                        : ListView.builder(
+                            itemCount: players.length,
+                            itemBuilder: (context, index) => Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16.0, vertical: 5),
+                              child: _buildPlayerRow(context, players[index]),
+                            ),
+                          ),
+                  );
+
+                  if (area.maxWidth < 720) {
+                    // Stacked: the board gets a region of its own height, as
+                    // wide as a player row (the width less the same inset) and
+                    // as tall as that is wide, so the square fills the column
+                    // and no empty paper is left down either side of it. What
+                    // is left below it belongs to the players, and it scrolls.
+                    final double rowWidth = area.maxWidth - 32;
+                    final double side = math.min(
+                      rowWidth,
+                      math.max(0.0, area.maxHeight - 200),
+                    );
+                    return Column(
+                      children: <Widget>[
+                        SizedBox(height: side, child: board),
+                        const SizedBox(height: 4),
+                        Expanded(child: playerList),
+                      ],
+                    );
+                  }
+
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      Expanded(flex: 3, child: board),
+                      const SizedBox(width: 8),
+                      Expanded(flex: 2, child: playerList),
+                    ],
+                  );
+                },
+              ),
+            ),
           ],
+          ),
         ),
       ),
     );
@@ -2415,7 +2589,7 @@ class Player {
         playerID: map['player_id'],
         name: map['name'],
         value: double.tryParse(map['wallet'].toString()) ?? 0.0,
-        color: Colors.primaries[map['name'].hashCode % Colors.primaries.length],
+        color: PlayerPalette.forName(map['name'].toString()),
         avatar: map['avatar'] ?? "assets/avatars/boy1.jpg",
         standing: PlayerStanding.fromRow(map));
   }

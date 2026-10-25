@@ -3,9 +3,9 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:mon/services/board_download.dart';
 import 'package:mon/services/board_share.dart';
-import 'package:responsive_sizer/responsive_sizer.dart';
-import 'package:share_plus/share_plus.dart';
+import 'package:mon/widgets/app_metrics.dart';
 
 /// Bringing a board in: paste the JSON a friend sent, or pick the file they
 /// sent it as. Either way the text goes through [BoardShare.decode], and a
@@ -148,6 +148,40 @@ class _ImportBoardSheetState extends State<_ImportBoardSheet> {
               style: TextStyle(fontSize: 12.5.sp, color: Colors.black54),
             ),
             const SizedBox(height: 14),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF1F8E9),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFC5E1A5)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  const Text(
+                    'A shared board is a list of { "index", "name" } - the '
+                        'card number and its name, nothing else:',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF33691E),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  SelectableText(
+                    BoardShare.sample,
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 11.5,
+                      height: 1.35,
+                      color: Color(0xFF4A5A3A),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
             TextField(
               controller: _controller,
               minLines: 4,
@@ -300,35 +334,28 @@ Future<void> showBoardShareSheet(
             ),
             const SizedBox(height: 10),
             _ShareAction(
-              icon: Icons.ios_share,
-              title: 'Share as file',
-              subtitle: 'Sends ${BoardShare.fileName(boardName)}',
+              icon: Icons.file_download_outlined,
+              title: 'Save as file',
+              subtitle: 'Puts ${BoardShare.fileName(boardName)} in your '
+                  'downloads',
               onTap: () async {
-                await _shareFile(boardName, json);
-                if (!sheetContext.mounted) return;
-                Navigator.of(sheetContext).pop();
+                try {
+                  await BoardDownload.json(
+                    json,
+                    BoardShare.fileName(boardName),
+                  );
+                  if (!sheetContext.mounted) return;
+                  Navigator.of(sheetContext).pop();
+                  _tell(context, 'Board file saved');
+                } catch (error) {
+                  if (!sheetContext.mounted) return;
+                  _tell(context, 'Could not save the file');
+                }
               },
             ),
           ],
         ),
       ),
-    ),
-  );
-}
-
-Future<void> _shareFile(String boardName, String json) async {
-  final XFile file = XFile.fromData(
-    utf8.encode(json),
-    mimeType: 'application/json',
-    name: BoardShare.fileName(boardName),
-  );
-  await SharePlus.instance.share(
-    ShareParams(
-      files: <XFile>[file],
-      fileNameOverrides: <String>[file.name],
-      subject: 'Bankpop board: $boardName',
-      text: 'Open Bankpop, go to Boards & cards and tap Import to load '
-          '"$boardName".',
     ),
   );
 }

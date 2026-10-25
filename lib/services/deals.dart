@@ -343,6 +343,25 @@ class Deals {
         ((card['hotels'] as num?) ?? 0) < 1) {
       return const DealOutcome.rejected('that property has no hotel to sell');
     }
+    // Houses come down the same way they went up: evenly. Without this a player
+    // could strip one card while its neighbours stayed built - 2, 1 and 0 in
+    // the same set - which the building rules do not allow.
+    if (deal.kind == DealKind.sellHouse) {
+      final List<Map<String, dynamic>> group = await _groupCards(
+          supabase, deal.gameId, spaces, space?.color, deal.fromName);
+      final int here = ((card['houses'] as num?) ?? 0).toInt();
+      final int most = group.fold<int>(
+        0,
+        (int high, Map<String, dynamic> row) {
+          final int on = ((row['houses'] as num?) ?? 0).toInt();
+          return on > high ? on : high;
+        },
+      );
+      if (here < most) {
+        return const DealOutcome.rejected(
+            'sell evenly: the rest of the set has to come down first');
+      }
+    }
 
     // The bank pays for a mortgage and for buildings coming back; it is paid for
     // an unmortgage. One direction only, so one transfer.

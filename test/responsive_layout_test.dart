@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mon/models/bankpop_board.dart';
+import 'package:mon/pages/home.dart';
 import 'package:mon/pages/role.dart';
 import 'package:mon/services/player_cards.dart';
+import 'package:mon/widgets/app_content.dart';
 import 'package:mon/widgets/app_frame.dart';
 import 'package:mon/widgets/bankpop_space_card.dart';
 import 'package:mon/widgets/trade_builder_dialog.dart';
-import 'package:responsive_sizer/responsive_sizer.dart';
+import 'package:mon/widgets/app_metrics.dart';
 
 /// The sizes the app has to survive: a small phone, a normal phone, a phone in
 /// landscape, a tablet in portrait and a desktop browser window.
@@ -16,6 +18,7 @@ const List<Size> _sizes = <Size>[
   Size(800, 400),
   Size(1024, 768),
   Size(1440, 900),
+  Size(1920, 1080),
 ];
 
 /// Puts the app in the responsive frame, exactly as `main.dart` does.
@@ -46,7 +49,7 @@ const BankpopSpace _brown = BankpopSpace(
 );
 
 /// Shows the number the sizing layer produces, so a test can prove the frame
-/// clamps the column and the design height instead of using the raw window.
+/// hands every screen the real window.
 class _MetricsProbe extends StatelessWidget {
   const _MetricsProbe();
 
@@ -56,7 +59,8 @@ class _MetricsProbe extends StatelessWidget {
       body: Center(
         child: Text(
           '${20.w.toStringAsFixed(1)} / ${20.h.toStringAsFixed(1)} / '
-          '${MediaQuery.sizeOf(context).width.toStringAsFixed(1)}',
+          '${MediaQuery.sizeOf(context).width.toStringAsFixed(1)} / '
+          '${18.sp.toStringAsFixed(1)}',
         ),
       ),
     );
@@ -64,26 +68,25 @@ class _MetricsProbe extends StatelessWidget {
 }
 
 void main() {
-  testWidgets('a desktop window is capped to a phone-width column',
+  testWidgets('a desktop window is used in full, with text capped',
       (WidgetTester tester) async {
     await _setSize(tester, const Size(1440, 900));
     await tester.pumpWidget(_framed(const _MetricsProbe()));
     await tester.pump();
 
-    // 20% of the 560 px column, 20% of the 900 px design height, and a
-    // MediaQuery that agrees with the column rather than the window.
-    expect(find.text('112.0 / 180.0 / 560.0'), findsOneWidget);
+    // 20% of the 1000 px design width, 20% of the window's height, a
+    // MediaQuery that agrees with the window, and text at the 1.2x cap rather
+    // than the package's 2x.
+    expect(find.text('200.0 / 180.0 / 1440.0 / 21.6'), findsOneWidget);
   });
 
-  testWidgets('a landscape phone gets a usable design height',
+  testWidgets('a landscape phone fills its short height',
       (WidgetTester tester) async {
     await _setSize(tester, const Size(800, 400));
     await tester.pumpWidget(_framed(const _MetricsProbe()));
     await tester.pump();
 
-    // The column is 560 wide, but `.h` is computed from the 600 px floor
-    // instead of the 400 px window, which is what keeps buttons readable.
-    expect(find.text('112.0 / 120.0 / 560.0'), findsOneWidget);
+    expect(find.text('160.0 / 80.0 / 800.0 / 18.5'), findsOneWidget);
   });
 
   testWidgets('a small phone keeps its own width', (WidgetTester tester) async {
@@ -91,7 +94,35 @@ void main() {
     await tester.pumpWidget(_framed(const _MetricsProbe()));
     await tester.pump();
 
-    expect(find.text('64.0 / 120.0 / 320.0'), findsOneWidget);
+    // 18 * 0.85 (the floor of the text scale) = 15.3
+    expect(find.text('64.0 / 113.6 / 320.0 / 15.3'), findsOneWidget);
+  });
+
+  testWidgets('a home button fills the content column, not the window',
+      (WidgetTester tester) async {
+    await _setSize(tester, const Size(1440, 900));
+    await tester.pumpWidget(_framed(
+      Scaffold(
+        body: AppContent(
+          maxWidth: 1120,
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          child: ButtonCard(
+            title: 'Start Game',
+            gradientColors: const <Color>[Colors.green, Colors.green],
+            textColor: Colors.white,
+            onTap: () {},
+          ),
+        ),
+      ),
+    ));
+    await tester.pump();
+
+    // The content column is 1120 wide (minus the gutters and the card margin),
+    // so the card fills it without running to the edges of a 1440 px window.
+    final double width = tester.getSize(find.byType(ButtonCard)).width;
+    expect(width, greaterThan(900));
+    expect(width, lessThan(1120));
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('the role picker lays out at every size without overflowing',

@@ -10,7 +10,14 @@
       "name": "Beggar's Alley",
       "type": "Property",
       "price": 60,
-      "rent": [2, 10, 30, 90, 160, 250],
+      "rent": [
+        2,
+        10,
+        30,
+        90,
+        160,
+        250
+      ],
       "color": "Brown",
       "houseCost": 50,
       "hotelCost": 50,
@@ -27,7 +34,14 @@
       "name": "Peasant Lane",
       "type": "Property",
       "price": 60,
-      "rent": [4, 20, 60, 180, 320, 450],
+      "rent": [
+        4,
+        20,
+        60,
+        180,
+        320,
+        450
+      ],
       "color": "Brown",
       "houseCost": 50,
       "hotelCost": 50,
@@ -37,14 +51,20 @@
     {
       "index": 4,
       "name": "Income Tax",
-      "type": "Special"
+      "type": "Special",
+      "price": 200
     },
     {
       "index": 5,
       "name": "North Star Station",
       "type": "Property",
       "price": 200,
-      "rent": [25, 50, 100, 200],
+      "rent": [
+        25,
+        50,
+        100,
+        200
+      ],
       "color": "Station",
       "houseCost": null,
       "hotelCost": null,
@@ -56,7 +76,14 @@
       "name": "Harbor View",
       "type": "Property",
       "price": 100,
-      "rent": [6, 30, 90, 270, 400, 550],
+      "rent": [
+        6,
+        30,
+        90,
+        270,
+        400,
+        550
+      ],
       "color": "Light Blue",
       "houseCost": 50,
       "hotelCost": 50,
@@ -73,7 +100,14 @@
       "name": "River Walk",
       "type": "Property",
       "price": 100,
-      "rent": [6, 30, 90, 270, 400, 550],
+      "rent": [
+        6,
+        30,
+        90,
+        270,
+        400,
+        550
+      ],
       "color": "Light Blue",
       "houseCost": 50,
       "hotelCost": 50,
@@ -85,7 +119,14 @@
       "name": "Bridge Street",
       "type": "Property",
       "price": 120,
-      "rent": [8, 40, 100, 300, 450, 600],
+      "rent": [
+        8,
+        40,
+        100,
+        300,
+        450,
+        600
+      ],
       "color": "Light Blue",
       "houseCost": 50,
       "hotelCost": 50,
@@ -102,7 +143,14 @@
       "name": "Royal Avenue",
       "type": "Property",
       "price": 140,
-      "rent": [10, 50, 150, 450, 625, 750],
+      "rent": [
+        10,
+        50,
+        150,
+        450,
+        625,
+        750
+      ],
       "color": "Pink",
       "houseCost": 100,
       "hotelCost": 100,
@@ -114,7 +162,10 @@
       "name": "Electric",
       "type": "Property",
       "price": 150,
-      "rent": [4, 10],
+      "rent": [
+        4,
+        10
+      ],
       "color": "Utility",
       "houseCost": null,
       "hotelCost": null,
@@ -126,7 +177,14 @@
       "name": "Civic Plaza",
       "type": "Property",
       "price": 140,
-      "rent": [10, 50, 150, 450, 625, 750],
+      "rent": [
+        10,
+        50,
+        150,
+        450,
+        625,
+        750
+      ],
       "color": "Pink",
       "houseCost": 100,
       "hotelCost": 100,
@@ -138,7 +196,14 @@
       "name": "Monument Way",
       "type": "Property",
       "price": 160,
-      "rent": [12, 60, 180, 500, 700, 900],
+      "rent": [
+        12,
+        60,
+        180,
+        500,
+        700,
+        900
+      ],
       "color": "Pink",
       "houseCost": 100,
       "hotelCost": 100,
@@ -150,7 +215,12 @@
       "name": "Central Transit Station",
       "type": "Property",
       "price": 200,
-      "rent": [25, 50, 100, 200],
+      "rent": [
+        25,
+        50,
+        100,
+        200
+      ],
       "color": "Station",
       "houseCost": null,
       "hotelCost": null,
@@ -162,7 +232,14 @@
       "name": "Market Square",
       "type": "Property",
       "price": 180,
-      "rent": [14, 70, 200, 550, 750, 950],
+      "rent": [
+        14,
+        70,
+        200,
+        550,
+        750,
+        950
+      ],
       "color": "Orange",
       "houseCost": 100,
       "hotelCost": 100,
@@ -179,7 +256,14 @@
       "name": "Merchant Road",
       "type": "Property",
       "price": 180,
-      "rent": [14, 70, 200, 550, 750, 950],
+      "rent": [
+        14,
+        70,
+        200,
+        550,
+        750,
+        950
+      ],
       "color": "Orange",
       "houseCost": 100,
       "hotelCost": 100,
@@ -191,7 +275,14 @@
       "name": "Trade Avenue",
       "type": "Property",
       "price": 200,
-      "rent": [16, 80, 220, 600, 800, 1000],
+      "rent": [
+        16,
+        80,
+        220,
+        600,
+        800,
+        1000
+      ],
       "color": "Orange",
       "houseCost": 100,
       "hotelCost": 100,
@@ -208,7 +299,14 @@
       "name": "Festival Walk",
       "type": "Property",
       "price": 220,
-      "rent": [18, 90, 250, 700, 875, 1050],
+      "rent": [
+        18,
+        90,
+        250,
+        700,
+        875,
+        1050
+      ],
       "color": "Red",
       "houseCost": 150,
       "hotelCost": 150,
@@ -225,7 +323,14 @@
       "name": "Press Boulevard",
       "type": "Property",
       "price": 220,
-      "rent": [18, 90, 250, 700, 875, 1050],
+      "rent": [
+        18,
+        90,
+        250,
+        700,
+        875,
+        1050
+      ],
       "color": "Red",
       "houseCost": 150,
       "hotelCost": 150,
@@ -237,7 +342,14 @@
       "name": "Victory Square",
       "type": "Property",
       "price": 240,
-      "rent": [20, 100, 300, 750, 925, 1100],
+      "rent": [
+        20,
+        100,
+        300,
+        750,
+        925,
+        1100
+      ],
       "color": "Red",
       "houseCost": 150,
       "hotelCost": 150,
@@ -249,7 +361,12 @@
       "name": "South Harbor Station",
       "type": "Property",
       "price": 200,
-      "rent": [25, 50, 100, 200],
+      "rent": [
+        25,
+        50,
+        100,
+        200
+      ],
       "color": "Station",
       "houseCost": null,
       "hotelCost": null,
@@ -261,7 +378,14 @@
       "name": "Cinema Row",
       "type": "Property",
       "price": 260,
-      "rent": [22, 110, 330, 800, 975, 1150],
+      "rent": [
+        22,
+        110,
+        330,
+        800,
+        975,
+        1150
+      ],
       "color": "Yellow",
       "houseCost": 150,
       "hotelCost": 150,
@@ -273,7 +397,14 @@
       "name": "Theater Lane",
       "type": "Property",
       "price": 260,
-      "rent": [22, 110, 330, 800, 975, 1150],
+      "rent": [
+        22,
+        110,
+        330,
+        800,
+        975,
+        1150
+      ],
       "color": "Yellow",
       "houseCost": 150,
       "hotelCost": 150,
@@ -285,7 +416,10 @@
       "name": "City Water",
       "type": "Property",
       "price": 150,
-      "rent": [4, 10],
+      "rent": [
+        4,
+        10
+      ],
       "color": "Utility",
       "houseCost": null,
       "hotelCost": null,
@@ -297,7 +431,14 @@
       "name": "Grand Circus",
       "type": "Property",
       "price": 280,
-      "rent": [24, 120, 360, 850, 1025, 1200],
+      "rent": [
+        24,
+        120,
+        360,
+        850,
+        1025,
+        1200
+      ],
       "color": "Yellow",
       "houseCost": 150,
       "hotelCost": 150,
@@ -314,7 +455,14 @@
       "name": "Crown Street",
       "type": "Property",
       "price": 300,
-      "rent": [26, 130, 390, 900, 1100, 1275],
+      "rent": [
+        26,
+        130,
+        390,
+        900,
+        1100,
+        1275
+      ],
       "color": "Green",
       "houseCost": 200,
       "hotelCost": 200,
@@ -326,7 +474,14 @@
       "name": "Shopping Parade",
       "type": "Property",
       "price": 300,
-      "rent": [26, 130, 390, 900, 1100, 1275],
+      "rent": [
+        26,
+        130,
+        390,
+        900,
+        1100,
+        1275
+      ],
       "color": "Green",
       "houseCost": 200,
       "hotelCost": 200,
@@ -343,7 +498,14 @@
       "name": "Luxury Lane",
       "type": "Property",
       "price": 320,
-      "rent": [28, 150, 450, 1000, 1200, 1400],
+      "rent": [
+        28,
+        150,
+        450,
+        1000,
+        1200,
+        1400
+      ],
       "color": "Green",
       "houseCost": 200,
       "hotelCost": 200,
@@ -355,7 +517,12 @@
       "name": "East Metro Station",
       "type": "Property",
       "price": 200,
-      "rent": [25, 50, 100, 200],
+      "rent": [
+        25,
+        50,
+        100,
+        200
+      ],
       "color": "Station",
       "houseCost": null,
       "hotelCost": null,
@@ -372,7 +539,14 @@
       "name": "Billionaire's Row",
       "type": "Property",
       "price": 350,
-      "rent": [35, 175, 500, 1100, 1300, 1500],
+      "rent": [
+        35,
+        175,
+        500,
+        1100,
+        1300,
+        1500
+      ],
       "color": "Dark Blue",
       "houseCost": 200,
       "hotelCost": 200,
@@ -389,7 +563,14 @@
       "name": "Platinum Heights",
       "type": "Property",
       "price": 400,
-      "rent": [50, 200, 600, 1400, 1700, 2000],
+      "rent": [
+        50,
+        200,
+        600,
+        1400,
+        1700,
+        2000
+      ],
       "color": "Dark Blue",
       "houseCost": 200,
       "hotelCost": 200,

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 /// The one dialog look.
@@ -111,8 +113,10 @@ Future<T?> showAppDialog<T>(
             ],
           ),
           // A long summary scrolls instead of overflowing on a short screen.
+          // On a wide window the card keeps a readable width instead of
+          // stretching a sentence across the whole screen.
           content: SizedBox(
-            width: width,
+            width: math.min(width, 420),
             child: SingleChildScrollView(
               child: content ??
                   Text(

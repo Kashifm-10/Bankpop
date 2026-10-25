@@ -10,7 +10,7 @@ import 'package:mon/services/game_session.dart';
 import 'package:mon/services/player_exit.dart';
 import 'package:mon/widgets/app_dialog.dart';
 import 'package:mon/widgets/app_message.dart';
-import 'package:responsive_sizer/responsive_sizer.dart';
+import 'package:mon/widgets/app_metrics.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 

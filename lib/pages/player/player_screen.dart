@@ -8,25 +8,35 @@ import 'package:intl/intl.dart';
 import 'package:lottie/lottie.dart';
 import 'package:mon/models/bankpop_board.dart';
 import 'package:mon/routes.dart';
+import 'package:mon/services/bankruptcy.dart';
+import 'package:mon/services/bank_handover.dart';
 import 'package:mon/services/board_catalog.dart';
 import 'package:mon/services/building_rules.dart';
+import 'package:mon/services/card_actions.dart';
+import 'package:mon/services/card_charges.dart';
+import 'package:mon/services/card_deck.dart';
 import 'package:mon/services/card_requests.dart';
 import 'package:mon/services/deals.dart';
 import 'package:mon/services/game_session.dart';
 import 'package:mon/services/player_cards.dart';
 import 'package:mon/services/player_exit.dart';
+import 'package:mon/services/rent.dart';
 import 'package:mon/services/wallet_transfer.dart';
 import 'package:mon/pages/transactions/receive.dart';
 import 'package:mon/widgets/amount_keypad.dart';
 import 'package:mon/widgets/app_dialog.dart';
+import 'package:mon/widgets/app_content.dart';
 import 'package:mon/widgets/app_message.dart';
 import 'package:mon/widgets/bankpop_board_popup.dart';
+import 'package:mon/widgets/bankrupt_dialog.dart';
 import 'package:mon/widgets/card_owner_badge.dart';
 import 'package:mon/widgets/bankpop_space_card.dart';
 import 'package:mon/widgets/game_controls.dart';
+import 'package:mon/widgets/rent_qr_dialog.dart';
 import 'package:mon/widgets/game_status_banner.dart';
+import 'package:mon/widgets/player_palette.dart';
 import 'package:mon/widgets/trade_builder_dialog.dart';
-import 'package:responsive_sizer/responsive_sizer.dart';
+import 'package:mon/widgets/app_metrics.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -54,7 +64,7 @@ class Player {
         playerID: map['player_id'],
         name: map['name'],
         value: double.tryParse(map['wallet'].toString()) ?? 0.0,
-        color: Colors.primaries[map['name'].hashCode % Colors.primaries.length],
+        color: PlayerPalette.forName(map['name'].toString()),
         avatar: map['avatar'] ?? "assets/avatars/boy1.jpg",
         standing: PlayerStanding.fromRow(map));
   }
@@ -120,6 +130,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
 
   bool _isFetching = false; // One poll in flight at a time
   bool _isProcessingDeal = false;
+  bool _isProcessingCharge = false;
   String? _bankerPlayerId;
   StreamSubscription<List<Map<String, dynamic>>>? _rosterUpdates;
 
@@ -138,9 +149,18 @@ class _PlayersScreenState extends State<PlayersScreen> {
   /// the banker table appears exactly once.
   bool _bankOfferShown = false;
 
+  /// True while a bankruptcy is being worked out, so a second tap cannot start
+  /// a second liquidation.
+  bool _declaringBankrupt = false;
+
+  /// True when this device is watching a game it handed over. The previous
+  /// banker keeps a seat so they can follow the game, but the bank and every
+  /// control in it belong to somebody else now.
+  bool _observer = false;
+
   /// True when the banker paused the game, or ended it. The player can look at
   /// the table and their holdings, but nothing here may move money or property.
-  bool get _viewOnly => _session?.blocksPlay ?? false;
+  bool get _viewOnly => _observer || (_session?.blocksPlay ?? false);
 
   /// Explains, once, why an action did nothing, and reports that it was
   /// blocked. Every money-moving entry point starts with this.
@@ -394,6 +414,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
           (response as List<dynamic>).cast<Map<String, dynamic>>());
       unawaited(_loadSession());
       unawaited(_checkDeals());
+      unawaited(_checkCardCharges());
     } catch (e) {
       debugPrint('Error fetching players: $e');
     } finally {
@@ -406,6 +427,16 @@ class _PlayersScreenState extends State<PlayersScreen> {
   /// can never produce a different screen.
   void _applyRosterRows(List<Map<String, dynamic>> rows) {
     if (!mounted) return;
+
+    // An ex-banker watches through the player table. Their row is what tells
+    // this screen to keep every action disabled even while the game is running.
+    final String? me = playerID;
+    if (me != null && me.isNotEmpty) {
+      final bool observer = rows.any((Map<String, dynamic> row) =>
+          row['player_id']?.toString() == me &&
+          row['role']?.toString() == BankHandover.exBankerRole);
+      if (observer != _observer) setState(() => _observer = observer);
+    }
 
     // A removed player keeps their row: the badge next to the name is how the
     // table sees what happened. They sort to the bottom, under the live players.
@@ -676,6 +707,127 @@ class _PlayersScreenState extends State<PlayersScreen> {
     } finally {
       _isProcessingDeal = false;
     }
+  }
+
+  /// A share of a card the banker drew that this player still owes.
+  ///
+  /// "Collect £10 from every player" writes one row per payer; each of those
+  /// players sees it here as a dialog that cannot be closed without paying,
+  /// because the money is owed to whoever drew the card, not to the bank.
+  Future<void> _checkCardCharges() async {
+    if (_viewOnly) return;
+    if (_isProcessingCharge) return;
+    final String? id = playerID;
+    if (id == null || id.isEmpty) return;
+
+    // Claimed before the read, not after it: two reconciliation ticks can
+    // overlap, and both would otherwise open the same dialog.
+    _isProcessingCharge = true;
+    try {
+      final List<CardCharge> waiting = await CardCharges.pendingForGame(
+        gameId: widget.gameId,
+        payerId: id,
+      );
+      if (waiting.isEmpty || !mounted) return;
+      final CardCharge charge = waiting.first;
+      final String currency =
+          (await BoardCatalog.boardForGame(widget.gameId)).currency;
+      if (!mounted) return;
+      await _confirmCardCharge(charge, currency);
+    } catch (error) {
+      debugPrint('Could not settle a card charge: $error');
+    } finally {
+      _isProcessingCharge = false;
+    }
+  }
+
+  Future<void> _confirmCardCharge(CardCharge charge, String currency) async {
+    final String? id = playerID;
+    if (id == null || id.isEmpty) return;
+    final String amount = BoardCurrencies.format(currency, charge.amount);
+
+    final bool? pay = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          backgroundColor: const Color(0xFFFFF8E1),
+          title: const Text('A card is waiting'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                charge.description,
+                style: TextStyle(fontSize: 15.sp, height: 1.35),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'You pay $amount to ${charge.receiverName}.',
+                style: TextStyle(
+                  fontSize: 16.sp,
+                  fontWeight: FontWeight.bold,
+                  color: const Color(0xFF33691E),
+                ),
+              ),
+            ],
+          ),
+          actions: <Widget>[
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF689F38),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: Text('Pay $amount'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (pay != true || !mounted) return;
+
+    final TransferOutcome outcome = await WalletTransfer.pay(
+      gameId: widget.gameId,
+      fromId: id,
+      fromRole: WalletTransfer.playerRole,
+      toId: charge.receiverId,
+      toRole: WalletTransfer.playerRole,
+      amount: charge.amount,
+    );
+    if (!mounted) return;
+    if (!outcome.ok) {
+      await showMessage(
+        context,
+        outcome.failure == TransferFailure.insufficientFunds
+            ? 'You do not have $amount.'
+            : 'The payment could not be made. Please try again.',
+        title: 'Payment failed',
+      );
+      return;
+    }
+
+    await CardCharges.markPaid(charge.id);
+    final DateTime now = DateTime.now();
+    try {
+      await Supabase.instance.client.from('transactions').insert(<String, dynamic>{
+        'game_id': widget.gameId,
+        'value': charge.amount,
+        'from': charge.payerName,
+        'to': charge.receiverName,
+        'code': '${charge.payerId}_${charge.receiverId}',
+        'date': DateFormat('yyyy-MM-dd').format(now),
+        'time': DateFormat('HH:mm:ss').format(now),
+      });
+    } catch (error) {
+      debugPrint('Could not record the card payment: $error');
+    }
+    if (!mounted) return;
+    await showMessage(
+      context,
+      'You paid $amount to ${charge.receiverName}.',
+      title: 'Paid',
+    );
   }
 
   Future<void> _showTradeOffer(
@@ -984,9 +1136,36 @@ class _PlayersScreenState extends State<PlayersScreen> {
 
     final Map<int, BankpopSpace> spaces = await PlayerCards.spaces(widget.gameId);
     final BankpopSpace? space = spaces[card.cardIndex];
-    final int refund = (space?.houseCost ?? 0) ~/ 2;
+    if (space == null) return;
+
+    // The same rule the bank applies when it settles the sale: a card can only
+    // come down while it is level with the rest of its colour set, so a group
+    // can never be left with 2, 1 and 0 houses however the sales are ordered.
+    final List<BankpopSpace> set = spaces.values
+        .where((BankpopSpace s) => s.color == space.color)
+        .toList();
+    final BuildingDecision sale = BuildingRules.sell(
+      space: space,
+      set: set,
+      houses: card.houses,
+      hotels: card.hotels,
+      housesByCard: <int, int>{
+        for (final PlayerCard c in myCards) c.cardIndex: c.houses,
+      },
+    );
+    if (!mounted) return;
+    if (!sale.allowed) {
+      await showMessage(
+        context,
+        sale.reason ?? 'Sell evenly: the rest of the set has to come down first',
+        title: 'Cannot sell yet',
+      );
+      return;
+    }
+
+    final int refund = sale.price;
     final bool confirmed = await _confirm(
-      'Sell a house on ${space?.name ?? "this card"}?',
+      'Sell a house on ${space.name}?',
       'The bank will pay you \u00a3$refund and one house will be removed '
           'from the card.',
       'Sell house',
@@ -1154,10 +1333,25 @@ class _PlayersScreenState extends State<PlayersScreen> {
     }
     final Map<int, BankpopSpace> spaces = await PlayerCards.spaces(widget.gameId);
     if (!mounted) return;
+    // The rent and every price on these cards is written in the game board's
+    // own currency.
+    final String currency =
+        (await BoardCatalog.boardForGame(widget.gameId)).currency;
+    if (!mounted) return;
 
     // The sheet keeps its own mutable copy so a house that has just been
     // approved changes the mini card's rent in place, without reopening.
     final List<PlayerCard> mine = List<PlayerCard>.of(cards);
+    // A drawn jail-free card is held in the hand, not owned as a property: it
+    // sits above the properties and leaves again when it is used.
+    final List<PlayerCard> held = <PlayerCard>[
+      for (final PlayerCard card in mine)
+        if (JailFreeCards.isJailFree(card.cardIndex)) card,
+    ];
+    final List<PlayerCard> owned = <PlayerCard>[
+      for (final PlayerCard card in mine)
+        if (!JailFreeCards.isJailFree(card.cardIndex)) card,
+    ];
 
     await showModalBottomSheet<void>(
       context: context,
@@ -1176,7 +1370,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
               minChildSize: 0.3,
               maxChildSize: 0.9,
               builder: (BuildContext context, ScrollController controller) {
-                final List<_CardGroup> groups = _groupCards(mine, spaces);
+                final List<_CardGroup> groups = _groupCards(owned, spaces);
                 return Column(
                   children: [
                     Padding(
@@ -1200,7 +1394,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
                       ),
                     ),
                     Expanded(
-                      child: groups.isEmpty
+                      child: groups.isEmpty && held.isEmpty
                           ? Center(
                               child: Padding(
                                 padding: const EdgeInsets.all(24),
@@ -1219,6 +1413,34 @@ class _PlayersScreenState extends State<PlayersScreen> {
                               controller: controller,
                               padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
                               children: <Widget>[
+                                if (held.isNotEmpty) ...<Widget>[
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 4, bottom: 8),
+                                    child: Text(
+                                      'In hand',
+                                      style: TextStyle(
+                                        fontSize: 14.sp,
+                                        fontWeight: FontWeight.bold,
+                                        color: const Color(0xFF33691E),
+                                      ),
+                                    ),
+                                  ),
+                                  for (final PlayerCard card in held)
+                                    _jailFreeCard(
+                                      card: card,
+                                      onUse: () async {
+                                        final bool used = await _useJailFree(
+                                          card: card,
+                                          setSheetState: setSheetState,
+                                        );
+                                        if (!used) return;
+                                        mine.remove(card);
+                                        held.remove(card);
+                                        setSheetState(() {});
+                                      },
+                                    ),
+                                  const SizedBox(height: 14),
+                                ],
                                 for (final _CardGroup group in groups) ...[
                                   _groupHeader(group),
                                   Wrap(
@@ -1229,7 +1451,9 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                         _miniCard(
                                           card: card,
                                           space: spaces[card.cardIndex]!,
-                                          myCards: mine,
+                                          spaces: spaces,
+                                          myCards: owned,
+                                          currency: currency,
                                           setSheetState: setSheetState,
                                         ),
                                     ],
@@ -1320,15 +1544,116 @@ class _PlayersScreenState extends State<PlayersScreen> {
     );
   }
 
+  /// A jail-free card held in the hand: the only thing to do with it is use it,
+  /// which sends it back to the pack it came from.
+  Widget _jailFreeCard({
+    required PlayerCard card,
+    required VoidCallback onUse,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF6A1B9A), width: 2),
+      ),
+      child: Row(
+        children: <Widget>[
+          const Icon(Icons.key, color: Color(0xFF6A1B9A), size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  JailFreeCards.nameFor(card.cardIndex),
+                  style: TextStyle(
+                    fontSize: 13.sp,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Use it to leave jail, then it goes back to the pack.',
+                  style: TextStyle(fontSize: 11.sp, color: Colors.black54),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: onUse,
+            child: const Text('Use'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Uses a held jail-free card: the row leaves the hand and the card goes back
+  /// to the bottom of the pack it was drawn from.
+  Future<bool> _useJailFree({
+    required PlayerCard card,
+    required void Function(void Function()) setSheetState,
+  }) async {
+    final CardDeckKind kind = card.cardIndex == JailFreeCards.chestIndex
+        ? CardDeckKind.chest
+        : CardDeckKind.chance;
+    String? text;
+    try {
+      final BankpopBoard board = await BoardCatalog.boardForGame(widget.gameId);
+      final List<String> pack =
+          kind == CardDeckKind.chance ? board.chanceOptions : board.communityChest;
+      for (final String card in pack) {
+        if (card.toLowerCase().contains('jail free')) {
+          text = card;
+          break;
+        }
+      }
+    } catch (error) {
+      debugPrint('Could not read the pack for the jail-free card: $error');
+    }
+
+    await PlayerCards.release(card.id);
+    if (text != null) {
+      await CardDeck.returnCard(
+        gameId: widget.gameId,
+        kind: kind,
+        card: text,
+      );
+    }
+    if (!mounted) return true;
+    setSheetState(() {});
+    await showMessage(
+      context,
+      'The ${kind.label.toLowerCase()} jail-free card is back in its pack.',
+      title: 'Card used',
+    );
+    return true;
+  }
+
   /// The mini card in the sheet: name, what is built on it, and the rent it
   /// currently pays. Tapping opens the full deed for that card.
   Widget _miniCard({
     required PlayerCard card,
     required BankpopSpace space,
+    required Map<int, BankpopSpace> spaces,
     required List<PlayerCard> myCards,
+    required String currency,
     required void Function(void Function()) setSheetState,
   }) {
     final Color groupColor = Color(BankpopBoard.colorForGroup(space.color));
+    final RentDue due = Rent.forCard(
+      space: space,
+      card: card,
+      ownerCards: myCards,
+      spaces: spaces,
+    );
+    final String rent = due.rentFree
+        ? 'No rent'
+        : due.needsDice
+            ? '${due.diceMultiplier}× dice'
+            : 'Rent ${BoardCurrencies.format(currency, due.amount)}';
 
     return SizedBox(
       width: 154,
@@ -1338,6 +1663,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
           space: space,
           card: card,
           myCards: myCards,
+          spaces: spaces,
+          currency: currency,
           onBuilt: () => setSheetState(() {}),
         ),
         child: Container(
@@ -1404,11 +1731,13 @@ class _PlayersScreenState extends State<PlayersScreen> {
                       ),
                   const Spacer(),
                   Text(
-                    'Rent £${_currentRent(space, card)}',
+                    rent,
                     style: TextStyle(
                       fontSize: 12.sp,
                       fontWeight: FontWeight.w600,
-                      color: const Color(0xFF33691E),
+                      color: due.rentFree
+                          ? Colors.red.shade700
+                          : const Color(0xFF33691E),
                     ),
                   ),
                 ],
@@ -1418,18 +1747,6 @@ class _PlayersScreenState extends State<PlayersScreen> {
         ),
       ),
     );
-  }
-
-  /// The rent this card is due right now: base rent while it is bare, the house
-  /// level while it has 1-4, and the hotel line once it has one.
-  static int _currentRent(BankpopSpace space, PlayerCard card) {
-    final List<int>? rent = space.rent;
-    if (rent == null || rent.isEmpty) return 0;
-    if (card.hasHotel) return rent[rent.length > 5 ? 5 : rent.length - 1];
-    if (card.houses > 0) {
-      return rent[card.houses.clamp(0, rent.length - 1)];
-    }
-    return rent[0];
   }
 
   /// Opens the full deed for one of this player's cards, with what is built on
@@ -1442,6 +1759,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
     required BankpopSpace space,
     required PlayerCard card,
     required List<PlayerCard> myCards,
+    required Map<int, BankpopSpace> spaces,
+    required String currency,
     required VoidCallback onBuilt,
   }) async {
     final int index =
@@ -1451,6 +1770,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
     await showBankpopSpaceCard(
       context,
       space,
+      currency: currency,
       actionWidget: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1468,6 +1788,13 @@ class _PlayersScreenState extends State<PlayersScreen> {
           if (!_viewOnly)
             _CardManageBar(
               card: live,
+              onTakeRent: () => _takeRent(
+                space: space,
+                card: live,
+                myCards: myCards,
+                spaces: spaces,
+                currency: currency,
+              ),
               onMortgage: () => _mortgageCard(
                 space: space,
                 card: live,
@@ -1509,6 +1836,127 @@ class _PlayersScreenState extends State<PlayersScreen> {
               return true;
             },
     );
+  }
+
+  /// Takes this card's rent with a QR instead of a typed amount.
+  ///
+  /// The figure comes from [Rent]: nothing while the card is mortgaged, the
+  /// owner's station count for a station, and the dice multiplier for a utility
+  /// (the throw is asked for first). The QR closes itself when the money
+  /// reaches this player.
+  Future<void> _takeRent({
+    required BankpopSpace space,
+    required PlayerCard card,
+    required List<PlayerCard> myCards,
+    required Map<int, BankpopSpace> spaces,
+    required String currency,
+  }) async {
+    if (_guardLifecycle()) return;
+
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String id = playerID ?? prefs.getString('playerID') ?? '';
+    if (!mounted) return;
+    if (id.isEmpty) {
+      await showMessage(context, 'This device has no player id');
+      return;
+    }
+    final String name = card.to.trim().isNotEmpty
+        ? card.to
+        : (prefs.getString('display_name') ?? 'Player');
+
+    // Check the mortgage first: there is no point asking for a dice throw on a
+    // card that collects nothing.
+    final RentDue before = Rent.forCard(
+      space: space,
+      card: card,
+      ownerCards: myCards,
+      spaces: spaces,
+    );
+    if (before.rentFree) {
+      await showMessage(
+        context,
+        '${space.name} is mortgaged, so it collects no rent.',
+        title: 'No rent',
+      );
+      return;
+    }
+
+    int? dice;
+    if (Rent.isUtility(space)) {
+      dice = await _askDice();
+      if (dice == null || !mounted) return;
+    }
+
+    final RentDue due = Rent.forCard(
+      space: space,
+      card: card,
+      ownerCards: myCards,
+      spaces: spaces,
+      dice: dice,
+    );
+    if (due.amount <= 0) {
+      await showMessage(
+        context,
+        'There is no rent to collect on ${space.name}.',
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    final bool paid = await showRentQrDialog(
+      context,
+      gameId: widget.gameId,
+      playerId: id,
+      playerName: name,
+      cardName: space.name,
+      currency: currency,
+      amount: due.amount,
+    );
+    if (!mounted || !paid) return;
+    await showMessage(
+      context,
+      '${BoardCurrencies.format(currency, due.amount)} rent for '
+      '${space.name} received.',
+      title: 'Rent paid',
+    );
+  }
+
+  /// The throw a utility's rent is multiplied by: 2-12, entered by the owner
+  /// when a payer lands on it.
+  Future<int?> _askDice() async {
+    final TextEditingController controller = TextEditingController();
+    final int? total = await showDialog<int>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFFFFF8E1),
+        title: const Text('Dice total'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            hintText: '2 to 12',
+            labelText: 'The throw the payer rolled',
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              final int? total = int.tryParse(controller.text.trim());
+              if (total == null || total < 2 || total > 12) return;
+              Navigator.of(dialogContext).pop(total);
+            },
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return total;
   }
 
   /// One step of building: the rules, the ask, then the wait for the banker.
@@ -1941,6 +2389,123 @@ class _PlayersScreenState extends State<PlayersScreen> {
     );
   }
 
+  /// Declares this player bankrupt.
+  ///
+  /// The screen does not decide what a bankruptcy is worth - the service reads
+  /// the cash, the buildings and the cards and adds it up. This asks the player
+  /// who they owe first, shows what can be paid, and then hands the answer over
+  /// to [Bankruptcy.declare], which liquidates, pays the creditors in
+  /// proportion to their debts and returns the cards to the bank.
+  Future<void> _declareBankrupt() async {
+    if (_declaringBankrupt || _guardLifecycle()) return;
+
+    final String id = playerID ??
+        (await SharedPreferences.getInstance()).getString('playerID') ??
+        '';
+    if (id.isEmpty) {
+      if (!mounted) return;
+      await showMessage(context, 'This device has no player id');
+      return;
+    }
+    final String bankerId = _bankerPlayerId ?? '';
+    if (bankerId.isEmpty) {
+      if (!mounted) return;
+      await showMessage(context, 'The bank of this game could not be found');
+      return;
+    }
+
+    final List<BankruptcyCreditor> creditors = <BankruptcyCreditor>[
+      for (final Player player in players)
+        if (!player.standing.isGone && player.playerID != id)
+          BankruptcyCreditor(playerId: player.playerID, name: player.name),
+    ];
+    final BankruptcyPreview preview = await Bankruptcy.preview(
+      gameId: widget.gameId,
+      playerId: id,
+    );
+    if (!mounted) return;
+
+    final List<BankruptcyDue>? dues = await showBankruptcyDialog(
+      context,
+      creditors: creditors,
+      preview: preview,
+    );
+    if (dues == null || !mounted) return;
+
+    final double owed = dues.fold(
+      0,
+      (double sum, BankruptcyDue due) => sum + due.amount,
+    );
+    final String canPay = '₹${preview.total.toStringAsFixed(2)}';
+    final bool confirmed = await showAppConfirm(
+      context,
+      title: 'Go bankrupt?',
+      icon: Icons.gavel,
+      destructive: true,
+      confirmLabel: 'Declare bankrupt',
+      cancelLabel: 'Stay in the game',
+      message: owed > 0
+          ? 'Your cash, houses and cards raise $canPay. The '
+              '₹${owed.toStringAsFixed(2)} you owe is paid from that as far '
+              'as it goes, and you leave the table. Every card you hold goes '
+              'back to the bank, so anyone can buy it again.'
+          : 'You leave the table. Your cash goes to the bank and every card '
+              'you hold goes back on the market for anyone to buy.',
+    );
+    if (!confirmed || !mounted) return;
+
+    setState(() => _declaringBankrupt = true);
+    // This device knows why it is leaving; the banker's removal dialog is not
+    // the right thing to show on top of it.
+    _standingHandled = true;
+
+    final BankruptcyOutcome outcome = await Bankruptcy.declare(
+      gameId: widget.gameId,
+      playerId: id,
+      playerName: currentPlayerName ?? '',
+      bankerId: bankerId,
+      dues: dues,
+    );
+    if (!mounted) return;
+
+    if (!outcome.ok) {
+      setState(() => _declaringBankrupt = false);
+      _standingHandled = false;
+      await showMessage(context, outcome.failure!);
+      return;
+    }
+
+    await showMessage(
+      context,
+      _bankruptcySummary(outcome),
+      title: 'Bankrupt',
+    );
+    if (!mounted) return;
+    await _returnToTitle();
+  }
+
+  /// What just happened, in the player's words: who was paid what, and what
+  /// went back to the bank.
+  String _bankruptcySummary(BankruptcyOutcome outcome) {
+    final StringBuffer text = StringBuffer()
+      ..writeln(
+          '₹${outcome.raised.toStringAsFixed(2)} was raised from your cash, '
+          'buildings and mortgages.');
+    for (final BankruptcyPayment payment in outcome.payments) {
+      if (payment.paid > 0) {
+        text.writeln(
+            '${payment.name} was paid ₹${payment.paid.toStringAsFixed(2)} of '
+            '₹${payment.due.toStringAsFixed(2)}.');
+      } else {
+        text.writeln('${payment.name} could not be paid.');
+      }
+    }
+    text.write(
+        '${outcome.cards} card(s) went back to the bank and can be bought '
+        'again.');
+    return text.toString();
+  }
+
   /// Pays the bank: the stake, a fine, or anything else the rules hand it.
   Future<void> payBank() async {
     if (_guardLifecycle()) return;
@@ -2001,6 +2566,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
         if (payOption == 'ScanPay') GameControls.receive,
         GameControls.myCards,
         if (_playWithCards) GameControls.trade,
+        if (!_viewOnly) GameControls.bankrupt,
         _payControl,
       ];
 
@@ -2081,12 +2647,42 @@ class _PlayersScreenState extends State<PlayersScreen> {
         ),
         // playerID comes from local prefs, so this gate clears within a frame or
         // two; it just keeps the card from being built before it exists.
-        body: isLoading || playerID == null
-            ? const Center(
-                child: CircularProgressIndicator(color: Color(0xFF689F38)),
-              )
-            : Column(
-                children: <Widget>[
+        body: AppContent(
+          maxWidth: 1000,
+          child: isLoading || playerID == null
+              ? const Center(
+                  child: CircularProgressIndicator(color: Color(0xFF689F38)),
+                )
+              : Column(
+                  children: <Widget>[
+                  // A banker who handed the bank over stays to watch. Nothing
+                  // here is theirs to move any more, so the band says so before
+                  // the lifecycle band (which still applies on top of it).
+                  if (_observer)
+                    Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                      padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE8F5E9),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Row(
+                        children: <Widget>[
+                          Icon(Icons.visibility_outlined,
+                              color: Color(0xFF558B2F), size: 20),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'You handed over the bank, so this table is view '
+                              'only for you. Only the banker can pay, advance, '
+                              'pause or end it.',
+                              style: TextStyle(fontSize: 12.5),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   // Paused or ended: the band explains why the pay, trade and
                   // building controls are gone, and who can lift the pause.
                   if (_session != null && _session!.blocksPlay)
@@ -2337,6 +2933,21 @@ class _PlayersScreenState extends State<PlayersScreen> {
                                         control: GameControls.trade,
                                         onPressed: _openTradeBuilder,
                                       ),
+                                    // Spelled out rather than an icon: it is the
+                                    // one action here that cannot be undone.
+                                    if (!_viewOnly)
+                                      TextButton.icon(
+                                        onPressed: _declareBankrupt,
+                                        icon: const Icon(Icons.gavel, size: 18),
+                                        label: const Text('Declare bankrupt'),
+                                        style: TextButton.styleFrom(
+                                          foregroundColor:
+                                              const Color(0xFFB71C1C),
+                                          textStyle: const TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
                                     if (!_viewOnly)
                                       GameIconButton(
                                         control: _payControl,
@@ -2371,6 +2982,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
                   ),
                 ],
               ),
+          ),
       ),
     );
   }
@@ -2382,6 +2994,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
 class _CardManageBar extends StatelessWidget {
   const _CardManageBar({
     required this.card,
+    required this.onTakeRent,
     required this.onMortgage,
     required this.onUnmortgage,
     required this.onSellHouse,
@@ -2389,6 +3002,7 @@ class _CardManageBar extends StatelessWidget {
   });
 
   final PlayerCard card;
+  final Future<void> Function() onTakeRent;
   final Future<void> Function() onMortgage;
   final Future<void> Function() onUnmortgage;
   final Future<void> Function() onSellHouse;
@@ -2402,6 +3016,9 @@ class _CardManageBar extends StatelessWidget {
       spacing: 6,
       runSpacing: 4,
       children: <Widget>[
+        // The rent is collected from this card's own figure, never typed by the
+        // payer; a mortgaged card says so instead of opening a code.
+        _chip('Take rent', const Color(0xFF2E7D32), onTakeRent),
         if (canMortgage) _chip('Mortgage', const Color(0xFF616161), onMortgage),
         if (card.mortgaged)
           _chip('Unmortgage', const Color(0xFF2E7D32), onUnmortgage),

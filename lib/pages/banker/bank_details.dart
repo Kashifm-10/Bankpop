@@ -1,16 +1,20 @@
 import 'dart:math';
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 import 'package:go_router/go_router.dart';
+import 'package:mon/models/bankpop_board.dart';
 import 'package:mon/routes.dart';
 import 'package:mon/services/board_catalog.dart';
+import 'package:mon/services/card_deck.dart';
 import 'package:mon/services/game_session.dart';
+import 'package:mon/widgets/app_content.dart';
 import 'package:mon/widgets/app_dialog.dart';
 import 'package:mon/widgets/app_message.dart';
+import 'package:mon/widgets/app_metrics.dart';
 import 'package:mon/widgets/country_chip.dart';
-import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -29,14 +33,14 @@ class _BankValueScreenState extends State<BankValueScreen> {
   /// game so the banker screen knows to offer the Give Card flow.
   bool _playWithCards = false;
 
-  /// The board this game is played on. It is chosen here, with the other
-  /// rules, because it is one of them: the board and every Chance and Community
-  /// Chest card follow it for the whole game, on every device. A signed-in
-  /// banker can also pick a board they made themselves.
+  /// The board this game is played on: one of the built-in countries. The board
+  /// and its Chance and Community Chest cards follow it for the whole game, on
+  /// every device, so it is chosen here with the rest of the rules.
   String? _boardId;
   String _boardLabel = '';
 
-  /// The boards on offer: the built-in countries plus this banker's own.
+  /// The country boards on offer. Creating a board lives in Boards & cards, not
+  /// in the middle of a game set-up.
   late Future<List<BoardListing>> _boardsFuture;
 
   final TextEditingController _bankValueController = TextEditingController();
@@ -48,21 +52,6 @@ class _BankValueScreenState extends State<BankValueScreen> {
   void initState() {
     super.initState();
     _boardsFuture = BoardCatalog.available(refresh: true);
-  }
-
-  /// Opens the editor for a board of the banker's own, then offers it here.
-  Future<void> _createBoard() async {
-    final String? created = await context.push<String>(AppRoutes.newBoard);
-    if (!mounted) return;
-    setState(() => _boardsFuture = BoardCatalog.available(refresh: true));
-    if (created != null && created.isNotEmpty) {
-      final BoardListing? listing = await BoardCatalog.listing(created);
-      if (!mounted) return;
-      setState(() {
-        _boardId = created;
-        _boardLabel = listing?.name ?? 'Your board';
-      });
-    }
   }
 
   String generateGameId(int length) {
@@ -104,11 +93,13 @@ class _BankValueScreenState extends State<BankValueScreen> {
       showMessage(context, 'Please select payment type');
       return;
     }
-    final String? boardId = _boardId;
-    if (boardId == null) {
+    if (_playWithCards && _boardId == null) {
       showMessage(context, 'Please choose the board');
       return;
     }
+    // Only a cards game draws the board; a game without cards keeps the default
+    // so the session still has one to name.
+    final String boardId = _boardId ?? BoardCatalog.fallbackId;
 
     // The summary comes before anything is written. The stake and the advance
     // become the rules of the game, and a player reads them from the session,
@@ -152,11 +143,12 @@ class _BankValueScreenState extends State<BankValueScreen> {
             value: _playWithCards ? 'Yes' : 'No',
             icon: Icons.style_outlined,
           ),
-          AppDialogPoint(
-            label: 'Board',
-            value: _boardLabel.isEmpty ? 'Board' : _boardLabel,
-            icon: Icons.grid_on,
-          ),
+          if (_playWithCards && _boardLabel.isNotEmpty)
+            AppDialogPoint(
+              label: 'Board',
+              value: _boardLabel,
+              icon: Icons.grid_on,
+            ),
         ],
       ),
     );
@@ -225,6 +217,19 @@ class _BankValueScreenState extends State<BankValueScreen> {
     // copy of it now: every board and card lookup in the game then reads from
     // the phone instead of the database.
     await BoardCatalog.cacheForGame(gameId, boardId);
+    // Both packs are shuffled once, now, and kept with the game: every draw
+    // the banker makes from here on follows that order on every device.
+    try {
+      final BankpopBoard board = await BoardCatalog.boardForGame(gameId);
+      await CardDeck.startGame(
+        gameId: gameId,
+        chance: board.chanceOptions,
+        chest: board.communityChest,
+      );
+    } catch (error) {
+      // The game still plays; the banker's draw shuffles a pack of its own.
+      debugPrint('Could not shuffle the card packs: $error');
+    }
 
     if (!mounted) return;
     // The setup screen is not somewhere the back button should return to once
@@ -275,14 +280,18 @@ class _BankValueScreenState extends State<BankValueScreen> {
           ),
           // The form grew by the cards switch; a short screen (or a large text
           // scale) would otherwise overflow with no way to reach Start Game.
-          // Centring is kept while the content still fits.
-          child: LayoutBuilder(
-            builder: (BuildContext context, BoxConstraints constraints) =>
-                SingleChildScrollView(
-              child: ConstrainedBox(
-                constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                child: Padding(
-                  padding: EdgeInsets.all(4.w),
+          // Centring is kept while the content still fits, and on a desktop
+          // window the form keeps a comfortable width instead of stretching
+          // its fields across the screen.
+          child: AppContent(
+            maxWidth: 720,
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: LayoutBuilder(
+              builder: (BuildContext context, BoxConstraints constraints) =>
+                  SingleChildScrollView(
+                child: ConstrainedBox(
+                  constraints:
+                      BoxConstraints(minHeight: constraints.maxHeight),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -476,79 +485,6 @@ class _BankValueScreenState extends State<BankValueScreen> {
                           ),
                         ),
                       ),
-                      // The board is a rule of the game like the payment type:
-                      // every device at the table draws the board chosen here,
-                      // and its Chance and Community Chest cards follow it.
-                      Align(
-                        alignment: Alignment.center,
-                        child: Padding(
-                          padding: const EdgeInsets.all(5.0),
-                          child: Text(
-                            'Choose the board',
-                            style: TextStyle(
-                              fontSize: 14.sp,
-                              fontWeight: FontWeight.w400,
-                              color: const Color(0xFF33691E),
-                            ),
-                          ),
-                        ),
-                      ),
-                      SizedBox(
-                        height: 44,
-                        child: FutureBuilder<List<BoardListing>>(
-                          future: _boardsFuture,
-                          builder: (context, snap) {
-                            final List<BoardListing> boards =
-                                snap.data ?? const <BoardListing>[];
-                            if (snap.connectionState ==
-                                ConnectionState.waiting) {
-                              return const Center(
-                                child: SizedBox(
-                                  height: 20,
-                                  width: 20,
-                                  child:
-                                      CircularProgressIndicator(strokeWidth: 2),
-                                ),
-                              );
-                            }
-                            return ListView.separated(
-                              scrollDirection: Axis.horizontal,
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 2),
-                              itemCount: boards.length + 1,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(width: 6),
-                              itemBuilder: (BuildContext context, int index) {
-                                if (index == boards.length) {
-                                  return Center(
-                                    child: CountryChip(
-                                      label: 'Create your own',
-                                      icon: Icons.add_circle_outline,
-                                      selected: false,
-                                      onTap: _createBoard,
-                                    ),
-                                  );
-                                }
-                                final BoardListing board = boards[index];
-                                return Center(
-                                  child: CountryChip(
-                                    label: board.name,
-                                    flag: board.flag,
-                                    icon: board.isMine
-                                        ? Icons.person_outline
-                                        : null,
-                                    selected: _boardId == board.boardId,
-                                    onTap: () => setState(() {
-                                      _boardId = board.boardId;
-                                      _boardLabel = board.name;
-                                    }),
-                                  ),
-                                );
-                              },
-                            );
-                          },
-                        ),
-                      ),
                       SizedBox(height: 2.h),
                       // Cards game: the bank sells board properties to the players.
                       SwitchListTile(
@@ -577,6 +513,87 @@ class _BankValueScreenState extends State<BankValueScreen> {
                           });
                         },
                       ),
+                      // The board only matters in a cards game: that is the one
+                      // where players buy properties, and where the board and
+                      // its Chance and Community Chest cards are drawn. The
+                      // picker is a row of flags; the chosen one shows its name.
+                      if (_playWithCards) ...<Widget>[
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4, bottom: 6),
+                          child: Text(
+                            'Choose the board',
+                            style: TextStyle(
+                              fontSize: 14.sp,
+                              fontWeight: FontWeight.w500,
+                              color: const Color(0xFF33691E),
+                            ),
+                          ),
+                        ),
+                        SizedBox(
+                          height: 46,
+                          child: FutureBuilder<List<BoardListing>>(
+                            future: _boardsFuture,
+                            builder: (context, snap) {
+                              final List<BoardListing> boards =
+                                  snap.data ?? const <BoardListing>[];
+                              if (snap.connectionState ==
+                                  ConnectionState.waiting) {
+                                return const Center(
+                                  child: SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
+                                  ),
+                                );
+                              }
+                              if (boards.isEmpty) {
+                                return const Center(
+                                  child: Text(
+                                    'No country boards available',
+                                    style: TextStyle(color: Colors.black54),
+                                  ),
+                                );
+                              }
+                              return ScrollConfiguration(
+                                behavior:
+                                    ScrollConfiguration.of(context).copyWith(
+                                  dragDevices: PointerDeviceKind.values.toSet(),
+                                ),
+                                child: ListView.separated(
+                                  scrollDirection: Axis.horizontal,
+                                  padding:
+                                      const EdgeInsets.symmetric(horizontal: 2),
+                                  itemCount: boards.length,
+                                  separatorBuilder: (_, __) =>
+                                      const SizedBox(width: 6),
+                                  itemBuilder:
+                                      (BuildContext context, int index) {
+                                    final BoardListing board = boards[index];
+                                    final bool isSelected =
+                                        _boardId == board.boardId;
+                                    return Center(
+                                      child: CountryChip(
+                                        label: board.name,
+                                        flag: board.flag,
+                                        icon: board.isMine && board.flag.isEmpty
+                                            ? Icons.person_outline
+                                            : null,
+                                        labelVisible: isSelected,
+                                        selected: isSelected,
+                                        onTap: () => setState(() {
+                                          _boardId = board.boardId;
+                                          _boardLabel = board.name;
+                                        }),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
                       SizedBox(height: 2.h),
                       SizedBox(
                         width: 50.w,

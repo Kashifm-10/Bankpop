@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mon/models/bankpop_board.dart';
 import 'package:mon/services/player_cards.dart';
+import 'package:mon/widgets/bankpop_board_view.dart';
 import 'package:mon/widgets/bankpop_space_card.dart';
 import 'package:mon/widgets/bankpop_tile.dart';
 import 'package:mon/widgets/card_owner_badge.dart';
@@ -17,9 +18,9 @@ const BankpopSpace _beggarAlley = BankpopSpace(
   hotelCost: 50,
 );
 
-/// One board tile at the size the board draws it, so the owner label is laid
+/// One board tile at the size the board draws it, so a house or a hotel is laid
 /// out the way it is in a game rather than in a roomy test box.
-Widget _tile({String? ownerName, int houses = 0, int hotels = 0}) {
+Widget _tile({int houses = 0, int hotels = 0}) {
   return MaterialApp(
     home: Scaffold(
       body: Center(
@@ -28,7 +29,6 @@ Widget _tile({String? ownerName, int houses = 0, int hotels = 0}) {
           side: BoardSide.bottom,
           width: 34,
           height: 46,
-          ownerName: ownerName,
           houses: houses,
           hotels: hotels,
           onTap: () {},
@@ -38,12 +38,20 @@ Widget _tile({String? ownerName, int houses = 0, int hotels = 0}) {
   );
 }
 
-/// A building dot on a tile's colour block.
-Finder _dots(Color color) => find.byWidgetPredicate(
+/// A house standing on a tile's colour block.
+Finder get _houses => find.byWidgetPredicate(
       (Widget widget) =>
-          widget is Container &&
-          widget.decoration is BoxDecoration &&
-          (widget.decoration as BoxDecoration).color == color,
+          widget is Icon &&
+          widget.icon == Icons.home_rounded &&
+          widget.color == const Color(0xFF1B5E20),
+    );
+
+/// A hotel standing on a tile's colour block.
+Finder get _hotel => find.byWidgetPredicate(
+      (Widget widget) =>
+          widget is Icon &&
+          widget.icon == Icons.apartment_rounded &&
+          widget.color == const Color(0xFFC62828),
     );
 
 /// The deed is opened from a dialog, so the tests need a screen with a button
@@ -62,6 +70,20 @@ Widget _opener(Future<void> Function(BuildContext) onPressed, String label) {
     ),
   );
 }
+
+/// The corners plus the brown card this file uses, laid out as the real board
+/// is, so the owner badge is drawn where a game draws it.
+BankpopBoard _board() => BankpopBoard(
+      spaces: const <BankpopSpace>[
+        BankpopSpace(index: 0, name: 'GO', type: 'Special'),
+        _beggarAlley,
+        BankpopSpace(index: 10, name: 'Jail', type: 'Special'),
+        BankpopSpace(index: 20, name: 'Free Parking', type: 'Special'),
+        BankpopSpace(index: 30, name: 'Go To Jail', type: 'Special'),
+      ],
+      chanceOptions: const <String>['Advance to GO'],
+      communityChest: const <String>['Bank error in your favour'],
+    );
 
 void main() {
   testWidgets('the deed runs the card action the caller passes in',
@@ -133,20 +155,50 @@ void main() {
     expect(find.text('Show QR'), findsNothing);
   });
 
-  testWidgets('a sold tile carries the owner name',
+  testWidgets('a sold card carries its holder above the card',
       (WidgetTester tester) async {
-    await tester.pumpWidget(_tile(ownerName: 'Ameen'));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 420,
+              height: 420,
+              child: BankpopBoardView(
+                board: _board(),
+                size: 420,
+                owners: const <int, CardOwner>{
+                  1: CardOwner(name: 'Ameen'),
+                },
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
 
-    // Somebody walking the board sees whose card it is without tapping.
-    expect(find.text('Ameen'), findsOneWidget);
+    // The holder is the avatar badge; its name is what the badge announces and
+    // shows on hover, so somebody at the table still knows whose card it is.
+    final Finder avatar = find.byTooltip('Ameen');
+    expect(avatar, findsOneWidget);
+
+    // It hangs above the card, centred on it, and half outside it - over the
+    // middle of the board, never over the card's own face.
+    final Finder card = find.byWidgetPredicate(
+      (Widget widget) => widget is BankpopTile && widget.space.index == 1,
+    );
+    final Rect face = tester.getRect(avatar);
+    final Rect tile = tester.getRect(card);
+    expect(face.center.dy, lessThan(tile.top + tile.height * 0.1));
+    expect(face.center.dx, moreOrLessEquals(tile.center.dx, epsilon: 1));
   });
 
-  testWidgets('an unsold tile stays empty', (WidgetTester tester) async {
+  testWidgets('an unsold card stays empty', (WidgetTester tester) async {
     await tester.pumpWidget(_tile());
     await tester.pumpAndSettle();
 
-    expect(find.text('Ameen'), findsNothing);
+    expect(find.byTooltip('Ameen'), findsNothing);
   });
 
   testWidgets('a deed ticks the houses it has and offers the next level',
@@ -230,21 +282,21 @@ void main() {
     );
   });
 
-  testWidgets('a tile shows one green dot per house',
+  testWidgets('a tile shows one green house per house',
       (WidgetTester tester) async {
     await tester.pumpWidget(_tile(houses: 2));
     await tester.pumpAndSettle();
 
-    expect(_dots(Colors.green.shade800), findsNWidgets(2));
-    expect(_dots(Colors.red.shade700), findsNothing);
+    expect(_houses, findsNWidgets(2));
+    expect(_hotel, findsNothing);
   });
 
-  testWidgets('a hotel replaces the green dots with one red dot',
+  testWidgets('a hotel replaces the houses with one red building',
       (WidgetTester tester) async {
     await tester.pumpWidget(_tile(houses: 4, hotels: 1));
     await tester.pumpAndSettle();
 
-    expect(_dots(Colors.red.shade700), findsOneWidget);
-    expect(_dots(Colors.green.shade800), findsNothing);
+    expect(_hotel, findsOneWidget);
+    expect(_houses, findsNothing);
   });
 }

@@ -22,6 +22,7 @@ Future<void> showBankpopSpaceCard(
   int houses = 0,
   int hotels = 0,
   Future<bool> Function(int step)? onBuild,
+  String currency = BoardCurrencies.fallback,
 }) async {
   await showDialog(
     context: context,
@@ -31,6 +32,7 @@ Future<void> showBankpopSpaceCard(
       houses: houses,
       hotels: hotels,
       onBuild: onBuild,
+      currency: currency,
     ),
   );
 }
@@ -42,6 +44,7 @@ class _SpaceCardDialog extends StatefulWidget {
     this.houses = 0,
     this.hotels = 0,
     this.onBuild,
+    this.currency = BoardCurrencies.fallback,
   });
 
   final BankpopSpace space;
@@ -49,6 +52,7 @@ class _SpaceCardDialog extends StatefulWidget {
   final int houses;
   final int hotels;
   final Future<bool> Function(int step)? onBuild;
+  final String currency;
 
   @override
   State<_SpaceCardDialog> createState() => _SpaceCardDialogState();
@@ -136,11 +140,13 @@ class _SpaceCardDialogState extends State<_SpaceCardDialog> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    if (isStation) _buildStationDeed(space),
-                    if (isUtility) _buildUtilityDeed(space),
+                    if (isStation)
+                      _buildStationDeed(space, widget.currency),
+                    if (isUtility) _buildUtilityDeed(space, widget.currency),
                     if (!isStation && !isUtility)
                       _buildColorPropertyDeed(
                         space,
+                        currency: widget.currency,
                         houses: houses,
                         hotels: hotels,
                         building: _building,
@@ -190,6 +196,7 @@ class _SpaceCardDialogState extends State<_SpaceCardDialog> {
 // plus for the one level that could be bought next.
 Widget _buildColorPropertyDeed(
   BankpopSpace space, {
+  required String currency,
   required int houses,
   required int hotels,
   required bool building,
@@ -198,7 +205,12 @@ Widget _buildColorPropertyDeed(
   return Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      _row('Price', '£${space.price ?? '-'}'),
+      _row(
+        'Price',
+        space.price == null
+            ? '-'
+            : BoardCurrencies.format(currency, space.price!),
+      ),
       const Divider(
           height: 24,
           thickness: 1,
@@ -216,7 +228,7 @@ Widget _buildColorPropertyDeed(
         for (var i = 0; i < space.rent!.length; i++)
           _rentRow(
             _rentLabel(space, i),
-            '£${space.rent![i]}',
+            BoardCurrencies.format(currency, space.rent![i]),
             built: (i >= 1 && i <= 4 && houses >= i) || (i == 5 && hotels > 0),
             // One plus only: the very next level this card could take.
             buy: onBuy != null && _isNextStep(i, houses, hotels)
@@ -229,8 +241,10 @@ Widget _buildColorPropertyDeed(
               height: 24,
               thickness: 1,
               color: Color(0xFFC2C2C2)), // Darkened divider
-          _row('House cost', '£${space.houseCost}'),
-          _row('Hotel cost', '£${space.hotelCost}'),
+          if (space.houseCost != null)
+            _row('House cost', BoardCurrencies.format(currency, space.houseCost!)),
+          if (space.hotelCost != null)
+            _row('Hotel cost', BoardCurrencies.format(currency, space.hotelCost!)),
         ],
       ],
     ],
@@ -306,7 +320,9 @@ Widget _rentRow(
     );
 
 // 2. Station Property Layout
-Widget _buildStationDeed(BankpopSpace space) {
+Widget _buildStationDeed(BankpopSpace space, String currency) {
+  String rent(int i, int fallback) =>
+      BoardCurrencies.format(currency, space.rent?[i] ?? fallback);
   return Column(
     children: [
       const SizedBox(height: 24),
@@ -318,16 +334,16 @@ Widget _buildStationDeed(BankpopSpace space) {
             const Icon(Icons.train, size: 80, color: Colors.black),
       ),
       const SizedBox(height: 40),
-      _rowDots('RENT', '£${space.rent?[0] ?? 25}'),
-      _rowDots('If 2 R.R.s are owned', '£${space.rent?[1] ?? 50}'),
-      _rowDots('If 3 R.R.s are owned', '£${space.rent?[2] ?? 100}'),
-      _rowDots('If 4 R.R.s are owned', '£${space.rent?[3] ?? 200}'),
+      _rowDots('RENT', rent(0, 25)),
+      _rowDots('If 2 R.R.s are owned', rent(1, 50)),
+      _rowDots('If 3 R.R.s are owned', rent(2, 100)),
+      _rowDots('If 4 R.R.s are owned', rent(3, 200)),
     ],
   );
 }
 
 // 3. Utility Property Layout
-Widget _buildUtilityDeed(BankpopSpace space) {
+Widget _buildUtilityDeed(BankpopSpace space, String currency) {
   final isElectric = space.name.contains('Electric');
   final imagePath = isElectric
       ? 'assets/images/Electric_nbg.png'
@@ -337,6 +353,8 @@ Widget _buildUtilityDeed(BankpopSpace space) {
   return Column(
     children: [
       const SizedBox(height: 24),
+      if (space.price != null && space.price! > 0)
+        _row('Price', BoardCurrencies.format(currency, space.price!)),
       Image.asset(
         imagePath,
         height: 170,

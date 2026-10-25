@@ -3,13 +3,13 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:mon/models/bankpop_board.dart';
+import 'package:mon/services/board_catalog.dart';
 import 'package:mon/widgets/app_message.dart';
 import 'package:mon/services/player_cards.dart';
 import 'package:mon/services/player_exit.dart';
-import 'package:mon/widgets/bankpop_board_popup.dart';
 import 'package:mon/widgets/bankpop_space_card.dart';
-import 'package:qr_flutter/qr_flutter.dart';
-import 'package:responsive_sizer/responsive_sizer.dart';
+import 'package:mon/widgets/qr_box.dart';
+import 'package:mon/widgets/app_metrics.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// What the bank row is called in `player_cards.from`. The roster uses the same
@@ -24,53 +24,31 @@ const String _bankName = 'Bank';
 /// banker assigns the card to a named player instead; the money for those
 /// purchases already moved through the ordinary "Pay to Bank" flow.
 ///
-/// The caller has already checked that the game is in cards mode; this only asks
-/// *which* card and *how*. Each step is a layer on top of the last - board, then
-/// deed, then QR - so choosing a card never makes the board disappear.
-Future<void> showGiveCardFlow({
+/// The board is part of the banker's screen, so this is asked with the card the
+/// banker already tapped. Each step is a layer on top of the last - deed, then
+/// QR - so choosing a card never makes the board disappear, and only a completed
+/// sale closes the deed.
+Future<void> showGiveCardFor({
   required BuildContext context,
   required String gameId,
   required String payOption,
   required String bankerId,
-}) async {
-  await showDialog<void>(
-    context: context,
-    builder: (BuildContext boardContext) => BankpopBoardPopup(
-      isCardMode: true,
-      gameId: gameId,
-      onSpaceSelected: (BankpopSpace space) => _sellFromBoard(
-        context,
-        boardContext: boardContext,
-        space: space,
-        gameId: gameId,
-        payOption: payOption,
-        bankerId: bankerId,
-      ),
-    ),
-  );
-}
-
-/// Opens the deed over the board, and the QR (or the player list) over the deed.
-/// Only a completed sale closes the whole stack.
-Future<void> _sellFromBoard(
-  BuildContext pageContext, {
-  required BuildContext boardContext,
   required BankpopSpace space,
-  required String gameId,
-  required String payOption,
-  required String bankerId,
 }) async {
   final int? price = space.price;
   if (price == null || price <= 0) {
-    showMessage(boardContext, '${space.name} cannot be sold as a card');
+    showMessage(context, '${space.name} cannot be sold as a card');
     return;
   }
+  final String currency =
+      (await BoardCatalog.boardForGame(gameId)).currency;
+  if (!context.mounted) return;
 
   // One property, one owner: never offer a card that has already gone.
   final String? owner = await PlayerCards.ownerOf(gameId, space.index);
-  if (!boardContext.mounted) return;
+  if (!context.mounted) return;
   if (owner != null) {
-    showMessage(boardContext, '${space.name} is already owned by $owner');
+    showMessage(context, '${space.name} is already owned by $owner');
     return;
   }
 
@@ -78,8 +56,9 @@ Future<void> _sellFromBoard(
   String? buyer;
 
   await showBankpopSpaceCard(
-    boardContext,
+    context,
     space,
+    currency: currency,
     actionWidget: Builder(
       builder: (BuildContext deedContext) {
         return ElevatedButton.icon(
@@ -90,17 +69,18 @@ Future<void> _sellFromBoard(
                     gameId: gameId,
                     space: space,
                     bankerId: bankerId,
+                    currency: currency,
                   )
                 : await _assignToPlayer(
-                    pageContext,
+                    context,
                     deedContext,
                     space: space,
                     gameId: gameId,
                     bankerId: bankerId,
                   );
             if (!deedContext.mounted || buyer == null) return;
-            // The card has gone to a player: close the deed, then the board
-            // underneath it. The receipt is shown on the screen itself.
+            // The card has gone to a player: close the deed. The receipt is
+            // shown on the screen itself.
             Navigator.of(deedContext).pop();
           },
           icon: Icon(scanPay ? Icons.qr_code_2 : Icons.person_add_alt_1,
@@ -117,14 +97,13 @@ Future<void> _sellFromBoard(
     ),
   );
 
-  if (!boardContext.mounted) return;
+  if (!context.mounted) return;
   if (buyer == null) return;
 
-  Navigator.of(boardContext).pop(); // close the board
-  if (!pageContext.mounted) return;
   await showMessage(
-    pageContext,
-    '$buyer bought ${space.name} for \u00a3$price.',
+    context,
+    '$buyer bought ${space.name} for '
+    '${BoardCurrencies.format(currency, price)}.',
     title: 'Card sold',
   );
 }
@@ -141,12 +120,14 @@ Future<String?> _showSaleQr(
   required String gameId,
   required BankpopSpace space,
   required String bankerId,
+  required String currency,
 }) {
   final String qrData = jsonEncode(<String, dynamic>{
     'type': 'card',
     'cardIndex': space.index,
     'name': space.name,
     'price': '${space.price}',
+    'currency': currency,
     // Who gets the money: this device's banker row, not the bank row's uuid.
     'playerID': bankerId,
     'role': 'banker',
@@ -158,6 +139,7 @@ Future<String?> _showSaleQr(
       gameId: gameId,
       cardIndex: space.index,
       space: space,
+      currency: currency,
       qrData: qrData,
     ),
   );
@@ -169,12 +151,14 @@ class _SaleQrDialog extends StatefulWidget {
     required this.gameId,
     required this.cardIndex,
     required this.space,
+    required this.currency,
     required this.qrData,
   });
 
   final String gameId;
   final int cardIndex;
   final BankpopSpace space;
+  final String currency;
   final String qrData;
 
   @override
@@ -220,16 +204,14 @@ class _SaleQrDialogState extends State<_SaleQrDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            QrImageView(
+            QrBox(
               data: widget.qrData,
-              version: QrVersions.auto,
               size: 55.w,
-              gapless: false,
               padding: const EdgeInsets.all(8),
             ),
             SizedBox(height: 1.5.h),
             Text(
-              '\u00a3${widget.space.price}',
+              BoardCurrencies.format(widget.currency, widget.space.price ?? 0),
               style: TextStyle(fontSize: 20.sp, fontWeight: FontWeight.bold),
             ),
             SizedBox(height: 0.5.h),

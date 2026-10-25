@@ -364,6 +364,19 @@ values
 """
 
 FOOTER = """on conflict (board_id) do nothing;
+
+-- A board seeded before the tax squares carried a figure keeps the spaces it
+-- was created with, because the insert above only adds a board that is not
+-- already there. Income Tax is 200 in every board's own money, so this puts the
+-- value on the rows that are missing it - the same way a price sits on every
+-- other card. A player's own board is a copy of a built-in one, so it gets the
+-- value too, but only while its fourth space is still called Income Tax: a
+-- space the player renamed is theirs and is left as it is.
+update public.game_boards
+   set spaces = jsonb_set(spaces, '{4,price}', '200'::jsonb, true),
+       updated_at = now()
+ where spaces -> 4 ->> 'name' = 'Income Tax'
+   and spaces -> 4 ->> 'price' is null;
 """
 
 

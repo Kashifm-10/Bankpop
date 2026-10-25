@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:responsive_sizer/responsive_sizer.dart';
+import 'package:mon/widgets/app_metrics.dart';
 
 /// One board in a picker: its flag (or an icon for a player's own board) and
 /// its name, with the selected one filled in so a row of them reads as a
@@ -12,10 +12,16 @@ class CountryChip extends StatelessWidget {
     this.icon,
     required this.selected,
     required this.onTap,
+    this.labelVisible = true,
   });
 
   final String label;
   final String flag;
+
+  /// False draws the flag on its own. The pickers use it so a row of countries
+  /// reads as a row of flags, and only the one being looked at spells its name
+  /// out beside its flag.
+  final bool labelVisible;
 
   /// Shown instead of [flag], for a board that has no flag of its own.
   final IconData? icon;
@@ -49,15 +55,17 @@ class CountryChip extends StatelessWidget {
                 size: 14,
                 color: selected ? const Color(0xFF2E7D32) : Colors.black54,
               ),
-            if (flag.isNotEmpty || icon != null) const SizedBox(width: 5),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11.sp,
-                fontWeight: selected ? FontWeight.bold : FontWeight.w500,
-                color: selected ? const Color(0xFF2E7D32) : Colors.black87,
+            if (labelVisible && (flag.isNotEmpty || icon != null))
+              const SizedBox(width: 5),
+            if (labelVisible)
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11.sp,
+                  fontWeight: selected ? FontWeight.bold : FontWeight.w500,
+                  color: selected ? const Color(0xFF2E7D32) : Colors.black87,
+                ),
               ),
-            ),
           ],
         ),
       ),

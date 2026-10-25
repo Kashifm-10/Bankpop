@@ -47,8 +47,8 @@ class _BankpopBoardPopupState extends State<BankpopBoardPopup> {
 
   @override
   Widget build(BuildContext context) {
-    final screen = MediaQuery.of(context).size;
-    final size =
+    final Size screen = MediaQuery.of(context).size;
+    final double size =
         (screen.width < screen.height ? screen.width : screen.height) * 0.92;
 
     return Dialog(

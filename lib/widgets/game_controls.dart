@@ -59,6 +59,15 @@ abstract final class GameControls {
     color: Color(0xFF2E7D32),
   );
 
+  static const GameControl drawCard = GameControl(
+    icon: Icons.casino_outlined,
+    label: 'Draw a card',
+    detail: 'Draws the next Chance or Community Chest card. Each pack is '
+        'shuffled once when the game starts, and again when it has been worked '
+        'through.',
+    color: Color(0xFF6A1B9A),
+  );
+
   static const GameControl leave = GameControl(
     icon: Icons.logout,
     label: 'Leave game',
@@ -119,6 +128,14 @@ abstract final class GameControls {
     label: 'Bank QR',
     detail: 'Shows the bank\'s QR so players can join and buy cards.',
     color: Color(0xFF1E88E5),
+  );
+
+  static const GameControl bankrupt = GameControl(
+    icon: Icons.gavel,
+    label: 'Declare bankrupt',
+    detail: 'Leaves the table for good: your cash, houses and cards are sold '
+        'and the money pays the players you owe.',
+    color: Color(0xFFB71C1C),
   );
 
   static const GameControl suspend = GameControl(

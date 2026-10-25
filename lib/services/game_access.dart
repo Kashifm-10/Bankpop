@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:mon/services/bank_handover.dart';
 import 'package:mon/services/player_exit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -31,6 +32,8 @@ enum GameAccess {
 ///
 /// The banker is the holder of the `role = 'banker'` row, which hand-over moves
 /// to the new banker's id - so the same rule covers a game that changed hands.
+/// A banker who handed the bank over keeps an `ex-banker` row: it opens the
+/// player table as a viewer, never the bank.
 class GameGate {
   const GameGate._();
 
@@ -76,6 +79,7 @@ class GameGate {
 
     bool hasBankerSeat = false;
     bool hasPlayerSeat = false;
+    bool hasViewerSeat = false;
 
     for (final dynamic raw in rows) {
       if (raw is! Map) continue;
@@ -90,16 +94,22 @@ class GameGate {
         hasBankerSeat = true;
       } else if (role == 'player') {
         hasPlayerSeat = true;
+      } else if (role == BankHandover.exBankerRole) {
+        hasViewerSeat = true;
       }
     }
 
-    if (!hasBankerSeat && !hasPlayerSeat) return GameAccess.notSeated;
+    if (!hasBankerSeat && !hasPlayerSeat && !hasViewerSeat) {
+      return GameAccess.notSeated;
+    }
 
     return switch (seat) {
       GameSeat.banker =>
         hasBankerSeat ? GameAccess.allowed : GameAccess.wrongRole,
+      // The ex-banker's row is a viewing seat, and the player table is where a
+      // viewer watches the game.
       GameSeat.player =>
-        hasPlayerSeat ? GameAccess.allowed : GameAccess.wrongRole,
+        hasPlayerSeat || hasViewerSeat ? GameAccess.allowed : GameAccess.wrongRole,
       null => GameAccess.allowed,
     };
   }

@@ -2,7 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:mon/routes.dart';
+import 'package:mon/services/bank_handover.dart';
 import 'package:mon/services/camera_access.dart';
 import 'package:mon/services/game_session.dart';
 import 'package:mon/services/player_exit.dart';
@@ -107,14 +110,127 @@ class _PlayerQRScannerScreenState extends State<PlayerQRScannerScreen> {
   Future<void> _onDetect(BarcodeCapture capture) async {
     if (_scanned) return;
     if (capture.barcodes.isEmpty) return;
-    final String? gameId = capture.barcodes.first.rawValue;
-    if (gameId == null || gameId.trim().isEmpty) return;
+    final String? raw = capture.barcodes.first.rawValue;
+    if (raw == null || raw.trim().isEmpty) return;
     // The camera is released before the join flow starts its round trips, and
     // the release is awaited: an un-awaited stop() leaves the analyzer running
     // behind the waiting dialog.
     _scanned = true;
     await cameraController.stop();
-    await _joinGame(gameId.trim());
+
+    // A banker's hand-over code is not a join: it asks this player to take the
+    // bank, and only a player who is not already in the game may answer it.
+    final HandoverInvite? invite = BankHandover.parse(raw.trim());
+    if (invite != null) {
+      await _takeOverBank(invite);
+      return;
+    }
+
+    await _joinGame(raw.trim());
+  }
+
+  /// Claims the bank on the banker's screen, then waits for their confirmation.
+  ///
+  /// Scanning alone changes nothing. The claim is queued, the banker confirms
+  /// it on their own device, and this screen notices when the bank row becomes
+  /// this player's - opening the banker table at that point.
+  Future<void> _takeOverBank(HandoverInvite invite) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String playerID = prefs.getString('playerID') ?? '';
+    final String playerName = prefs.getString('profile_name') ??
+        (playerID.isEmpty
+            ? 'Player'
+            : 'player${playerID.substring(0, playerID.length < 3 ? playerID.length : 3)}');
+
+    final HandoverClaim claim = await BankHandover.claim(
+      invite: invite,
+      playerId: playerID,
+      playerName: playerName,
+    );
+    if (!mounted) return;
+    if (!claim.queued) {
+      showMessage(context, claim.rejection ?? 'The bank did not change hands.');
+      _scanned = false;
+      if (_cameraOn) await cameraController.start();
+      return;
+    }
+
+    bool waitingOpen = true;
+    bool cancelled = false;
+    unawaited(showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFFFFF8E1),
+        title: const Text('Waiting for the banker'),
+        content: const Text(
+          'The banker has been asked to hand you the bank. Keep this screen '
+          'open until they confirm.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () {
+              cancelled = true;
+              waitingOpen = false;
+              Navigator.of(dialogContext).pop();
+            },
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    ));
+
+    bool promoted = false;
+    // Two minutes is long enough for the banker to look up and tap, and short
+    // enough that a claim is not left waiting on a table nobody is watching.
+    for (int tick = 0; tick < 60 && !cancelled; tick++) {
+      if (await BankHandover.holdsBank(claim.gameId, playerID)) {
+        promoted = true;
+        break;
+      }
+      await Future<void>.delayed(const Duration(seconds: 2));
+    }
+
+    if (mounted && waitingOpen) {
+      // The dialog is the top route; the cancel button has already closed it
+      // and cleared the flag in that case.
+      Navigator.of(context, rootNavigator: true).pop();
+    }
+    if (!mounted) return;
+
+    if (!promoted) {
+      // Take the claim back, so the banker is not asked to confirm a player who
+      // has stopped waiting.
+      final List<HandoverRequest> pending =
+          await BankHandover.pending(claim.gameId);
+      for (final HandoverRequest request in pending) {
+        if (request.playerId == playerID) await BankHandover.withdraw(request);
+      }
+      if (!mounted) return;
+      showMessage(
+        context,
+        cancelled
+            ? 'The bank did not change hands.'
+            : 'The banker did not confirm in time, so the request was '
+                'withdrawn. Scan the code again when they are ready.',
+      );
+      _scanned = false;
+      if (_cameraOn) await cameraController.start();
+      return;
+    }
+
+    await prefs.setString('gameID', claim.gameId);
+    await prefs.setString('role', 'banker');
+    await prefs.setString('display_name', claim.name);
+    if (!mounted) return;
+    showMessage(
+      context,
+      '${claim.name}, you are the banker now. The bank balance and every '
+      'control moved to this device.',
+      title: 'You have the bank',
+    );
+    if (!mounted) return;
+    context.go(AppRoutes.banker(claim.gameId));
   }
 
   /// The join QR carries the bare five-character code, but the same scanner can

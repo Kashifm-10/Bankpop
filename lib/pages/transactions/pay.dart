@@ -1,16 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:mon/models/bankpop_board.dart';
+import 'package:mon/services/board_catalog.dart';
 import 'package:mon/services/camera_access.dart';
 import 'package:mon/services/player_cards.dart';
 import 'package:mon/widgets/app_message.dart';
 import 'package:mon/widgets/scanner_error_view.dart';
 import 'package:mon/services/wallet_transfer.dart';
-import 'package:responsive_sizer/responsive_sizer.dart';
+import 'package:mon/widgets/app_metrics.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -263,6 +264,10 @@ class _QRPayScannerState extends State<QRPayScanner> {
         : int.tryParse('${data['cardIndex']}');
     final String cardName = (data['name'] ?? 'Card').toString();
     final double price = double.tryParse('${data['price']}') ?? 0;
+    // The board the card belongs to names its money; an older bank QR has no
+    // symbol, so the game's own currency is the fallback.
+    final String currency =
+        (data['currency'] ?? BoardCatalog.activeCurrency).toString();
     final String bankerId = (data['playerID'] ?? '').toString();
 
     if (cardIndex == null || bankerId.isEmpty || price <= 0) {
@@ -303,7 +308,8 @@ class _QRPayScannerState extends State<QRPayScanner> {
       builder: (BuildContext dialogContext) => AlertDialog(
         title: const Text('Buy Card'),
         content: Text(
-          'Buy $cardName for £$price?\nThe money goes to the bank.',
+          'Buy $cardName for ${BoardCurrencies.format(currency, price)}?\n'
+          'The money goes to the bank.',
         ),
         actions: <Widget>[
           TextButton(

@@ -22,6 +22,9 @@ class _ProfileDialogState extends State<ProfileDialog> {
   String? _avatarAsset;
   int _selectedAvatarIndex = 0;
 
+  /// What is missing when Save would otherwise close the dialog.
+  String? _error;
+
   @override
   void initState() {
     super.initState();
@@ -44,10 +47,21 @@ class _ProfileDialogState extends State<ProfileDialog> {
               widget.prevIndex < ProfileAvatar.choices.length)
           ? widget.prevIndex
           : 0;
-      _avatarAsset = hasAvatar ? avatar : ProfileAvatar.choices[fallback];
-      _selectedAvatarIndex = hasAvatar
-          ? (avatarIndex ?? ProfileAvatar.choices.indexOf(avatar))
-          : fallback;
+      if (hasAvatar) {
+        _avatarAsset = avatar;
+        _selectedAvatarIndex =
+            avatarIndex ?? ProfileAvatar.choices.indexOf(avatar);
+      } else if (widget.first) {
+        // Setting up from scratch: nothing is picked yet. Drawing a tick on the
+        // first avatar looked like a choice the player had made, so Save closed
+        // the dialog with no avatar at all. Now the setup has to be chosen.
+        _avatarAsset = null;
+        _selectedAvatarIndex = -1;
+      } else {
+        // Editing an existing profile keeps the old friendly default.
+        _avatarAsset = ProfileAvatar.choices[fallback];
+        _selectedAvatarIndex = fallback;
+      }
     });
   }
 
@@ -58,6 +72,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
     setState(() {
       _avatarAsset = assetPath;
       _selectedAvatarIndex = index;
+      if (_error != null) _error = null;
     });
     // A tap is a decent haptic on a phone; on the web it is a no-op.
     HapticFeedback.selectionClick();
@@ -65,19 +80,23 @@ class _ProfileDialogState extends State<ProfileDialog> {
 
   Future<void> _saveProfile() async {
     if (!_formKey.currentState!.validate()) return;
+    final String? avatar = _avatarAsset;
+    if (avatar == null) {
+      // The dialog stays open: a profile without an avatar leaves the home
+      // screen with the app icon and no way to change it during setup.
+      setState(() => _error = 'Pick an avatar to continue.');
+      return;
+    }
     final prefs = await SharedPreferences.getInstance();
     final String name = _nameController.text.trim();
     if (name.isNotEmpty) {
       await prefs.setString('profile_name', name);
     }
-    final String? avatar = _avatarAsset;
-    if (avatar != null) {
-      await ProfileAvatar.save(
-        prefs,
-        asset: avatar,
-        index: _selectedAvatarIndex,
-      );
-    }
+    await ProfileAvatar.save(
+      prefs,
+      asset: avatar,
+      index: _selectedAvatarIndex,
+    );
     // The account row is what follows the player to a new device, so the same
     // edit has to reach it, not just this device's prefs.
     await Account.updateProfile(name: name, avatar: avatar);
@@ -123,29 +142,29 @@ class _ProfileDialogState extends State<ProfileDialog> {
               key: _formKey,
               child: TextFormField(
                 controller: _nameController,
+                // The board shows names next to avatars, so a full name - with
+                // the space between first and last - is what players type.
                 validator: (value) {
-                  if (value == null || value.isEmpty) {
+                  final String name = (value ?? '').trim();
+                  if (name.isEmpty) {
                     return 'Name cannot be empty';
                   }
 
-                  if (value.contains(' ')) {
-                    return 'Name cannot contain spaces';
-                  }
-
-                  if (value.length < 2) {
+                  if (name.length < 2) {
                     return 'Name must be at least 2 characters';
                   }
 
-                  if (value.length > 10) {
-                    return 'Name must be at most 10 characters';
+                  if (name.length > 16) {
+                    return 'Name must be at most 16 characters';
                   }
 
-                  final nameRegExp = RegExp(r'^[a-zA-Z0-9\-_@]+$');
-                  if (!nameRegExp.hasMatch(value)) {
-                    return 'Name can only contain letters and \nhyphens';
+                  final nameRegExp = RegExp(r'^[a-zA-Z0-9 \-_@.]+$');
+                  if (!nameRegExp.hasMatch(name)) {
+                    return 'Name can only contain letters, numbers, spaces,\n'
+                        'hyphens, underscores, dots and @';
                   }
 
-                  return null; // ✅ Passed all checks
+                  return null;
                 },
                 decoration: InputDecoration(
                   labelText: "Name",
@@ -165,6 +184,16 @@ class _ProfileDialogState extends State<ProfileDialog> {
                 ),
               ),
             ),
+            if (_error != null) ...<Widget>[
+              const SizedBox(height: 8),
+              Text(
+                _error!,
+                style: const TextStyle(
+                  color: Color(0xFFC62828),
+                  fontSize: 12.5,
+                ),
+              ),
+            ],
             const SizedBox(height: 20),
             Wrap(
               spacing: 10,

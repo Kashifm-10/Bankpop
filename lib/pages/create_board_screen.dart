@@ -6,7 +6,8 @@ import 'package:mon/services/account.dart';
 import 'package:mon/services/board_catalog.dart';
 import 'package:mon/services/board_share.dart';
 import 'package:mon/widgets/app_message.dart';
-import 'package:responsive_sizer/responsive_sizer.dart';
+import 'package:mon/widgets/board_transfer.dart';
+import 'package:mon/widgets/app_metrics.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Making a board of your own: give it a name, then rename the spaces.
@@ -43,11 +44,44 @@ class _Slot {
   final TextEditingController controller;
 
   bool get isStation => space.color == 'Station';
+
+  /// A colour property: its name is printed in the tile's colour block.
+  bool get isColour =>
+      space.isProperty &&
+      space.color != null &&
+      space.color != 'Station' &&
+      space.color != 'Utility';
+
+  /// The longest name this slot accepts.
+  int get maxLength =>
+      isColour ? BoardNames.colourNameMaxLength : BoardNames.maxLength;
+
   String get name => controller.text.trim();
 }
 
 class _CreateBoardScreenState extends State<CreateBoardScreen> {
   final TextEditingController _nameController = TextEditingController();
+
+  /// The emoji a board can be listed under: the empty one draws the person
+  /// icon a board without a flag has always had.
+  static const List<String> _emojis = <String>[
+    '',
+    '🌍',
+    '🏝️',
+    '🏰',
+    '🌆',
+    '🚀',
+    '🐉',
+    '⚽',
+    '🎸',
+    '🍕',
+    '🌵',
+    '🎲',
+    '👑',
+    '🦁',
+    '🎨',
+    '🌊',
+  ];
 
   /// The spaces a player may rename, in board order.
   final List<_Slot> _slots = <_Slot>[];
@@ -61,6 +95,19 @@ class _CreateBoardScreenState extends State<CreateBoardScreen> {
   String? _error;
   int _step = 0;
 
+  /// The board being imported, if any. It can also be set from inside the
+  /// editor: "Import" sits on the first step, so a player who has already
+  /// typed a name can decide to use a friend's board instead.
+  BoardDraft? _draft;
+
+  /// The emoji this board is listed under in the pickers. Empty draws a
+  /// person icon instead, the same way a board with no flag always has.
+  String _flag = '';
+
+  /// The money symbol this board's prices are written in. Empty until the
+  /// first load, which fills it with the currency of the country being copied.
+  String _currency = '';
+
   /// The built-in board the names are relative to: the one the imported board
   /// was copied from, or the default country when starting from scratch.
   late String _baseId = widget.draft?.baseId ?? BoardCatalog.fallbackId;
@@ -68,6 +115,8 @@ class _CreateBoardScreenState extends State<CreateBoardScreen> {
   @override
   void initState() {
     super.initState();
+    _draft = widget.draft;
+    _flag = widget.draft?.flag ?? '';
     _load();
   }
 
@@ -89,6 +138,14 @@ class _CreateBoardScreenState extends State<CreateBoardScreen> {
     });
     if (!signedIn) return;
 
+    // A second load is an import: the names start again from the new base.
+    for (final _Slot slot in _slots) {
+      slot.controller.dispose();
+    }
+    _slots.clear();
+    _fixed.clear();
+    _baseId = _draft?.baseId ?? BoardCatalog.fallbackId;
+
     try {
       BankpopBoard base;
       try {
@@ -101,8 +158,13 @@ class _CreateBoardScreenState extends State<CreateBoardScreen> {
         _baseId = BoardCatalog.fallbackId;
         base = await BoardCatalog.board(_baseId);
       }
-      final BoardDraft? draft = widget.draft;
-      if (draft != null) _nameController.text = draft.name;
+      // A new board starts on the country's own currency; a board the player
+      // already picked a symbol for keeps it.
+      if (_currency.isEmpty) _currency = base.currency;
+      final BoardDraft? draft = _draft;
+      if (draft != null && _nameController.text.trim().isEmpty) {
+        _nameController.text = draft.name;
+      }
       final List<BankpopSpace> properties = base.spaces
           .where((BankpopSpace space) => space.isProperty)
           .toList()
@@ -111,9 +173,12 @@ class _CreateBoardScreenState extends State<CreateBoardScreen> {
         if (BoardNames.fixed.contains(space.name)) {
           _fixed.add(space);
         } else {
-          // An imported board arrives as names for the spaces it was copied
-          // from; anything it did not rename keeps the country's own name.
-          final String name = draft?.renames[space.name] ?? space.name;
+          // An imported board names its spaces by card index; a file from
+          // before that format named them by their built-in name. Anything it
+          // did not rename keeps the country's own name.
+          final String name = draft?.renamesByIndex[space.index] ??
+              draft?.renames[space.name] ??
+              space.name;
           _slots.add(_Slot(space, TextEditingController(text: name)));
         }
       }
@@ -131,6 +196,27 @@ class _CreateBoardScreenState extends State<CreateBoardScreen> {
     }
   }
 
+  /// Brings in a board a friend sent, without leaving the editor: paste the
+  /// JSON or choose the file, and its names (and emoji) fill this board in.
+  Future<void> _importFromFriend() async {
+    final BoardDraft? draft = await showBoardImportSheet(context);
+    if (draft == null || !mounted) return;
+    setState(() {
+      _draft = draft;
+      _flag = draft.flag;
+      // The shared file carries names only, so the symbol comes back to the
+      // country the board was copied from.
+      _currency = '';
+      if (_nameController.text.trim().isEmpty) {
+        _nameController.text = draft.name;
+      }
+      _loading = true;
+    });
+    await _load();
+    if (!mounted) return;
+    setState(() => _step = 1);
+  }
+
   /// Everything the editor can reject, in the order a player would hit it.
   String? _validate() {
     final String name = _nameController.text.trim();
@@ -143,7 +229,12 @@ class _CreateBoardScreenState extends State<CreateBoardScreen> {
     for (final _Slot slot in _slots) {
       final String value = _finishName(slot);
       if (value.isEmpty) return 'Every space needs a name';
-      if (value.length > BoardNames.maxLength) return '"$value" is too long for a space';
+      if (value.length > slot.maxLength) {
+        return slot.isColour
+            ? '"$value" is too long: a colour card fits '
+                '${BoardNames.colourNameMaxLength} characters'
+            : '"$value" is too long for a space';
+      }
       final String key = value.toLowerCase();
       if (!seen.add(key)) return '"$value" is used twice on this board';
     }
@@ -180,7 +271,9 @@ class _CreateBoardScreenState extends State<CreateBoardScreen> {
       name: _nameController.text.trim(),
       ownerId: ownerId,
       renames: renames,
+      flag: _flag,
       baseId: _baseId,
+      currency: _currency,
     );
     if (!mounted) return;
     setState(() => _saving = false);
@@ -213,7 +306,7 @@ class _CreateBoardScreenState extends State<CreateBoardScreen> {
               size: 26.sp, color: const Color(0xFF689F38)),
         ),
         title: Text(
-          widget.draft == null ? 'Create your board' : 'Imported board',
+          _draft == null ? 'Create your board' : 'Imported board',
           style: TextStyle(
             fontWeight: FontWeight.bold,
             fontSize: 18.sp,
@@ -276,7 +369,7 @@ class _CreateBoardScreenState extends State<CreateBoardScreen> {
             'player sees when the banker starts a game with it.',
             style: TextStyle(fontSize: 13.sp, color: Colors.black54),
           ),
-          if (widget.draft != null) ...<Widget>[
+          if (_draft != null) ...<Widget>[
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(12),
@@ -315,6 +408,105 @@ class _CreateBoardScreenState extends State<CreateBoardScreen> {
               ),
             ),
             onSubmitted: (_) => _nextStep(),
+          ),
+          Text(
+            'Pick an emoji for it',
+            style: TextStyle(
+              fontSize: 13.sp,
+              fontWeight: FontWeight.bold,
+              color: const Color(0xFF558B2F),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: <Widget>[
+              for (final String emoji in _emojis)
+                GestureDetector(
+                  onTap: () => setState(() => _flag = emoji),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: _flag == emoji
+                          ? const Color(0xFFC5E1A5)
+                          : Colors.white,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: _flag == emoji
+                            ? const Color(0xFF689F38)
+                            : Colors.black12,
+                        width: _flag == emoji ? 2 : 1,
+                      ),
+                    ),
+                    child: emoji.isEmpty
+                        ? const Icon(Icons.person_outline,
+                            size: 20, color: Colors.black45)
+                        : Text(emoji, style: const TextStyle(fontSize: 20)),
+                  ),
+                ),
+            ],
+          ),
+          SizedBox(height: 12),
+          Text(
+            'Pick the money symbol',
+            style: TextStyle(
+              fontSize: 13.sp,
+              fontWeight: FontWeight.bold,
+              color: const Color(0xFF558B2F),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: <Widget>[
+              for (final String symbol in BoardCurrencies.choices)
+                GestureDetector(
+                  onTap: () => setState(() => _currency = symbol),
+                  child: Container(
+                    constraints: const BoxConstraints(minWidth: 44),
+                    height: 38,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: _currency == symbol
+                          ? const Color(0xFFC5E1A5)
+                          : Colors.white,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: _currency == symbol
+                            ? const Color(0xFF689F38)
+                            : Colors.black12,
+                        width: _currency == symbol ? 2 : 1,
+                      ),
+                    ),
+                    child: Text(
+                      symbol,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: _saving ? null : _importFromFriend,
+            icon: const Icon(Icons.file_download_outlined, size: 18),
+            label: const Text('Import a board a friend sent'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFF33691E),
+              side: const BorderSide(color: Color(0xFFAED581)),
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
           ),
           SizedBox(height: 10),
           ElevatedButton(
@@ -488,7 +680,7 @@ class _CreateBoardScreenState extends State<CreateBoardScreen> {
           Expanded(
             child: TextField(
               controller: slot.controller,
-              maxLength: BoardNames.maxLength,
+              maxLength: slot.maxLength,
               textCapitalization: TextCapitalization.words,
               decoration: InputDecoration(
                 isDense: true,

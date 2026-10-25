@@ -4,8 +4,9 @@ import 'package:mon/routes.dart';
 import 'package:mon/services/account.dart';
 import 'package:mon/services/account_mail.dart';
 import 'package:mon/services/password.dart';
+import 'package:mon/widgets/app_dialog.dart';
 import 'package:mon/widgets/app_message.dart';
-import 'package:responsive_sizer/responsive_sizer.dart';
+import 'package:mon/widgets/app_metrics.dart';
 
 /// The one place an account is created or opened.
 ///
@@ -128,6 +129,12 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   Future<void> _signIn() async {
+    // Read before signing in: adopting the account moves `playerID` to the
+    // account's id, and the guest id is gone from the device after that.
+    final String? guestId = await Account.guestPlayerId();
+    final bool guestPlayed =
+        guestId != null && await Account.hasGames(guestId);
+
     final AuthResult result = await Account.signIn(
       email: _email.text,
       password: _password.text,
@@ -148,6 +155,28 @@ class _AuthScreenState extends State<AuthScreen> {
     await Account.markOnboarded();
     if (!mounted) return;
     setState(() => _busy = false);
+
+    // Guest games live under the old player id, which this sign-in has just
+    // replaced. Ask before they are left behind: keeping them repoints every
+    // row they own at the account, so the history is one list again.
+    final String accountId = result.profile?.id ?? '';
+    if (guestPlayed && accountId.isNotEmpty) {
+      final bool keep = await showAppConfirm(
+        context,
+        title: 'Keep your guest games?',
+        icon: Icons.merge_type,
+        confirmLabel: 'Keep them',
+        cancelLabel: 'No thanks',
+        message: 'This device played games before you signed in. Keeping them '
+            'moves those games, their cards and their payments into this '
+            'account, so your history stays in one place. They will no longer '
+            'be reachable as a guest.',
+      );
+      if (keep) {
+        await Account.adoptGuestGames(guestId: guestId, accountId: accountId);
+      }
+      if (!mounted) return;
+    }
 
     // A temporary password only gets this far: the real password is chosen
     // before anything else, and the splash screen enforces the same rule if
@@ -203,7 +232,21 @@ class _AuthScreenState extends State<AuthScreen> {
   /// The escape hatch. Signing in is a convenience - the games follow the
   /// player to another device - not a requirement, so a player who does not
   /// want an account can walk straight into the game.
+  ///
+  /// The trade is spelled out first: a guest gets the whole game, but the
+  /// things that need an identity are not there, and this is the one moment the
+  /// player can decide with the list in front of them.
   Future<void> _continueAsGuest() async {
+    final bool goAhead = await showAppConfirm(
+      context,
+      title: 'Play as a guest?',
+      icon: Icons.person_outline,
+      confirmLabel: 'Continue as guest',
+      cancelLabel: 'Sign in instead',
+      message: 'These need an account and will not be available:',
+      extra: const _GuestLimits(),
+    );
+    if (!goAhead) return;
     await Account.markOnboarded();
     if (!mounted) return;
     if (widget.returnOnSuccess) {
@@ -235,8 +278,13 @@ class _AuthScreenState extends State<AuthScreen> {
           behavior: HitTestBehavior.translucent,
           onTap: () => FocusScope.of(context).unfocus(),
           child: Center(
-            child: SingleChildScrollView(
-              padding: EdgeInsets.symmetric(horizontal: 7.w, vertical: 4.h),
+            child: ConstrainedBox(
+              // A login form keeps a phone-like measure; on a desktop window it
+              // sits as a card in the middle rather than stretching its fields.
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: SingleChildScrollView(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
               child: _pendingEmail != null
                   ? _PendingVerification(
                       email: _pendingEmail!,
@@ -476,6 +524,7 @@ class _AuthScreenState extends State<AuthScreen> {
                         ),
                       ],
                     ),
+              ),
             ),
           ),
         ),
@@ -713,6 +762,59 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
             ),
           ),
         ),
+      ],
+    );
+  }
+}
+
+/// What a guest gives up, in the one place they can still choose otherwise.
+///
+/// The app keeps working without an account - this is not a warning that
+/// something is broken, but the list of what an email would have bought.
+class _GuestLimits extends StatelessWidget {
+  const _GuestLimits();
+
+  static const List<String> _lines = <String>[
+    'Your games are listed on this device only - reinstalling the app or '
+        'clearing the browser data removes them.',
+    'A game played as a guest cannot be opened on another phone, tablet or '
+        'browser.',
+    'Creating and sharing your own boards needs an account.',
+    'If you sign in later, your guest games are not merged automatically - '
+        'you have to choose to keep them.',
+    'Nobody can recover a guest profile: there is no email to verify and no '
+        'password to reset.',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final AppDialogPalette palette = AppDialogPalette.of(context);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        for (final String line in _lines)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Icon(Icons.remove_circle_outline,
+                    size: 16, color: palette.accent),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    line,
+                    style: TextStyle(
+                      fontSize: 13,
+                      height: 1.35,
+                      color: palette.body,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
       ],
     );
   }

@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:mon/models/bankpop_board.dart';
+import 'package:mon/services/board_catalog.dart';
 import 'package:mon/services/card_requests.dart';
 import 'package:mon/services/deals.dart';
 import 'package:mon/services/player_cards.dart';
-import 'package:responsive_sizer/responsive_sizer.dart';
+import 'package:mon/widgets/app_metrics.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:timeago/timeago.dart' as timeago;
@@ -93,10 +94,14 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
   void initState() {
     super.initState();
     _transactionsFuture = fetchTransactions();
-    _cardsFuture = PlayerCards.forPlayer(
-      gameId: widget.gameId,
-      playerId: widget.playerId,
-    );
+    // The bank never buys a card, so asking for "this player's cards" on the
+    // banker's device is always empty; they get the whole game's ledger instead.
+    _cardsFuture = widget.showAllPlayers
+        ? PlayerCards.forGame(widget.gameId)
+        : PlayerCards.forPlayer(
+            gameId: widget.gameId,
+            playerId: widget.playerId,
+          );
     _spacesFuture = PlayerCards.spaces(widget.gameId);
     _buildingsFuture = _fetchBuildings();
     _mortgagesFuture = _fetchMortgages();
@@ -700,7 +705,10 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    '£${request.amount.toStringAsFixed(0)}',
+                    BoardCurrencies.format(
+                      BoardCatalog.activeCurrency,
+                      request.amount,
+                    ),
                     style: TextStyle(
                       fontSize: 12.sp,
                       fontWeight: FontWeight.w600,

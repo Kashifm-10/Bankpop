@@ -82,6 +82,11 @@ class BoardNames {
   /// fits in all of them.
   static const int maxLength = 40;
 
+  /// The longest name a colour property may have. Its name is printed inside
+  /// the tile's colour block in at most two lines, and a longer one would have
+  /// to shrink below the size every other card is set in.
+  static const int colourNameMaxLength = 20;
+
   /// A station always ends in "Station". Whatever the player typed is kept and
   /// the word is completed after it, so the rule is enforced without turning
   /// into an error they have to guess their way out of.
@@ -117,6 +122,13 @@ class BoardCatalog {
   static String _activeId = fallbackId;
 
   static String get activeId => _activeId;
+
+  /// The symbol the current game's prices are written in. The board's own, so
+  /// a screen that only knows a game id (the ledger, a scanner) still reads the
+  /// country's money rather than a hard-coded £.
+  static String _activeCurrency = BoardCurrencies.fallback;
+
+  static String get activeCurrency => _activeCurrency;
 
   /// Game screens call this when they load the session: a wrong board would
   /// rename every property in the game, so an id this build does not know is
@@ -183,9 +195,11 @@ class BoardCatalog {
   }
 
   static Future<BankpopBoard> _fetch(String boardId) async {
+    // Every column, so a project that has not added a newer one (the currency
+    // symbol, say) still loads its boards instead of failing the select.
     final Map<String, dynamic>? row = await Supabase.instance.client
         .from(_table)
-        .select('board_id, name, flag, spaces, cards')
+        .select()
         .eq('board_id', boardId)
         .maybeSingle();
     if (row == null) {
@@ -230,7 +244,13 @@ class BoardCatalog {
     required String name,
     required String ownerId,
     required Map<String, String> renames,
+    /// A flag or any other emoji the player picked to stand for their board, so
+    /// it sits in the picker beside the countries' flags.
+    String flag = '',
     String baseId = fallbackId,
+    /// The money symbol this board's prices are written in. Empty keeps the
+    /// built-in country's own currency.
+    String currency = '',
   }) async {
     if (ownerId.isEmpty) return const BoardCreateResult.failed();
     try {
@@ -239,14 +259,19 @@ class BoardCatalog {
       // prices and the same order, so the choice only ever changes names.
       final BankpopBoard base = await board(baseId);
       final String boardId = 'custom_${const Uuid().v4()}';
-      final BankpopBoard custom =
-          base.renamed(renames: renames, name: name, boardId: boardId);
-      await Supabase.instance.client.from(_table).insert(<String, dynamic>{
+      final BankpopBoard custom = base.renamed(
+        renames: renames,
+        name: name,
+        boardId: boardId,
+        currency: currency.trim().isEmpty ? base.currency : currency.trim(),
+      );
+      final Map<String, dynamic> row = <String, dynamic>{
         'board_id': boardId,
         'name': name,
-        'flag': '',
+        'flag': flag.trim(),
         'owner_id': ownerId,
         'is_custom': true,
+        'currency': custom.currency,
         'spaces': <Map<String, dynamic>>[
           for (final BankpopSpace space in custom.spaces) space.toMap(),
         ],
@@ -254,7 +279,17 @@ class BoardCatalog {
           'chanceOptions': custom.chanceOptions,
           'communityChest': custom.communityChest,
         },
-      });
+      };
+      try {
+        await Supabase.instance.client.from(_table).insert(row);
+      } on PostgrestException catch (error) {
+        // A project that has not run supabase/board_currency.sql has no column
+        // for the symbol. The board still saves, on the country's currency.
+        if (!_currencyColumnMissing(error)) rethrow;
+        await Supabase.instance.client
+            .from(_table)
+            .insert(<String, dynamic>{...row}..remove('currency'));
+      }
       _boards[boardId] = Future<BankpopBoard>.value(custom);
       _spaces[boardId] = <int, BankpopSpace>{
         for (final BankpopSpace space in custom.spaces) space.index: space,
@@ -272,6 +307,13 @@ class BoardCatalog {
       return const BoardCreateResult.failed();
     }
   }
+
+  /// 42703 is "undefined column"; PGRST204 is the same fact reported from a
+  /// stale PostgREST schema cache.
+  static bool _currencyColumnMissing(PostgrestException error) =>
+      error.code == '42703' ||
+      error.code == 'PGRST204' ||
+      error.message.contains('currency');
 
   /// The board this device last played on, before the session row arrives.
   ///
@@ -323,7 +365,11 @@ class BoardCatalog {
   /// otherwise one read from the database, which is then kept for the game.
   static Future<BankpopBoard> boardForGame(String gameId) {
     if (gameId.isEmpty) return board();
-    return _gameBoardFutures.putIfAbsent(gameId, () => _boardForGame(gameId));
+    return _gameBoardFutures.putIfAbsent(gameId, () async {
+      final BankpopBoard loaded = await _boardForGame(gameId);
+      _activeCurrency = loaded.currency;
+      return loaded;
+    });
   }
 
   static Future<BankpopBoard> _boardForGame(String gameId) async {

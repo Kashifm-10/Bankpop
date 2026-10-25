@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mon/widgets/app_content.dart';
 
 /// The house rules, as the app enforces them.
 ///
@@ -166,9 +167,11 @@ class GameRulesScreen extends StatelessWidget {
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 30),
-        children: <Widget>[
+      body: AppContent(
+        maxWidth: 820,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 30),
+          children: <Widget>[
           const _IntroCard(),
           const SizedBox(height: 14),
           for (final _RuleSection section in _sections) section,
@@ -183,7 +186,8 @@ class GameRulesScreen extends StatelessWidget {
               color: Color(0xFF7CB342),
             ),
           ),
-        ],
+          ],
+        ),
       ),
     );
   }

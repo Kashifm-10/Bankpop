@@ -1,18 +1,21 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mon/models/bankpop_board.dart';
 import 'package:mon/routes.dart';
+import 'package:mon/services/account.dart';
 import 'package:mon/services/board_catalog.dart';
 import 'package:mon/services/board_image.dart';
 import 'package:mon/services/board_share.dart';
+import 'package:mon/widgets/app_content.dart';
+import 'package:mon/widgets/app_dialog.dart';
 import 'package:mon/widgets/bankpop_board_view.dart';
 import 'package:mon/widgets/board_transfer.dart';
-import 'package:mon/widgets/bankpop_deck_sheet.dart';
 import 'package:mon/widgets/country_chip.dart';
-import 'package:responsive_sizer/responsive_sizer.dart';
+import 'package:mon/widgets/app_metrics.dart';
 
 /// The boards, before a game exists: pick one and look at the board it plays on
 /// and the two decks that come with it.
@@ -54,8 +57,43 @@ class _BoardPreviewScreenState extends State<BoardPreviewScreen> {
     setState(() => _boardId = boardId);
   }
 
+  /// The board on screen: the row the picker drew that matches the choice, so
+  /// download/share act on what the player is looking at.
+  BoardListing _selected() {
+    final List<BoardListing> known = _knownBoards;
+    if (known.isEmpty) {
+      return BoardListing(boardId: _boardId, name: 'Board');
+    }
+    return known.firstWhere(
+      (BoardListing board) => board.boardId == _boardId,
+      orElse: () => known.first,
+    );
+  }
+
   /// Opens the editor and, when it saves, shows the board it made.
+  ///
+  /// Making a board is the one thing here that needs an account - it is saved
+  /// against the player, so it can be found again on another device. A guest
+  /// is told so before the editor opens, not after they have typed 28 names.
   Future<void> _createBoard() async {
+    if (!await Account.isSignedIn()) {
+      if (!mounted) return;
+      final bool signIn = await showAppConfirm(
+        context,
+        title: 'Log in to create a board',
+        icon: Icons.lock_outline,
+        confirmLabel: 'Sign in',
+        cancelLabel: 'Not now',
+        message: 'Your own boards are saved to your account, so they are '
+            'there on any device you sign in on and nobody else sees them.\n\n'
+            'Until then you can play on any of the built-in countries.',
+      );
+      if (!signIn || !mounted) return;
+      final bool? signedIn = await context.push<bool>(AppRoutes.authReturning);
+      if (signedIn != true || !mounted) return;
+      setState(() => _boards = BoardCatalog.available(refresh: true));
+    }
+    if (!mounted) return;
     await _openEditor();
   }
 
@@ -86,7 +124,17 @@ class _BoardPreviewScreenState extends State<BoardPreviewScreen> {
       final BankpopBoard board = await BoardCatalog.board(listing.boardId);
       if (!mounted) return;
       final Uint8List bytes = await BoardImage.render(context, board);
-      await BoardImage.share(bytes, listing.name);
+      final String? path = await BoardImage.save(bytes, listing.name);
+      if (!mounted) return;
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          content: Text(
+            path == null
+                ? 'Board saved to your downloads'
+                : 'Board saved to $path',
+          ),
+        ),
+      );
     } catch (error) {
       debugPrint('Could not prepare the board for printing: $error');
       if (!mounted) return;
@@ -138,25 +186,12 @@ class _BoardPreviewScreenState extends State<BoardPreviewScreen> {
             color: const Color(0xFF689F38),
           ),
         ),
-        // Kept out of the chip row, which scrolls sideways: importing is how a
-        // player gets a board a friend sent, so it stays where it is always
-        // reachable.
+        // Download, share (only a board of this player's own - the countries
+        // are already on everybody's list) and create, in that order.
         actions: <Widget>[
           IconButton(
             tooltip: 'Download this board to print',
-            onPressed: _downloading
-                ? null
-                : () {
-                    // The rows are built from the same list the picker shows,
-                    // so the chip the player is looking at is the one saved.
-                    final List<BoardListing> known = _knownBoards;
-                    if (known.isEmpty) return;
-                    final BoardListing selected = known.firstWhere(
-                      (BoardListing board) => board.boardId == _boardId,
-                      orElse: () => known.first,
-                    );
-                    _downloadBoard(selected);
-                  },
+            onPressed: _downloading ? null : () => _downloadBoard(_selected()),
             icon: _downloading
                 ? const SizedBox(
                     width: 20,
@@ -166,16 +201,26 @@ class _BoardPreviewScreenState extends State<BoardPreviewScreen> {
                 : const Icon(Icons.download_outlined,
                     color: Color(0xFF689F38)),
           ),
+          if (_selected().isCustom)
+            IconButton(
+              tooltip: 'Share this board as JSON',
+              onPressed: () => _shareBoard(_selected()),
+              icon: const Icon(Icons.ios_share, color: Color(0xFF689F38)),
+            ),
           IconButton(
-            tooltip: 'Import a board',
-            onPressed: _importBoard,
-            icon: const Icon(Icons.file_upload_outlined,
+            tooltip: 'Create your own board',
+            onPressed: _createBoard,
+            icon: const Icon(Icons.add_circle_outline,
                 color: Color(0xFF689F38)),
           ),
         ],
       ),
       body: SafeArea(
-        child: FutureBuilder<List<BoardListing>>(
+        // The picker and the board keep a wide but finite measure; the board
+        // screen is the one that can use the most room.
+        child: AppContent(
+          maxWidth: 1280,
+          child: FutureBuilder<List<BoardListing>>(
           future: _boards,
           builder: (context, snap) {
             if (snap.connectionState == ConnectionState.waiting) {
@@ -199,33 +244,37 @@ class _BoardPreviewScreenState extends State<BoardPreviewScreen> {
               children: <Widget>[
                 SizedBox(
                   height: 44,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    itemCount: boards.length + 1,
-                    separatorBuilder: (_, __) => const SizedBox(width: 6),
-                    itemBuilder: (BuildContext context, int index) {
-                      if (index == boards.length) {
+                  // A mouse cannot drag a list by default, which left the
+                  // picker stuck on the first few flags in a desktop browser.
+                  child: ScrollConfiguration(
+                    behavior: ScrollConfiguration.of(context).copyWith(
+                      dragDevices: PointerDeviceKind.values.toSet(),
+                    ),
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      itemCount: boards.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 6),
+                      itemBuilder: (BuildContext context, int index) {
+                        final BoardListing board = boards[index];
+                        final bool isSelected =
+                            board.boardId == selected.boardId;
                         return Center(
                           child: CountryChip(
-                            label: 'Create your own',
-                            icon: Icons.add_circle_outline,
-                            selected: false,
-                            onTap: _createBoard,
+                            label: board.name,
+                            flag: board.flag,
+                            icon: board.isMine && board.flag.isEmpty
+                                ? Icons.person_outline
+                                : null,
+                            // Flags only, until one is picked: the row then
+                            // reads as the countries rather than as a list.
+                            labelVisible: isSelected,
+                            selected: isSelected,
+                            onTap: () => _select(board.boardId),
                           ),
                         );
-                      }
-                      final BoardListing board = boards[index];
-                      return Center(
-                        child: CountryChip(
-                          label: board.name,
-                          flag: board.flag,
-                          icon: board.isMine ? Icons.person_outline : null,
-                          selected: board.boardId == selected.boardId,
-                          onTap: () => _select(board.boardId),
-                        ),
-                      );
-                    },
+                      },
+                    ),
                   ),
                 ),
                 Padding(
@@ -248,18 +297,6 @@ class _BoardPreviewScreenState extends State<BoardPreviewScreen> {
                           ),
                         ),
                       ),
-                      // Only a board this player made can be sent on: the
-                      // countries are already in everybody's picker.
-                      if (selected.isCustom) ...<Widget>[
-                        const SizedBox(width: 4),
-                        IconButton(
-                          tooltip: 'Share this board',
-                          onPressed: () => _shareBoard(selected),
-                          visualDensity: VisualDensity.compact,
-                          icon: const Icon(Icons.ios_share,
-                              size: 20, color: Color(0xFF2E7D32)),
-                        ),
-                      ],
                     ],
                   ),
                 ),
@@ -269,13 +306,14 @@ class _BoardPreviewScreenState extends State<BoardPreviewScreen> {
               ],
             );
           },
+          ),
         ),
       ),
     );
   }
 }
 
-/// The board and its two decks. Kept in its own widget so switching boards only
+/// The board on its own. Kept in its own widget so switching boards only
 /// rebuilds this, not the picker above it.
 class _SelectedBoard extends StatefulWidget {
   const _SelectedBoard({required this.boardId});
@@ -324,57 +362,26 @@ class _SelectedBoardState extends State<_SelectedBoard> {
           );
         }
         final BankpopBoard board = snap.data!;
-        return Column(
-          children: <Widget>[
-            Expanded(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  // Whatever the column leaves, never more than it: the board
-                  // is square, so it has to fit the smaller side.
-                  final double size = math.max(
-                    0,
-                    math.min(
-                      constraints.maxWidth - 12,
-                      constraints.maxHeight - 12,
-                    ),
-                  );
-                  return Center(
-                    child: BankpopBoardView(board: board, size: size),
-                  );
-                },
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-              child: Row(
-                children: <Widget>[
-                  Expanded(
-                    child: _DeckButton(
-                      label: 'Chance cards',
-                      icon: Icons.casino_outlined,
-                      onTap: () => showBankpopDeckSheet(
-                        context,
-                        'Chance',
-                        board.chanceOptions,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _DeckButton(
-                      label: 'Community chest',
-                      icon: Icons.inventory_2_outlined,
-                      onTap: () => showBankpopDeckSheet(
-                        context,
-                        'Community Chest',
-                        board.communityChest,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+        // The same names and prices the download draws: the name sits just
+        // under its colour block, so the blocks read as solid bands.
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+          child: LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints area) {
+              // Whatever the area leaves, never more than it: the board is
+              // square, so it has to fit the smaller side.
+              final double size = math.max(
+                0,
+                math.min(area.maxWidth - 12, area.maxHeight - 12),
+              );
+              return Center(
+                child: BankpopBoardView(
+                  board: board,
+                  size: size,
+                ),
+              );
+            },
+          ),
         );
       },
     );
@@ -448,41 +455,3 @@ class _NoBoards extends StatelessWidget {
   }
 }
 
-/// The two deck buttons under the board. The decks are the board's own, so they
-/// read the same as the sheet a tile opens during a game.
-class _DeckButton extends StatelessWidget {
-  const _DeckButton({
-    required this.label,
-    required this.icon,
-    required this.onTap,
-  });
-
-  final String label;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return OutlinedButton.icon(
-      onPressed: onTap,
-      icon: Icon(icon, size: 18.sp, color: const Color(0xFF2E7D32)),
-      label: Text(
-        label,
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          fontSize: 12.sp,
-          fontWeight: FontWeight.w600,
-          color: const Color(0xFF2E7D32),
-        ),
-      ),
-      style: OutlinedButton.styleFrom(
-        backgroundColor: Colors.white,
-        side: const BorderSide(color: Color(0xFFAED581)),
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
-      ),
-    );
-  }
-}

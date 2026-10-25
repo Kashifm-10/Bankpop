@@ -9,7 +9,8 @@ import 'package:mon/services/account_mail.dart';
 import 'package:mon/services/profile_avatar.dart';
 import 'package:mon/widgets/app_message.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:responsive_sizer/responsive_sizer.dart';
+import 'package:mon/widgets/app_content.dart';
+import 'package:mon/widgets/app_metrics.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -219,9 +220,11 @@ class _ProfilePageState extends State<ProfilePage> {
           });
           FocusScope.of(context).unfocus();
         },
-        child: ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
+        child: AppContent(
+          maxWidth: 760,
+          child: ListView(
+            padding: const EdgeInsets.all(20),
+            children: [
             Center(
               child: Stack(
                 children: [
@@ -720,6 +723,7 @@ class _ProfilePageState extends State<ProfilePage> {
               ),
             ),
           ],
+          ),
         ),
       ),
     );

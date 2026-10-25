@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:mon/routes.dart';
+import 'package:mon/services/account.dart';
+import 'package:mon/services/bank_handover.dart';
 import 'package:mon/services/game_session.dart';
-import 'package:responsive_sizer/responsive_sizer.dart';
+import 'package:mon/widgets/app_content.dart';
+import 'package:mon/widgets/app_metrics.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -30,6 +33,10 @@ class _GameEntry {
   final GameSession? session;
 
   bool get isBanker => role == 'banker';
+
+  /// The banker who handed the bank over keeps a viewing seat, so the game
+  /// still shows up here - with the role they have now, not the one they had.
+  bool get isExBanker => role == BankHandover.exBankerRole;
   String get status => session?.status ?? GameSession.active;
   DateTime? get startedAt => session?.startedAt;
   DateTime? get endedAt => session?.endedAt;
@@ -52,6 +59,10 @@ class _GameHistoryScreenState extends State<GameHistoryScreen> {
   String? _error;
   List<_GameEntry> _games = <_GameEntry>[];
 
+  /// A guest's games are only reachable from this device, so the list carries
+  /// the same reminder the home screen does.
+  bool _signedIn = true;
+
   static final DateFormat _dateFormat = DateFormat('d MMM yyyy, h:mm a');
 
   @override
@@ -62,6 +73,8 @@ class _GameHistoryScreenState extends State<GameHistoryScreen> {
 
   Future<void> _load() async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final bool signedIn = await Account.isSignedIn();
+    if (mounted) setState(() => _signedIn = signedIn);
     final String? playerId = prefs.getString('playerID');
     if (playerId == null || playerId.isEmpty) {
       setState(() => _loading = false);
@@ -178,15 +191,18 @@ class _GameHistoryScreenState extends State<GameHistoryScreen> {
         ),
         iconTheme: const IconThemeData(color: Color(0xFF689F38)),
       ),
-      body: RefreshIndicator(
-        color: const Color(0xFF689F38),
-        onRefresh: _load,
+      body: AppContent(
+        maxWidth: 900,
+        child: RefreshIndicator(
+          color: const Color(0xFF689F38),
+          onRefresh: _load,
         child: _loading
             ? const Center(
                 child: CircularProgressIndicator(color: Color(0xFF689F38)))
             : ListView(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                 children: <Widget>[
+                  if (!_signedIn) _guestBanner(),
                   if (_error != null)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 12),
@@ -225,8 +241,59 @@ class _GameHistoryScreenState extends State<GameHistoryScreen> {
                   for (final _GameEntry game in _games) _card(game),
                 ],
               ),
+        ),
       ),
     );
+  }
+
+  /// The reminder above a guest's list, with a way to fix it.
+  Widget _guestBanner() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE8F5E9),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFC5E1A5)),
+      ),
+      child: Row(
+        children: <Widget>[
+          const Icon(Icons.info_outline, color: Color(0xFF2E7D32), size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'These games are not linked to an account. Create an account or '
+              'sign in to keep them on this device and any other.',
+              style: TextStyle(
+                fontSize: 12.sp,
+                height: 1.3,
+                color: const Color(0xFF33691E),
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: _openAccount,
+            child: Text(
+              'Sign in',
+              style: TextStyle(
+                fontSize: 13.sp,
+                fontWeight: FontWeight.w600,
+                color: const Color(0xFF2E7D32),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Signing in from the banner: the account screen pops back here, so the
+  /// list redraws with the account's games and without the reminder.
+  Future<void> _openAccount() async {
+    final bool? signedIn = await context.push<bool>(AppRoutes.authReturning);
+    if (signedIn != true || !mounted) return;
+    setState(() => _loading = true);
+    await _load();
   }
 
   Widget _card(_GameEntry game) {
@@ -244,7 +311,11 @@ class _GameHistoryScreenState extends State<GameHistoryScreen> {
       _ => (const Color(0xFF43A047), 'Active', Icons.play_circle_outline),
     };
 
-    final String roleLabel = game.isBanker ? 'Banker' : 'Player';
+    final String roleLabel = game.isBanker
+        ? 'Banker'
+        : game.isExBanker
+            ? 'Ex-banker (view only)'
+            : 'Player';
     final DateTime? started = game.startedAt;
 
     return Card(
@@ -260,8 +331,14 @@ class _GameHistoryScreenState extends State<GameHistoryScreen> {
             Row(
               children: <Widget>[
                 Expanded(
+                  // The game id is a join code, not a title: it stays in the
+                  // game screen's QR and is not printed in the list.
                   child: Text(
-                    'Game ${game.gameId}',
+                    game.isBanker
+                        ? 'Your table'
+                        : game.isExBanker
+                            ? 'A table you handed over'
+                            : 'Your game',
                     style: TextStyle(
                       fontSize: 17.sp,
                       fontWeight: FontWeight.bold,

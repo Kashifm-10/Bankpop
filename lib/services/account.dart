@@ -481,6 +481,118 @@ class Account {
     }
   }
 
+  /// The player id this device played under while nobody was signed in, or
+  /// null when an account already owns this device or nothing was ever played.
+  ///
+  /// Read before a sign-in, because signing in moves `playerID` to the
+  /// account's id - after that the guest id is no longer on the device.
+  static Future<String?> guestPlayerId() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String? email = prefs.getString(emailKey);
+    if (email != null && email.isNotEmpty) return null;
+    final String? id = prefs.getString('playerID');
+    return id == null || id.isEmpty ? null : id;
+  }
+
+  /// Whether [playerId] played at least one game on the server.
+  static Future<bool> hasGames(String playerId) async {
+    if (playerId.isEmpty) return false;
+    try {
+      final List<dynamic> rows = await Supabase.instance.client
+          .from('players_test')
+          .select('game_id')
+          .eq('player_id', playerId)
+          .limit(1);
+      return rows.isNotEmpty;
+    } catch (error) {
+      debugPrint('Could not check the guest games: $error');
+      return false;
+    }
+  }
+
+  /// Points every row that belonged to a guest at the account that just signed
+  /// in, so the games played before signing in show up under the account too.
+  ///
+  /// Returns how many game seats moved. Best effort per table: an old project
+  /// may be missing some of them, and one missing table must not leave the
+  /// others untouched.
+  static Future<int> adoptGuestGames({
+    required String guestId,
+    required String accountId,
+  }) async {
+    if (guestId.isEmpty || accountId.isEmpty || guestId == accountId) return 0;
+
+    // A seat is what lists the game, so this is the count worth reporting.
+    int moved = 0;
+    try {
+      final List<dynamic> rows = await Supabase.instance.client
+          .from('players_test')
+          .select('game_id')
+          .eq('player_id', guestId);
+      moved = rows.length;
+    } catch (error) {
+      debugPrint('Could not count the guest seats: $error');
+    }
+
+    await _repoint('players_test', 'player_id', guestId, accountId);
+    await _repoint('request_test', 'player_id', guestId, accountId);
+    await _repoint('card_requests', 'player_id', guestId, accountId);
+    await _repoint('deal_requests', 'from_id', guestId, accountId);
+    await _repoint('deal_requests', 'to_id', guestId, accountId);
+    await _repoint('game_sessions', 'banker_id', guestId, accountId);
+
+    // transactions and player_cards keep the id inside `code` as well, and a
+    // trigger refills their id columns whenever `code` changes - so the code is
+    // what has to be rewritten.
+    await _repointCode('transactions', guestId, accountId);
+    await _repointCode('player_cards', guestId, accountId);
+
+    return moved;
+  }
+
+  static Future<void> _repoint(
+    String table,
+    String column,
+    String from,
+    String to,
+  ) async {
+    try {
+      await Supabase.instance.client
+          .from(table)
+          .update(<String, dynamic>{column: to}).eq(column, from);
+    } catch (error) {
+      // A table that does not exist yet (its SQL file was never run) is fine:
+      // there is nothing in it to move.
+      debugPrint('Could not move $table.$column from the guest id: $error');
+    }
+  }
+
+  /// Rewrites `<payer>_<receiver>` codes that mention [from], one row at a
+  /// time; the row's id columns follow the code through their trigger.
+  static Future<void> _repointCode(
+    String table,
+    String from,
+    String to,
+  ) async {
+    try {
+      final List<dynamic> rows = await Supabase.instance.client
+          .from(table)
+          .select('id, code')
+          .like('code', '%$from%');
+      for (final dynamic raw in rows) {
+        final Map<String, dynamic> row = (raw as Map).cast<String, dynamic>();
+        final String code = row['code']?.toString() ?? '';
+        if (!code.contains(from)) continue;
+        await Supabase.instance.client
+            .from(table)
+            .update(<String, dynamic>{'code': code.replaceAll(from, to)})
+            .eq('id', row['id']);
+      }
+    } catch (error) {
+      debugPrint('Could not move the $table codes from the guest id: $error');
+    }
+  }
+
   /// Clears the account from this device. The player id is kept, so the games
   /// this device played stay reachable until someone else signs in.
   static Future<void> signOut() async {

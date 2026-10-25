@@ -1,5 +1,59 @@
 import 'dart:convert';
 
+/// The money symbol a board's prices are written in.
+///
+/// Every board plays by the same numbers, but a board of India reads ₹200 where
+/// the American one reads $200 - the symbol is part of the board's identity,
+/// not a rule. A player's own board picks its own symbol when it is made.
+abstract final class BoardCurrencies {
+  static const String fallback = '£';
+
+  /// The symbol each built-in country board is listed under.
+  static const Map<String, String> byBoard = <String, String>{
+    'india': '₹',
+    'usa': r'$',
+    'uk': '£',
+    'france': '€',
+    'germany': '€',
+    'italy': '€',
+    'spain': '€',
+    'japan': '¥',
+    'china': '¥',
+    'brazil': r'R$',
+    'australia': r'A$',
+    'canada': r'C$',
+    'egypt': r'E£',
+    'uae': 'AED',
+  };
+
+  /// The symbols a board's maker can choose from. Any other single character
+  /// still works, so a currency that is not in this row is never refused.
+  static const List<String> choices = <String>[
+    '£',
+    r'$',
+    '€',
+    '₹',
+    '¥',
+    r'R$',
+    r'A$',
+    r'C$',
+    r'E£',
+    'AED',
+  ];
+
+  static String forBoard(String boardId) =>
+      byBoard[boardId] ?? fallback;
+
+  /// A price with its symbol: `₹200`, `$200`, `AED 200`.
+  static String format(String symbol, num value) {
+    // A wallet stores 200 as 200.0; print it the way the board does.
+    final num shown = value is double && value == value.roundToDouble()
+        ? value.toInt()
+        : value;
+    return symbol.length > 1 ? '$symbol $shown' : '$symbol$shown';
+  }
+}
+
 /// One space on the board.
 ///
 /// The app draws and charges from these numbers, so they travel with the board
@@ -87,6 +141,9 @@ class BankpopBoard {
   final String boardName;
   final String flag;
 
+  /// The money symbol its prices are written in (`₹`, `$`, `AED`, ...).
+  final String currency;
+
   const BankpopBoard({
     required this.spaces,
     required this.chanceOptions,
@@ -94,11 +151,15 @@ class BankpopBoard {
     this.boardId = '',
     this.boardName = '',
     this.flag = '',
+    this.currency = BoardCurrencies.fallback,
   });
 
   /// A row of `game_boards` (see supabase/boards.sql). The `spaces` and `cards`
   /// columns arrive as JSON, which PostgREST hands back already decoded.
   factory BankpopBoard.fromMap(Map<String, dynamic> map) {
+    final String boardId =
+        map['board_id']?.toString() ?? map['id']?.toString() ?? '';
+    final String storedCurrency = (map['currency'] as String?)?.trim() ?? '';
     final Object? rawSpaces = map['spaces'];
     final List<dynamic> spaceList = rawSpaces is String
         ? (jsonDecode(rawSpaces) as List<dynamic>)
@@ -116,9 +177,13 @@ class BankpopBoard {
           (cards['chanceOptions'] as List?)?.cast<String>() ?? const <String>[],
       communityChest: (cards['communityChest'] as List?)?.cast<String>() ??
           const <String>[],
-      boardId: map['board_id']?.toString() ?? '',
+      boardId: boardId,
       boardName: map['country']?.toString() ?? map['name']?.toString() ?? '',
       flag: map['flag']?.toString() ?? '',
+      // A board written before the symbol was stored falls back to the
+      // country's own currency; a custom board without one reads £.
+      currency:
+          storedCurrency.isEmpty ? BoardCurrencies.forBoard(boardId) : storedCurrency,
     );
   }
 
@@ -128,6 +193,7 @@ class BankpopBoard {
         'board_id': boardId,
         'name': boardName,
         'flag': flag,
+        'currency': currency,
         'spaces': <Map<String, dynamic>>[
           for (final BankpopSpace space in spaces) space.toMap(),
         ],
@@ -147,6 +213,7 @@ class BankpopBoard {
     required Map<String, String> renames,
     required String name,
     String? boardId,
+    String? currency,
   }) {
     final List<String> keys = renames.keys.toList()
       ..sort((String a, String b) => b.length.compareTo(a.length));
@@ -174,6 +241,7 @@ class BankpopBoard {
       boardId: boardId ?? this.boardId,
       boardName: name,
       flag: flag,
+      currency: currency ?? this.currency,
     );
   }
 

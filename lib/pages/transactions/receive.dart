@@ -2,8 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:mon/widgets/game_controls.dart';
-import 'package:qr_flutter/qr_flutter.dart';
-import 'package:responsive_sizer/responsive_sizer.dart';
+import 'package:mon/widgets/qr_box.dart';
+import 'package:mon/widgets/app_metrics.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ReceiveButton extends StatelessWidget {
@@ -85,11 +85,9 @@ class ReceiveButton extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              QrImageView(
+              QrBox(
                 data: qrData,
-                version: QrVersions.auto,
                 size: 50.w,
-                gapless: false,
               ),
               SizedBox(height: 2.h),
               Text('Value: $value',

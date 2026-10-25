@@ -1,4 +1,3 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,11 +10,9 @@ import 'package:mon/services/board_catalog.dart';
 import 'package:mon/services/game_session.dart';
 import 'package:mon/services/player_exit.dart';
 import 'package:mon/services/profile_avatar.dart';
+import 'package:mon/widgets/app_content.dart';
 import 'package:mon/widgets/app_dialog.dart';
-import 'package:mon/widgets/bankpop_board_popup.dart';
-import 'package:mon/widgets/app_message.dart';
-import 'package:package_info_plus/package_info_plus.dart';
-import 'package:responsive_sizer/responsive_sizer.dart';
+import 'package:mon/widgets/app_metrics.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -28,20 +25,11 @@ class WelcomePage extends StatefulWidget {
 
 class _WelcomePageState extends State<WelcomePage> {
   final supabase = Supabase.instance.client;
-  String appName = '';
-  String packageName = '';
-  String version = '';
-  String buildNumber = '';
 
   /// The bundled avatar this device picked, or the app icon. It is an asset
   /// path rather than a file, so the same value renders on Android and web.
   String _avatarAsset = ProfileAvatar.appIcon;
   String userName = "";
-
-  /// True when the game this device last joined is playing with cards. Read
-  /// from prefs (banker) or the bank row (players), so the board icon is only
-  /// offered in a game that actually uses cards.
-  bool _playWithCards = false;
 
   /// An account is optional: a guest gets the whole app, and this only decides
   /// whether the greeting carries the "sign in to keep your games" banner.
@@ -67,38 +55,14 @@ class _WelcomePageState extends State<WelcomePage> {
     }
     _avatarAsset = ProfileAvatar.saved(prefs);
     userName = prefs.getString('profile_name') ?? "";
-    // Cards mode is a property of the game, kept on its session row. The local
-    // copy is only a fallback while that row cannot be read (a project that
-    // has not run game_sessions.sql yet).
+    // The board this device is part-way through, so anything that reads the
+    // board before a game screen opens draws the right country.
     final String? gameId = prefs.getString('gameID');
-    _playWithCards = prefs.getBool('playWithCards') ?? false;
     if (gameId != null && gameId.isNotEmpty) {
       final GameSession? session = await GameSession.fetch(gameId);
-      if (session != null) {
-        _playWithCards = session.playWithCards;
-        // The board this device is part-way through, so the board icon shows
-        // the right country even before a game screen opens.
-        BoardCatalog.use(session.boardId);
-      } else {
-        // A game started before game_sessions.sql keeps the switch on its bank
-        // row; read it there so the board icon does not disappear.
-        try {
-          final Map<String, dynamic>? bankRow = await supabase
-              .from('players_test')
-              .select('play_with_cards')
-              .eq('game_id', gameId)
-              .eq('role', 'banker')
-              .maybeSingle();
-          if (bankRow?['play_with_cards'] is bool) {
-            _playWithCards = bankRow!['play_with_cards'] == true;
-          }
-        } catch (error) {
-          debugPrint('Could not read cards mode: $error');
-        }
-      }
+      BoardCatalog.use(session?.boardId);
     }
     if (userName.isNotEmpty) {
-      await _loadPackageInfo();
       await _loadUser();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _checkForPlayerAndNavigate();
@@ -124,16 +88,6 @@ class _WelcomePageState extends State<WelcomePage> {
         setState(() {});
       }
     }
-  }
-
-  Future<void> _loadPackageInfo() async {
-    final info = await PackageInfo.fromPlatform();
-    setState(() {
-      appName = info.appName;
-      packageName = info.packageName;
-      version = info.version;
-      buildNumber = info.buildNumber;
-    });
   }
 
   Future<void> _loadUser() async {
@@ -256,6 +210,7 @@ class _WelcomePageState extends State<WelcomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final bool wide = AppLayout.isWide(context);
     return Scaffold(
       extendBodyBehindAppBar: true,
       resizeToAvoidBottomInset: false,
@@ -267,268 +222,123 @@ class _WelcomePageState extends State<WelcomePage> {
             colors: [
               Color(0xFFFFF8E1), // soft creamy yellow (like morning sun)
               Color(0xFFFFF8E1), // soft creamy yellow (like morning sun)
-              Color(0xFFFFF8E1), // soft creamy yellow (like morning sun)
-              Color(0xFFFFF8E1), // soft creamy yellow (like morning sun)
-              // Color(0xFFB3E5FC), // light sky blue
             ],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
         ),
         child: SafeArea(
-          child: Stack(
-            children: [
-              Container(
-                padding: EdgeInsets.symmetric(horizontal: 4.w, vertical: 0.h),
-                margin: EdgeInsets.symmetric(horizontal: 2.w, vertical: 2.h),
-                child: ListView(
-                  // The version label is pinned over the bottom of this list; the
-                  // padding stops the last card from sliding underneath it on a
-                  // short screen.
-                  padding: const EdgeInsets.only(bottom: 28),
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'BankPop!',
-                          style: TextStyle(
-                            fontSize: 24.sp,
-                            fontWeight: FontWeight.bold,
-                            color: const Color(0xFF33691E),
-                            letterSpacing: 1.2,
-                          ),
-                        ),
-                        Row(
-                          children: [
-                            if (_playWithCards)
-                              GestureDetector(
-                                onTap: () async {
-                                  final SharedPreferences prefs =
-                                      await SharedPreferences.getInstance();
-                                  if (!context.mounted) return;
-                                  showDialog(
-                                    context: context,
-                                    builder: (_) => BankpopBoardPopup(
-                                      gameId: prefs.getString('gameID') ?? '',
-                                    ),
-                                  );
-                                },
-                                child: const Icon(Icons.grid_on),
-                              ),
-                            SizedBox(width: 15),
-                            GestureDetector(
-                              onTap: () {
-                                showMessage(
-                                    context, 'Only an idiot would press this.');
-                              },
-                              child: const Icon(
-                                CupertinoIcons.info_circle_fill,
-                                color: Color(0xFF33691E),
-                              ),
-                            ),
-                          ],
-                        )
-                      ],
-                    ),
-                    SizedBox(height: 2.h),
-                    GestureDetector(
-                      onTap: () => context.push(AppRoutes.profile),
-                      child: Card(
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20)),
-                        color: const Color(0xFFFFF9C4), // soft pastel yellow
-                        elevation: 3,
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Expanded(
-                                // <- Limits width so text can wrap
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Hey, $userName',
-                                      style: TextStyle(
-                                        fontSize: 22.sp,
-                                        fontWeight: FontWeight.bold,
-                                        color: const Color(0xFF33691E),
-                                        letterSpacing: 1.2,
-                                      ),
-                                      maxLines: 3,
-                                      overflow: TextOverflow.ellipsis,
-                                      softWrap: true,
-                                    ),
-                                    Text(
-                                      'Ready to play?',
-                                      style: TextStyle(
-                                        fontSize: 18.sp,
-                                        fontWeight: FontWeight.w500,
-                                        color: const Color(0xFF689F38),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              GestureDetector(
-                                onTap: () => context.push(AppRoutes.profile),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(10.0),
-                                  child: CircleAvatar(
-                                    radius: 26.sp,
-                                    backgroundColor: Colors.white,
-                                    // Both sources are ~700-1200 px; the
-                                    // avatar is drawn at 52.sp, so decode it
-                                    // at 156px.
-                                    backgroundImage: ProfileAvatar.provider(
-                                        _avatarAsset,
-                                        cacheWidth: 156),
-                                  ),
-                                ),
-                              ),
+          // The page background fills the window; the content keeps a readable
+          // measure. On a desktop window the greeting and the hero copy sit in
+          // a column on the left and the buttons in a column on the right,
+          // instead of one set of cards stretched across the screen.
+          child: AppContent(
+            maxWidth: 1120,
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            child: ListView(
+              padding: const EdgeInsets.only(bottom: 24),
+              children: <Widget>[
+                Text(
+                  'BankPop!',
+                  style: TextStyle(
+                    fontSize: 24.sp,
+                    fontWeight: FontWeight.bold,
+                    color: const Color(0xFF33691E),
+                    letterSpacing: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _greetingCard(context),
+                if (!_signedIn && !wide) ...<Widget>[
+                  const SizedBox(height: 10),
+                  _GuestBanner(onSignIn: _openAccount),
+                ],
+                SizedBox(height: wide ? 28 : 22),
+                if (wide)
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Expanded(
+                        flex: 5,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            _hero(),
+                            if (!_signedIn) ...<Widget>[
+                              const SizedBox(height: 18),
+                              _GuestBanner(onSignIn: _openAccount),
                             ],
-                          ),
+                          ],
                         ),
                       ),
-                    ),
-
-                    if (!_signedIn) ...<Widget>[
-                      const SizedBox(height: 10),
-                      _GuestBanner(onSignIn: _openAccount),
+                      const SizedBox(width: 36),
+                      Expanded(flex: 6, child: _buttons(context, wide: true)),
                     ],
+                  )
+                else ...<Widget>[
+                  _hero(),
+                  const SizedBox(height: 22),
+                  _buttons(context, wide: false),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
-                    SizedBox(height: 6.h),
+  Widget _greetingCard(BuildContext context) {
+    return GestureDetector(
+      onTap: () => context.push(AppRoutes.profile),
+      child: Card(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        color: const Color(0xFFFFF9C4), // soft pastel yellow
+        elevation: 3,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: <Widget>[
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
                     Text(
-                      'Bring Your Board Games to Life!',
-                      textAlign: TextAlign.center,
+                      'Hey, $userName',
+                      style: TextStyle(
+                        fontSize: 22.sp,
+                        fontWeight: FontWeight.bold,
+                        color: const Color(0xFF33691E),
+                        letterSpacing: 1.2,
+                      ),
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: true,
+                    ),
+                    Text(
+                      'Ready to play?',
                       style: TextStyle(
                         fontSize: 18.sp,
-                        fontWeight: FontWeight.w700,
-                        color: const Color(0xFF33691E),
-                      ),
-                    ),
-                    SizedBox(height: 1.h),
-                    Text(
-                      'No paper money, no mess — just tap, play, and enjoy a smarter game night!',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 16.sp,
                         fontWeight: FontWeight.w500,
-                        color: const Color(0xFF558B2F), // medium green
+                        color: const Color(0xFF689F38),
                       ),
-                    ),
-                    SizedBox(height: 4.h),
-
-                    // Button cards
-                    Column(
-                      children: [
-                        ButtonCard(
-                          title: "Start Game",
-                          gradientColors: const [
-                            Color.fromARGB(255, 192, 235, 176),
-                            Color.fromARGB(255, 182, 229, 165),
-                            Color.fromARGB(
-                                255, 138, 201, 115), // Calm Aqua Mint
-                            Color.fromARGB(255, 80, 145, 55) // Calm Aqua Mint
-                          ],
-                          textColor: const Color(0xFF33691E),
-                          lottieAssetPath: "assets/lottie/dice.json",
-                          overlayImageUrl:
-                              "https://i.pinimg.com/736x/b2/93/53/b293530e766938aeaad897363c9df0eb.jpg",
-                          onTap: () => _startGame(context),
-                        ),
-                        const SizedBox(height: 20),
-                        ButtonCard(
-                          title: "Your Games",
-                          gradientColors: const [
-                            Color.fromARGB(255, 214, 234, 248),
-                            Color.fromARGB(255, 197, 225, 245),
-                            Color.fromARGB(255, 144, 202, 249),
-                            Color.fromARGB(255, 100, 181, 246),
-                          ],
-                          textColor: const Color(0xFF0D47A1),
-                          lottieAssetPath: "assets/lottie/bank_role.json",
-                          overlayImageUrl:
-                              "https://i.pinimg.com/736x/b2/93/53/b293530e766938aeaad897363c9df0eb.jpg",
-                          onTap: () => _openGames(context),
-                        ),
-                        const SizedBox(height: 20),
-                        ButtonCard(
-                          title: "How to use",
-                          gradientColors: const [
-                            Color.fromARGB(255, 243, 233, 141),
-                            Color.fromARGB(255, 243, 233, 141),
-                            Color.fromARGB(255, 236, 220, 70), // Calm Aqua Mint
-                            Color.fromARGB(255, 236, 215, 22) // Calm Aqua Mint
-                          ],
-                          textColor: const Color(0xFFFFF9C4),
-                          lottieAssetPath: "assets/lottie/help.json",
-                          overlayImageUrl:
-                              "https://i.pinimg.com/736x/b2/93/53/b293530e766938aeaad897363c9df0eb.jpg",
-                          onTap: () => context.push(AppRoutes.howToUse),
-                        ),
-                        const SizedBox(height: 20),
-                        ButtonCard(
-                          title: "Game rules",
-                          gradientColors: const [
-                            Color.fromARGB(255, 255, 224, 178),
-                            Color.fromARGB(255, 255, 204, 128),
-                            Color.fromARGB(255, 255, 183, 77),
-                            Color.fromARGB(255, 245, 160, 40),
-                          ],
-                          textColor: const Color(0xFFE65100),
-                          lottieAssetPath: "assets/lottie/help.json",
-                          onTap: () => context.push(AppRoutes.gameRules),
-                        ),
-                        const SizedBox(height: 20),
-                        ButtonCard(
-                          title: "Boards & cards",
-                          gradientColors: const [
-                            Color(0xFFE1BEE7),
-                            Color(0xFFCE93D8),
-                            Color(0xFFBA68C8),
-                            Color(0xFFAB47BC),
-                          ],
-                          textColor: const Color(0xFF4A148C),
-                          lottieAssetPath: "assets/lottie/help.json",
-                          onTap: () => context.push(AppRoutes.boards),
-                        ),
-                        const SizedBox(height: 20),
-                        ButtonCard(
-                          title: "Leave",
-                          gradientColors: const [
-                            Color.fromARGB(255, 243, 169, 169), // Soft Peach
-                            Color.fromARGB(255, 243, 128, 128), // Soft Peach
-                            Color.fromARGB(255, 250, 126, 126), // Soft Peach
-                            Color.fromARGB(255, 245, 67, 67), // Calm Coral
-                          ],
-                          textColor: const Color.fromARGB(255, 245, 72, 66),
-                          lottieAssetPath: "assets/lottie/close.json",
-                          overlayImageUrl:
-                              "https://i.pinimg.com/736x/03/52/7d/03527dc76d013498547fb1e61759dcd4.jpg",
-                          onTap: () => _exitApp(context),
-                        ),
-                      ],
                     ),
                   ],
                 ),
               ),
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 10,
-                child: Text(
-                  buildNumber.isEmpty
-                      ? 'Version $version'
-                      : 'Version $version ($buildNumber)',
-                  style: TextStyle(
-                    fontSize: 12.sp,
-                    color: const Color(0xFF558B2F), // medium green
-                    fontWeight: FontWeight.w300,
+              GestureDetector(
+                onTap: () => context.push(AppRoutes.profile),
+                child: Padding(
+                  padding: const EdgeInsets.all(10.0),
+                  child: CircleAvatar(
+                    radius: 26.sp,
+                    backgroundColor: Colors.white,
+                    // Both sources are ~700-1200 px; the avatar is drawn at
+                    // 52.sp, so decode it at 156px.
+                    backgroundImage:
+                        ProfileAvatar.provider(_avatarAsset, cacheWidth: 156),
                   ),
-                  textAlign: TextAlign.center,
                 ),
               ),
             ],
@@ -538,27 +348,150 @@ class _WelcomePageState extends State<WelcomePage> {
     );
   }
 
-  /// Your Games belongs to the account: the list is read from the games this
-  /// player id has rows in, which a guest does not have anywhere but this
-  /// device. Asking for a sign-in is clearer than opening an empty list.
+  Widget _hero() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          'Bring Your Board Games to Life!',
+          style: TextStyle(
+            fontSize: 20.sp,
+            height: 1.2,
+            fontWeight: FontWeight.w700,
+            color: const Color(0xFF33691E),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'No paper money, no mess - just tap, play, and enjoy a smarter game '
+          'night!',
+          style: TextStyle(
+            fontSize: 16.sp,
+            height: 1.4,
+            fontWeight: FontWeight.w500,
+            color: const Color(0xFF558B2F), // medium green
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// The four button rows, in the order the app is used: Start on its own, the
+  /// two pairs that belong together, then Leave.
+  Widget _buttons(BuildContext context, {required bool wide}) {
+    final double gap = wide ? 14 : 12;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        ButtonCard(
+          title: "Start Game",
+          gradientColors: const [
+            Color.fromARGB(255, 192, 235, 176),
+            Color.fromARGB(255, 182, 229, 165),
+            Color.fromARGB(255, 138, 201, 115), // Calm Aqua Mint
+            Color.fromARGB(255, 80, 145, 55) // Calm Aqua Mint
+          ],
+          textColor: const Color(0xFF33691E),
+          lottieAssetPath: "assets/lottie/dice.json",
+          overlayImageUrl:
+              "https://i.pinimg.com/736x/b2/93/53/b293530e766938aeaad897363c9df0eb.jpg",
+          onTap: () => _startGame(context),
+        ),
+        SizedBox(height: gap),
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: ButtonCard(
+                title: "Your Games",
+                compact: true,
+                gradientColors: const [
+                  Color.fromARGB(255, 214, 234, 248),
+                  Color.fromARGB(255, 197, 225, 245),
+                  Color.fromARGB(255, 144, 202, 249),
+                  Color.fromARGB(255, 100, 181, 246),
+                ],
+                textColor: const Color(0xFF0D47A1),
+                lottieAssetPath: "assets/lottie/bank_role.json",
+                onTap: () => _openGames(context),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ButtonCard(
+                title: "Boards & cards",
+                compact: true,
+                gradientColors: const [
+                  Color(0xFFE1BEE7),
+                  Color(0xFFCE93D8),
+                  Color(0xFFBA68C8),
+                  Color(0xFFAB47BC),
+                ],
+                textColor: const Color(0xFF4A148C),
+                lottieAssetPath: "assets/lottie/help.json",
+                onTap: () => context.push(AppRoutes.boards),
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: gap),
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: ButtonCard(
+                title: "How to use",
+                compact: true,
+                gradientColors: const [
+                  Color.fromARGB(255, 243, 233, 141),
+                  Color.fromARGB(255, 243, 233, 141),
+                  Color.fromARGB(255, 236, 220, 70),
+                  Color.fromARGB(255, 236, 215, 22)
+                ],
+                textColor: const Color(0xFFFFF9C4),
+                lottieAssetPath: "assets/lottie/help.json",
+                onTap: () => context.push(AppRoutes.howToUse),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ButtonCard(
+                title: "Game rules",
+                compact: true,
+                gradientColors: const [
+                  Color.fromARGB(255, 255, 224, 178),
+                  Color.fromARGB(255, 255, 204, 128),
+                  Color.fromARGB(255, 255, 183, 77),
+                  Color.fromARGB(255, 245, 160, 40),
+                ],
+                textColor: const Color(0xFFE65100),
+                lottieAssetPath: "assets/lottie/help.json",
+                onTap: () => context.push(AppRoutes.gameRules),
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: gap),
+        ButtonCard(
+          title: "Leave",
+          gradientColors: const [
+            Color.fromARGB(255, 243, 169, 169), // Soft Peach
+            Color.fromARGB(255, 243, 128, 128), // Soft Peach
+            Color.fromARGB(255, 250, 126, 126), // Soft Peach
+            Color.fromARGB(255, 245, 67, 67), // Calm Coral
+          ],
+          textColor: const Color.fromARGB(255, 245, 72, 66),
+          lottieAssetPath: "assets/lottie/close.json",
+          overlayImageUrl:
+              "https://i.pinimg.com/736x/03/52/7d/03527dc76d013498547fb1e61759dcd4.jpg",
+          onTap: () => _exitApp(context),
+        ),
+      ],
+    );
+  }
+
+  /// Your Games works for a guest too: the list is read from the player id
+  /// this device has been playing under, account or not. A guest sees the same
+  /// games with a reminder at the top that they are not linked to an account.
   Future<void> _openGames(BuildContext context) async {
-    if (!await Account.isSignedIn()) {
-      if (!context.mounted) return;
-      final bool signIn = await showAppConfirm(
-        context,
-        title: 'Sign in to view your games',
-        icon: Icons.lock_outline,
-        confirmLabel: 'Sign in',
-        cancelLabel: 'Not now',
-        message:
-            'Your games are saved to your account, so they follow you to a '
-            'new phone or a reinstall. Sign in to see them - or keep playing '
-            'as a guest without an account.',
-      );
-      if (signIn && context.mounted) await _openAccount();
-      return;
-    }
-    if (!context.mounted) return;
     context.push(AppRoutes.games);
   }
 
@@ -681,6 +614,10 @@ class ButtonCard extends StatelessWidget {
   final String? lottieAssetPath; // 🆕 Foreground Lottie animation
   final VoidCallback onTap;
 
+  /// Half a row rather than the whole width: the label and animation shrink so
+  /// two cards still read cleanly side by side.
+  final bool compact;
+
   const ButtonCard({
     super.key,
     required this.title,
@@ -689,6 +626,7 @@ class ButtonCard extends StatelessWidget {
     this.icon,
     this.overlayImageUrl,
     this.lottieAssetPath,
+    this.compact = false,
     required this.onTap,
   });
 
@@ -709,8 +647,10 @@ class ButtonCard extends StatelessWidget {
           ),
           color: Colors.transparent, // Keep transparent for gradient to show
           child: Container(
-            width: 80.w,
-            height: 11.h,
+            width: double.infinity,
+            // Clamped so a landscape phone still has a real tap target and a
+            // tall desktop window does not turn a button into a banner.
+            height: (compact ? 9.h : 11.h).clamp(64.0, 132.0).toDouble(),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(15),
               gradient: LinearGradient(
@@ -743,8 +683,16 @@ class ButtonCard extends StatelessWidget {
                     bottom: 0,
                     top: 0,
                     child: SizedBox(
-                      height: title != 'How to use' ? 11.h : 8.h,
-                      width: title != 'How to use' ? 11.h : 8.h,
+                      height: (compact
+                              ? 7.h
+                              : (title != 'How to use' ? 10.h : 8.h))
+                          .clamp(46.0, 108.0)
+                          .toDouble(),
+                      width: (compact
+                              ? 7.h
+                              : (title != 'How to use' ? 10.h : 8.h))
+                          .clamp(46.0, 108.0)
+                          .toDouble(),
                       child: Lottie.asset(lottieAssetPath!,
                           fit: BoxFit.contain, repeat: true),
                     ),
@@ -756,9 +704,11 @@ class ButtonCard extends StatelessWidget {
                     padding: const EdgeInsets.only(top: 10.0, right: 10),
                     child: Text(
                       title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 23.sp,
+                        fontSize: compact ? 16.sp : 23.sp,
                         fontWeight: FontWeight.bold,
                       ),
                       textAlign: TextAlign.right,

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:mon/models/bankpop_board.dart';
 import 'package:mon/services/player_cards.dart';
 import 'package:mon/services/deals.dart';
-import 'package:responsive_sizer/responsive_sizer.dart';
+import 'package:mon/widgets/app_metrics.dart';
 
 /// What the builder hands back once an offer has been written: the row id the
 /// caller polls, and who has to answer it.
@@ -237,12 +237,18 @@ class _TradeBuilderDialogState extends State<TradeBuilderDialog> {
             decoration: BoxDecoration(shape: BoxShape.circle, color: colour),
           ),
           const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12.sp,
-              fontWeight: FontWeight.bold,
-              color: const Color(0xFF33691E),
+          // The header shares its row with the cards below it on a narrow
+          // phone, so a long colour name shortens rather than overflows.
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12.sp,
+                fontWeight: FontWeight.bold,
+                color: const Color(0xFF33691E),
+              ),
             ),
           ),
           const SizedBox(width: 6),

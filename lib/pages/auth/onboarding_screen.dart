@@ -3,7 +3,8 @@ import 'package:go_router/go_router.dart';
 import 'package:lottie/lottie.dart';
 import 'package:mon/routes.dart';
 import 'package:mon/services/account.dart';
-import 'package:responsive_sizer/responsive_sizer.dart';
+import 'package:mon/widgets/app_content.dart';
+import 'package:mon/widgets/app_metrics.dart';
 
 /// What a new install (or a browser with no account) sees first.
 ///
@@ -51,16 +52,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     super.dispose();
   }
 
-  /// The default way in: a guest. The name/avatar dialog on the home screen
-  /// creates the local player, and no email is ever asked for.
-  Future<void> _playAsGuest() async {
-    await Account.markOnboarded();
-    if (!mounted) return;
-    context.go(AppRoutes.home);
-  }
-
-  /// The optional way in: an account, so the games are not tied to this device.
-  Future<void> _signIn() async {
+  /// The only way on: the account screen, where the player signs in, creates
+  /// an account, or chooses the guest path deliberately.
+  ///
+  /// The story used to drop a guest straight onto the home screen, which left
+  /// the account screen reachable only from a banner - so a player who wanted
+  /// an account had to find it after the fact. Both the last slide and the skip
+  /// link land here instead.
+  Future<void> _continue() async {
     await Account.markOnboarded();
     if (!mounted) return;
     // `go`, not `push`: the story is finished, and the back button should walk
@@ -82,9 +81,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFFFF8E1),
       body: SafeArea(
-        child: Column(
-          children: <Widget>[
-            const SizedBox(height: 8),
+        // The slides are a phone-shaped story: on a desktop window the copy
+        // keeps a readable measure instead of running across the screen.
+        child: AppContent(
+          maxWidth: 600,
+          child: Column(
+            children: <Widget>[
+              const SizedBox(height: 8),
             Expanded(
               child: PageView.builder(
                 controller: _controller,
@@ -157,7 +160,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 width: double.infinity,
                 height: 52,
                 child: ElevatedButton(
-                  onPressed: _isLast ? _playAsGuest : _next,
+                  onPressed: _isLast ? _continue : _next,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF689F38),
                     foregroundColor: Colors.white,
@@ -166,27 +169,29 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     ),
                   ),
                   child: Text(
-                    _isLast ? 'Start playing' : 'Next',
+                    _isLast ? 'Get started' : 'Next',
                     style:
                         TextStyle(fontSize: 17.sp, fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
             ),
-            // An account is optional, so the guest path is the button and the
-            // account is the alternative underneath it.
-            TextButton(
-              onPressed: _isLast ? _signIn : _playAsGuest,
-              child: Text(
-                _isLast ? 'Sign in or create an account' : 'Skip for now',
-                style: TextStyle(
-                  fontSize: 14.sp,
-                  color: const Color(0xFF2E7D32),
+            // The skip link is for the slides, not for the account screen: a
+            // player who skips lands on the same choice everyone else gets.
+            if (!_isLast)
+              TextButton(
+                onPressed: _continue,
+                child: Text(
+                  'Skip for now',
+                  style: TextStyle(
+                    fontSize: 14.sp,
+                    color: const Color(0xFF2E7D32),
+                  ),
                 ),
               ),
-            ),
             SizedBox(height: 2.h),
-          ],
+            ],
+          ),
         ),
       ),
     );

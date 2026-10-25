@@ -68,16 +68,35 @@ void main() {
       expect(draft.renames.length, 2);
     });
 
-    test('does not carry anything but names', () {
+    test('carries the name and every renamed space by index', () {
       final BoardDraft draft = BoardShare.decode(_document(<String, dynamic>{
-        'name': 'Cheap Land',
-        'spaces': <String, String>{'Boardwalk': 'Free Street'},
-        // A hand-written file cannot smuggle prices in: only "spaces" is read.
-        'prices': <String, int>{'Free Street': 0},
+        'name': 'My Home Town',
+        'spaces': <Map<String, dynamic>>[
+          {'index': 1, 'name': 'Gandhi Road'},
+          {'index': 3, 'name': 'Marine Drive'},
+        ],
       }));
 
-      expect(draft.renames.keys, <String>['Boardwalk']);
-      expect(draft.renames.values, <String>['Free Street']);
+      expect(draft.name, 'My Home Town');
+      expect(draft.baseId, 'usa');
+      expect(draft.renamesByIndex[1], 'Gandhi Road');
+      expect(draft.renamesByIndex[3], 'Marine Drive');
+      expect(draft.renamesByIndex.length, 2);
+    });
+
+    test('does not carry anything but index and name', () {
+      final BoardDraft draft = BoardShare.decode(_document(<String, dynamic>{
+        'name': 'Cheap Land',
+        'spaces': <Map<String, dynamic>>[
+          {'index': 3, 'name': 'Free Street'},
+          // A hand-written file cannot smuggle prices into an index entry:
+          // only "index" and "name" are read from each card.
+          {'index': 3, 'name': 'Free Street', 'price': 0},
+        ],
+      }));
+
+      expect(draft.renamesByIndex.keys, <int>{3});
+      expect(draft.renamesByIndex.values, <String>['Free Street']);
     });
 
     test('a board with no renames is still a board', () {
@@ -103,6 +122,59 @@ void main() {
       expect(BoardShare.fileName('My Home Town'), 'bankpop-my-home-town.json');
       expect(BoardShare.fileName('  Ünïcode & Co.  '), 'bankpop-n-code-co.json');
       expect(BoardShare.fileName('!!!'), 'bankpop-board.json');
+    });
+  });
+
+  group('the index format', () {
+    test('a shared board carries the index and the name of every card', () async {
+      final String text =
+          await BoardShare.encode(_board(street: 'Marine Drive'));
+      final Map<String, dynamic> doc =
+          jsonDecode(text) as Map<String, dynamic>;
+
+      expect(doc['version'], BoardShare.version);
+      final List<dynamic> spaces = doc['spaces'] as List<dynamic>;
+      expect(spaces.first, <String, dynamic>{
+        'index': 1,
+        'name': 'Mediterranean Avenue',
+      });
+      // Nothing but the card number and the editable name travels.
+      for (final dynamic entry in spaces) {
+        expect((entry as Map<String, dynamic>).keys.toSet(),
+            <String>{'index', 'name'});
+      }
+      expect(text.contains('"price"'), isFalse);
+      expect(text.contains('"rent"'), isFalse);
+      expect(text.contains('"color"'), isFalse);
+    });
+
+    test('the index ties a name to its card', () {
+      final BoardDraft draft = BoardShare.decode(jsonEncode(<String, dynamic>{
+        'format': 'bankpop-board',
+        'version': 2,
+        'name': 'Index Land',
+        'basedOn': 'usa',
+        'spaces': <Map<String, Object>>[
+          <String, Object>{'index': 3, 'name': 'Marine Drive'},
+        ],
+      }));
+
+      expect(draft.renamesByIndex[3], 'Marine Drive');
+      expect(draft.renames, isEmpty);
+    });
+
+    test('a card with no usable index is refused', () {
+      expect(
+        () => BoardShare.decode(jsonEncode(<String, dynamic>{
+          'format': 'bankpop-board',
+          'version': 2,
+          'name': 'No Index Land',
+          'spaces': <Map<String, Object>>[
+            <String, Object>{'name': 'Marine Drive'},
+          ],
+        })),
+        throwsA(isA<BoardImportFailure>()),
+      );
     });
   });
 
