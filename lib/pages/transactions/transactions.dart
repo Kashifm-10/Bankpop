@@ -97,7 +97,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
       gameId: widget.gameId,
       playerId: widget.playerId,
     );
-    _spacesFuture = PlayerCards.spaces();
+    _spacesFuture = PlayerCards.spaces(widget.gameId);
     _buildingsFuture = _fetchBuildings();
     _mortgagesFuture = _fetchMortgages();
     _houseSalesFuture = _fetchHouseSales();

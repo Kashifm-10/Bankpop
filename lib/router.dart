@@ -5,6 +5,8 @@ import 'package:mon/pages/auth/onboarding_screen.dart';
 import 'package:mon/pages/auth/set_password_screen.dart';
 import 'package:mon/pages/banker/bank_details.dart';
 import 'package:mon/pages/banker/banker_screen.dart';
+import 'package:mon/pages/board_preview_screen.dart';
+import 'package:mon/pages/create_board_screen.dart';
 import 'package:mon/pages/game_access_denied_screen.dart';
 import 'package:mon/pages/game_history_screen.dart';
 import 'package:mon/pages/game_rules_screen.dart';
@@ -16,6 +18,7 @@ import 'package:mon/pages/splash_screen.dart';
 import 'package:mon/pages/transactions/pay.dart';
 import 'package:mon/pages/transactions/transactions.dart';
 import 'package:mon/pages/verify_email_screen.dart';
+import 'package:mon/services/board_share.dart';
 import 'package:mon/pages/role.dart';
 import 'package:mon/profile.dart';
 import 'package:mon/routes.dart';
@@ -138,6 +141,22 @@ final GoRouter appRouter = GoRouter(
           retryPath: query['from'],
         );
       },
+    ),
+    GoRoute(
+      path: AppRoutes.boards,
+      builder: (BuildContext context, GoRouterState state) =>
+          const BoardPreviewScreen(),
+    ),
+    // Sign-in is checked on the screen itself rather than here: the editor
+    // explains why an account is needed and comes back to the form, which a
+    // redirect to the login screen would not do.
+    GoRoute(
+      path: AppRoutes.newBoard,
+      // A board a friend sent arrives here as the route's extra, so importing
+      // opens the same editor with its names already in place.
+      builder: (BuildContext context, GoRouterState state) => CreateBoardScreen(
+        draft: state.extra is BoardDraft ? state.extra as BoardDraft : null,
+      ),
     ),
     GoRoute(
       path: AppRoutes.profile,

@@ -26,6 +26,12 @@ class AppRoutes {
   static const String verifyEmail = '/verify';
   static const String gameDenied = '/game-denied';
 
+  /// The boards and their cards, before a game exists.
+  static const String boards = '/boards';
+
+  /// The editor for a signed-in player's own board.
+  static const String newBoard = '/boards/new';
+
   /// `/auth?return=1` - opened from a screen that stays put, so a successful
   /// sign-in pops back to it instead of replacing the whole stack.
   static const String authReturning = '/auth?return=1';

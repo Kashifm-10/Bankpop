@@ -9,6 +9,7 @@ import 'package:lottie/lottie.dart';
 import 'package:mon/models/bankpop_board.dart';
 import 'package:mon/pages/transactions/receive.dart';
 import 'package:mon/routes.dart';
+import 'package:mon/services/board_catalog.dart';
 import 'package:mon/services/card_requests.dart';
 import 'package:mon/services/deals.dart';
 import 'package:mon/services/game_session.dart';
@@ -82,6 +83,8 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
     _loadSession(); // First read, before the socket connects
     startPolling(); // Reconciliation, in case Realtime is unavailable
     _loadStartupSettings();
+    // The board this game was started on, before anything reads a card name.
+    BoardCatalog.useForGame(widget.gameId);
   }
 
   @override
@@ -95,7 +98,10 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
 
   Future<void> _loadSession() async {
     final GameSession? session = await GameSession.fetch(widget.gameId);
-    if (session != null) _applySession(session);
+    if (session != null) {
+      BoardCatalog.use(session.boardId);
+      _applySession(session);
+    }
   }
 
   void _subscribeToSession() {
@@ -719,7 +725,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
           await CardRequests.pending(widget.gameId);
       if (requests.isEmpty || !mounted) return;
 
-      final Map<int, BankpopSpace> spaces = await PlayerCards.spaces();
+      final Map<int, BankpopSpace> spaces = await PlayerCards.spaces(widget.gameId);
       final SharedPreferences prefs = await SharedPreferences.getInstance();
       final String bankerId =
           ID.isNotEmpty ? ID : (prefs.getString('playerID') ?? '');
@@ -806,7 +812,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
           await Deals.pendingFor(widget.gameId, bankId);
       if (deals.isEmpty || !mounted) return;
 
-      final Map<int, BankpopSpace> spaces = await PlayerCards.spaces();
+      final Map<int, BankpopSpace> spaces = await PlayerCards.spaces(widget.gameId);
       if (!mounted) return;
 
       for (final DealRequest deal in deals) {
@@ -994,7 +1000,6 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                 version: QrVersions.auto,
                 size: 58.w,
                 gapless: false,
-                backgroundColor: Colors.white,
                 padding: const EdgeInsets.all(10),
               ),
               Text(

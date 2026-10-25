@@ -399,7 +399,7 @@
   ],
   "cards": {
     "chanceOptions": [
-      "Advance to Go (Collect £200)",
+      "Advance to Go",
       "Advance to Victory Square",
       "Advance to Royal Avenue",
       "Advance to Platinum Heights",
@@ -412,7 +412,7 @@
       "Bank pays you dividend of £50",
       "Your building loan matures (Collect £150)",
       "You have won a competition (£25)",
-      "Go to Jail (Do not pass Go, do not collect £200)",
+      "Go to Jail (Do not pass Go, do not collect the advance)",
       "Drunk in charge - Fine £20",
       "Speeding fine - £15",
       "Street repairs - £40 per house, £115 per hotel",
@@ -423,11 +423,11 @@
       "It is your birthday! Collect £10 from each player"
     ],
     "communityChest": [
-      "Advance to Go (Collect £200)",
+      "Advance to Go",
       "Bank error in your favor - Collect £200",
       "Doctor's fee - Pay £50",
       "Get out of Jail Free",
-      "Go to Jail (Do not pass Go, do not collect £200)",
+      "Go to Jail (Do not pass Go, do not collect the advance)",
       "It is your birthday! Collect £10 from each player",
       "Grand Opera Night - Collect £50 from every player",
       "Income tax refund - Collect £20",

@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:lottie/lottie.dart';
 import 'package:mon/models/bankpop_board.dart';
 import 'package:mon/routes.dart';
+import 'package:mon/services/board_catalog.dart';
 import 'package:mon/services/building_rules.dart';
 import 'package:mon/services/card_requests.dart';
 import 'package:mon/services/deals.dart';
@@ -178,6 +179,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
     _loadSession(); // First read, before the socket connects
     startPolling(); // Reconciliation, in case Realtime is unavailable
     setAvatar();
+    // The board this game is played on, before anything reads a card name.
+    BoardCatalog.useForGame(widget.gameId);
   }
 
   @override
@@ -190,7 +193,10 @@ class _PlayersScreenState extends State<PlayersScreen> {
 
   Future<void> _loadSession() async {
     final GameSession? session = await GameSession.fetch(widget.gameId);
-    if (session != null) _applySession(session);
+    if (session != null) {
+      BoardCatalog.use(session.boardId);
+      _applySession(session);
+    }
   }
 
   /// Leaves the game because the banker removed this player.
@@ -656,7 +662,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
       final List<DealRequest> deals = await Deals.pendingFor(widget.gameId, id);
       if (deals.isEmpty || !mounted) return;
 
-      final Map<int, BankpopSpace> spaces = await PlayerCards.spaces();
+      final Map<int, BankpopSpace> spaces = await PlayerCards.spaces(widget.gameId);
       if (!mounted) return;
 
       for (final DealRequest deal in deals) {
@@ -790,7 +796,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
     if (id.isEmpty) return;
     final List<PlayerCard> myCards =
         await PlayerCards.forPlayer(gameId: widget.gameId, playerId: id);
-    final Map<int, BankpopSpace> spaces = await PlayerCards.spaces();
+    final Map<int, BankpopSpace> spaces = await PlayerCards.spaces(widget.gameId);
     final List<dynamic> roster = await Supabase.instance.client
         .from('players_test')
         .select('name, player_id')
@@ -860,7 +866,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
     final String id = playerID ?? '';
     if (id.isEmpty) return;
 
-    final Map<int, BankpopSpace> spaces = await PlayerCards.spaces();
+    final Map<int, BankpopSpace> spaces = await PlayerCards.spaces(widget.gameId);
     final bool builtInGroup = myCards.any((PlayerCard c) {
       final BankpopSpace? s = spaces[c.cardIndex];
       return s?.color == space.color && (c.houses > 0 || c.hotels > 0);
@@ -928,7 +934,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
     final String id = playerID ?? '';
     if (id.isEmpty) return;
 
-    final Map<int, BankpopSpace> spaces = await PlayerCards.spaces();
+    final Map<int, BankpopSpace> spaces = await PlayerCards.spaces(widget.gameId);
     final int unmortgageValue = card.unmortgageCost(spaces[card.cardIndex]);
     final bool confirmed = await _confirm(
       'Unmortgage ${spaces[card.cardIndex]?.name ?? "this card"}?',
@@ -976,7 +982,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
     final String id = playerID ?? '';
     if (id.isEmpty) return;
 
-    final Map<int, BankpopSpace> spaces = await PlayerCards.spaces();
+    final Map<int, BankpopSpace> spaces = await PlayerCards.spaces(widget.gameId);
     final BankpopSpace? space = spaces[card.cardIndex];
     final int refund = (space?.houseCost ?? 0) ~/ 2;
     final bool confirmed = await _confirm(
@@ -1027,7 +1033,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
     final String id = playerID ?? '';
     if (id.isEmpty) return;
 
-    final Map<int, BankpopSpace> spaces = await PlayerCards.spaces();
+    final Map<int, BankpopSpace> spaces = await PlayerCards.spaces(widget.gameId);
     final BankpopSpace? space = spaces[card.cardIndex];
     final int refund = (space?.hotelCost ?? 0) ~/ 2;
     final bool confirmed = await _confirm(
@@ -1146,7 +1152,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
       showMessage(context, 'Could not load your cards');
       return;
     }
-    final Map<int, BankpopSpace> spaces = await PlayerCards.spaces();
+    final Map<int, BankpopSpace> spaces = await PlayerCards.spaces(widget.gameId);
     if (!mounted) return;
 
     // The sheet keeps its own mutable copy so a house that has just been
@@ -1517,7 +1523,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
   }) async {
     if (_guardLifecycle()) return false;
 
-    final Map<int, BankpopSpace> spaces = await PlayerCards.spaces();
+    final Map<int, BankpopSpace> spaces = await PlayerCards.spaces(widget.gameId);
     final List<BankpopSpace> set = spaces.values
         .where((BankpopSpace s) => s.color == space.color)
         .toList();

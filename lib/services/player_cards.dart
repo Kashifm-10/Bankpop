@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import 'package:mon/models/bankpop_board.dart';
+import 'package:mon/services/board_catalog.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// One row of `player_cards`: a property that changed hands in this game.
@@ -150,27 +151,13 @@ class PlayerCards {
   static const String _table = 'player_cards';
 
   /// Board index -> space, for turning a stored `card_index` back into a name
-  /// and a colour. Loaded once per app run; an empty map if the asset is
-  /// unreadable, in which case callers fall back to "Card #n".
-  static Map<int, BankpopSpace>? _spaces;
-
-  static Future<Map<int, BankpopSpace>> spaces() async {
-    final Map<int, BankpopSpace>? cached = _spaces;
-    if (cached != null) return cached;
-    try {
-      final BankpopBoard board =
-          await BankpopBoard.loadFromAsset('assets/JSON/bankpop.json');
-      final Map<int, BankpopSpace> map = <int, BankpopSpace>{
-        for (final BankpopSpace space in board.spaces) space.index: space,
-      };
-      _spaces = map;
-      return map;
-    } catch (error) {
-      debugPrint('Could not load the board for card names: $error');
-      _spaces = const <int, BankpopSpace>{};
-      return _spaces!;
-    }
-  }
+  /// and a colour. The names come from the board the game plays on, which this
+  /// device keeps from the moment the game starts ([BoardCatalog.boardForGame]),
+  /// so the cards read correctly without asking the database again; an empty
+  /// map if the board is unreadable, in which case callers fall back to
+  /// "Card #n".
+  static Future<Map<int, BankpopSpace>> spaces(String gameId) =>
+      BoardCatalog.spacesForGame(gameId);
 
   /// Name of whoever already holds this board index in this game, or null while
   /// it is still unsold.

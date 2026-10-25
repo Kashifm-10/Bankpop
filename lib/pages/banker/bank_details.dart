@@ -5,9 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mon/routes.dart';
+import 'package:mon/services/board_catalog.dart';
 import 'package:mon/services/game_session.dart';
 import 'package:mon/widgets/app_dialog.dart';
 import 'package:mon/widgets/app_message.dart';
+import 'package:mon/widgets/country_chip.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -27,10 +29,41 @@ class _BankValueScreenState extends State<BankValueScreen> {
   /// game so the banker screen knows to offer the Give Card flow.
   bool _playWithCards = false;
 
+  /// The board this game is played on. It is chosen here, with the other
+  /// rules, because it is one of them: the board and every Chance and Community
+  /// Chest card follow it for the whole game, on every device. A signed-in
+  /// banker can also pick a board they made themselves.
+  String? _boardId;
+  String _boardLabel = '';
+
+  /// The boards on offer: the built-in countries plus this banker's own.
+  late Future<List<BoardListing>> _boardsFuture;
+
   final TextEditingController _bankValueController = TextEditingController();
   final TextEditingController _playerAmountController = TextEditingController();
   final TextEditingController _advanceAmountController =
       TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _boardsFuture = BoardCatalog.available(refresh: true);
+  }
+
+  /// Opens the editor for a board of the banker's own, then offers it here.
+  Future<void> _createBoard() async {
+    final String? created = await context.push<String>(AppRoutes.newBoard);
+    if (!mounted) return;
+    setState(() => _boardsFuture = BoardCatalog.available(refresh: true));
+    if (created != null && created.isNotEmpty) {
+      final BoardListing? listing = await BoardCatalog.listing(created);
+      if (!mounted) return;
+      setState(() {
+        _boardId = created;
+        _boardLabel = listing?.name ?? 'Your board';
+      });
+    }
+  }
 
   String generateGameId(int length) {
     const characters =
@@ -69,6 +102,11 @@ class _BankValueScreenState extends State<BankValueScreen> {
     }
     if (_selectedOption != 'ScanPay' && _selectedOption != 'InstantPay') {
       showMessage(context, 'Please select payment type');
+      return;
+    }
+    final String? boardId = _boardId;
+    if (boardId == null) {
+      showMessage(context, 'Please choose the board');
       return;
     }
 
@@ -113,6 +151,11 @@ class _BankValueScreenState extends State<BankValueScreen> {
             label: 'Play with cards',
             value: _playWithCards ? 'Yes' : 'No',
             icon: Icons.style_outlined,
+          ),
+          AppDialogPoint(
+            label: 'Board',
+            value: _boardLabel.isEmpty ? 'Board' : _boardLabel,
+            icon: Icons.grid_on,
           ),
         ],
       ),
@@ -163,6 +206,7 @@ class _BankValueScreenState extends State<BankValueScreen> {
       playWithCards: _playWithCards,
       playerValue: playerValue,
       advanceValue: advanceValue,
+      boardId: boardId,
     );
 
     await prefs.setString('name', 'banker');
@@ -173,6 +217,14 @@ class _BankValueScreenState extends State<BankValueScreen> {
     // that has not run game_sessions.sql yet, or a socket-less first frame).
     await prefs.setBool('playWithCards', _playWithCards);
     await prefs.setString('payOption', _selectedOption);
+    // This device's copy of the board, so the banker screen draws the right
+    // board even before the session row comes back from the server.
+    await prefs.setString('board_id', boardId);
+    BoardCatalog.use(boardId);
+    // The board is settled for the whole game, so this device keeps its own
+    // copy of it now: every board and card lookup in the game then reads from
+    // the phone instead of the database.
+    await BoardCatalog.cacheForGame(gameId, boardId);
 
     if (!mounted) return;
     // The setup screen is not somewhere the back button should return to once
@@ -424,6 +476,80 @@ class _BankValueScreenState extends State<BankValueScreen> {
                           ),
                         ),
                       ),
+                      // The board is a rule of the game like the payment type:
+                      // every device at the table draws the board chosen here,
+                      // and its Chance and Community Chest cards follow it.
+                      Align(
+                        alignment: Alignment.center,
+                        child: Padding(
+                          padding: const EdgeInsets.all(5.0),
+                          child: Text(
+                            'Choose the board',
+                            style: TextStyle(
+                              fontSize: 14.sp,
+                              fontWeight: FontWeight.w400,
+                              color: const Color(0xFF33691E),
+                            ),
+                          ),
+                        ),
+                      ),
+                      SizedBox(
+                        height: 44,
+                        child: FutureBuilder<List<BoardListing>>(
+                          future: _boardsFuture,
+                          builder: (context, snap) {
+                            final List<BoardListing> boards =
+                                snap.data ?? const <BoardListing>[];
+                            if (snap.connectionState ==
+                                ConnectionState.waiting) {
+                              return const Center(
+                                child: SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
+                                ),
+                              );
+                            }
+                            return ListView.separated(
+                              scrollDirection: Axis.horizontal,
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 2),
+                              itemCount: boards.length + 1,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(width: 6),
+                              itemBuilder: (BuildContext context, int index) {
+                                if (index == boards.length) {
+                                  return Center(
+                                    child: CountryChip(
+                                      label: 'Create your own',
+                                      icon: Icons.add_circle_outline,
+                                      selected: false,
+                                      onTap: _createBoard,
+                                    ),
+                                  );
+                                }
+                                final BoardListing board = boards[index];
+                                return Center(
+                                  child: CountryChip(
+                                    label: board.name,
+                                    flag: board.flag,
+                                    icon: board.isMine
+                                        ? Icons.person_outline
+                                        : null,
+                                    selected: _boardId == board.boardId,
+                                    onTap: () => setState(() {
+                                      _boardId = board.boardId;
+                                      _boardLabel = board.name;
+                                    }),
+                                  ),
+                                );
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                      SizedBox(height: 2.h),
                       // Cards game: the bank sells board properties to the players.
                       SwitchListTile(
                         contentPadding: EdgeInsets.zero,

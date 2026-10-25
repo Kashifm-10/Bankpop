@@ -225,7 +225,6 @@ class _SaleQrDialogState extends State<_SaleQrDialog> {
               version: QrVersions.auto,
               size: 55.w,
               gapless: false,
-              backgroundColor: Colors.white,
               padding: const EdgeInsets.all(8),
             ),
             SizedBox(height: 1.5.h),

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lottie/lottie.dart';
 import 'package:mon/routes.dart';
+import 'package:mon/services/board_catalog.dart';
 import 'package:mon/services/game_session.dart';
 import 'package:mon/services/player_exit.dart';
 import 'package:mon/widgets/app_dialog.dart';
@@ -156,6 +157,9 @@ class SelectRoleScreen extends StatelessWidget {
     // joined: the player is told it is paused and can come back when the
     // banker resumes it.
     final GameSession? session = await GameSession.fetch(gameId);
+    // Joining is where a player's device first learns which board this game
+    // plays on: it is read from the session row, not chosen here.
+    if (session != null) BoardCatalog.use(session.boardId);
     if (session != null && session.isEnded) {
       if (context.mounted) showMessage(context, 'That game has already ended.');
       return null;

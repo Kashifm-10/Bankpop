@@ -7,6 +7,7 @@ import 'package:lottie/lottie.dart';
 import 'package:mon/routes.dart';
 import 'package:mon/services/account.dart';
 import 'package:mon/pages/profile_edit.dart';
+import 'package:mon/services/board_catalog.dart';
 import 'package:mon/services/game_session.dart';
 import 'package:mon/services/player_exit.dart';
 import 'package:mon/services/profile_avatar.dart';
@@ -75,6 +76,9 @@ class _WelcomePageState extends State<WelcomePage> {
       final GameSession? session = await GameSession.fetch(gameId);
       if (session != null) {
         _playWithCards = session.playWithCards;
+        // The board this device is part-way through, so the board icon shows
+        // the right country even before a game screen opens.
+        BoardCatalog.use(session.boardId);
       } else {
         // A game started before game_sessions.sql keeps the switch on its bank
         // row; read it there so the board icon does not disappear.
@@ -161,6 +165,7 @@ class _WelcomePageState extends State<WelcomePage> {
       // A finished game must not pull the player back into it on launch. The
       // stored id is cleared so the home screen simply asks what to play next.
       final GameSession? session = await GameSession.fetch(gameID);
+      BoardCatalog.use(session?.boardId);
       if (session != null && session.isEnded) {
         await prefs.remove('gameID');
         if (mounted) Navigator.pop(context);
@@ -476,6 +481,19 @@ class _WelcomePageState extends State<WelcomePage> {
                           textColor: const Color(0xFFE65100),
                           lottieAssetPath: "assets/lottie/help.json",
                           onTap: () => context.push(AppRoutes.gameRules),
+                        ),
+                        const SizedBox(height: 20),
+                        ButtonCard(
+                          title: "Boards & cards",
+                          gradientColors: const [
+                            Color(0xFFE1BEE7),
+                            Color(0xFFCE93D8),
+                            Color(0xFFBA68C8),
+                            Color(0xFFAB47BC),
+                          ],
+                          textColor: const Color(0xFF4A148C),
+                          lottieAssetPath: "assets/lottie/help.json",
+                          onTap: () => context.push(AppRoutes.boards),
                         ),
                         const SizedBox(height: 20),
                         ButtonCard(

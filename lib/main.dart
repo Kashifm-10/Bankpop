@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:mon/router.dart';
 import 'package:mon/services/url_strategy.dart';
 import 'package:mon/theme.dart';
@@ -20,6 +21,14 @@ void main() async {
   // Real paths in the browser's address bar. Called before the first frame so
   // the router reads `/game/ABC/player` from the URL, not a hash fragment.
   useAppUrlStrategy();
+
+  // go_router rewrites the address bar for `go` and `pushReplacement` only:
+  // `push` is a "detour" to it, so with this off the bar kept showing `/home`
+  // while the app was already on `/start` or `/game/ABC/player`. Every screen
+  // here is a real route with its own URL that a deep link resolves, so the
+  // bar has to follow the pushed ones too - otherwise a refresh or a shared
+  // link lands on the page behind the screen the player is looking at.
+  GoRouter.optionURLReflectsImperativeAPIs = true;
 
   await Supabase.initialize(
     url: 'https://dgalohswapxuaayftwlj.supabase.co',

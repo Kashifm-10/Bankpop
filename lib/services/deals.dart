@@ -275,7 +275,8 @@ class Deals {
         return const DealOutcome.rejected('that request was already settled');
       }
 
-      final Map<int, BankpopSpace> spaces = await PlayerCards.spaces();
+      final Map<int, BankpopSpace> spaces =
+          await PlayerCards.spaces(deal.gameId);
 
       return deal.isTrade
           ? _settleTrade(supabase, deal, spaces)

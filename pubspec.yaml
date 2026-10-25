@@ -67,6 +67,8 @@ dependencies:
   # Only used by the web URL strategy (lib/services/url_strategy_web.dart).
   flutter_web_plugins:
     sdk: flutter
+  share_plus: ^12.0.2
+  file_picker: ^11.0.3
 
 
 dev_dependencies:
@@ -153,7 +155,6 @@ flutter:
     - assets/avatars/boy5.jpg
     - assets/avatars/boy6.jpg
     - assets/avatars/boy7.jpg
-    - assets/JSON/bankpop.json
   #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see

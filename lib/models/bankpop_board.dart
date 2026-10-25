@@ -1,7 +1,10 @@
 import 'dart:convert';
 
-import 'package:flutter/services.dart';
-
+/// One space on the board.
+///
+/// The app draws and charges from these numbers, so they travel with the board
+/// rather than being recomputed per screen: a custom board carries the same
+/// prices, rents and building costs as the built-in board it was copied from.
 class BankpopSpace {
   final int index;
   final String name;
@@ -43,6 +46,34 @@ class BankpopSpace {
       hotels: (map['hotels'] as num?)?.toInt(),
     );
   }
+
+  /// The same space with a different name, for a player's own board. Nothing
+  /// else can differ: the creation screen only edits names.
+  BankpopSpace renamed(String newName) => BankpopSpace(
+        index: index,
+        name: newName,
+        type: type,
+        price: price,
+        rent: rent,
+        color: color,
+        houseCost: houseCost,
+        hotelCost: hotelCost,
+        houses: houses,
+        hotels: hotels,
+      );
+
+  Map<String, dynamic> toMap() => <String, dynamic>{
+        'index': index,
+        'name': name,
+        'type': type,
+        if (price != null) 'price': price,
+        if (rent != null) 'rent': rent,
+        if (color != null) 'color': color,
+        if (houseCost != null) 'houseCost': houseCost,
+        if (hotelCost != null) 'hotelCost': hotelCost,
+        if (houses != null) 'houses': houses,
+        if (hotels != null) 'hotels': hotels,
+      };
 }
 
 class BankpopBoard {
@@ -50,27 +81,99 @@ class BankpopBoard {
   final List<String> chanceOptions;
   final List<String> communityChest;
 
+  /// Which board this is (`india`, `custom_<uuid>`, ...), the name shown above
+  /// it and its flag. Read from the database row.
+  final String boardId;
+  final String boardName;
+  final String flag;
+
   const BankpopBoard({
     required this.spaces,
     required this.chanceOptions,
     required this.communityChest,
+    this.boardId = '',
+    this.boardName = '',
+    this.flag = '',
   });
 
-  static Future<BankpopBoard> loadFromAsset(String path) async {
-    final raw = await rootBundle.loadString(path);
-    final map = jsonDecode(raw) as Map<String, dynamic>;
-    final spaces = (map['spaces'] as List)
-        .map((e) => BankpopSpace.fromMap(e as Map<String, dynamic>))
-        .toList();
-    final cards = (map['cards'] as Map?)?.cast<String, dynamic>() ?? {};
-    final chance =
-        (cards['chanceOptions'] as List?)?.cast<String>() ?? const [];
-    final chest =
-        (cards['communityChest'] as List?)?.cast<String>() ?? const [];
+  /// A row of `game_boards` (see supabase/boards.sql). The `spaces` and `cards`
+  /// columns arrive as JSON, which PostgREST hands back already decoded.
+  factory BankpopBoard.fromMap(Map<String, dynamic> map) {
+    final Object? rawSpaces = map['spaces'];
+    final List<dynamic> spaceList = rawSpaces is String
+        ? (jsonDecode(rawSpaces) as List<dynamic>)
+        : (rawSpaces as List<dynamic>? ?? const <dynamic>[]);
+    final Object? rawCards = map['cards'];
+    final Map<String, dynamic> cards = rawCards is String
+        ? (jsonDecode(rawCards) as Map<String, dynamic>)
+        : (rawCards as Map<String, dynamic>? ?? const <String, dynamic>{});
     return BankpopBoard(
-      spaces: spaces,
-      chanceOptions: chance,
-      communityChest: chest,
+      spaces: <BankpopSpace>[
+        for (final dynamic space in spaceList)
+          BankpopSpace.fromMap(space as Map<String, dynamic>),
+      ],
+      chanceOptions:
+          (cards['chanceOptions'] as List?)?.cast<String>() ?? const <String>[],
+      communityChest: (cards['communityChest'] as List?)?.cast<String>() ??
+          const <String>[],
+      boardId: map['board_id']?.toString() ?? '',
+      boardName: map['country']?.toString() ?? map['name']?.toString() ?? '',
+      flag: map['flag']?.toString() ?? '',
+    );
+  }
+
+  /// The row this board came from, so a device can keep its own copy of it
+  /// (see [BoardCatalog.boardForGame]) without going back to the database.
+  Map<String, dynamic> toMap() => <String, dynamic>{
+        'board_id': boardId,
+        'name': boardName,
+        'flag': flag,
+        'spaces': <Map<String, dynamic>>[
+          for (final BankpopSpace space in spaces) space.toMap(),
+        ],
+        'cards': <String, dynamic>{
+          'chanceOptions': chanceOptions,
+          'communityChest': communityChest,
+        },
+      };
+
+  /// The same board under another name, for a player's own board.
+  ///
+  /// Every space named in [renames] takes its new name, and the two decks are
+  /// rewritten with the same map so "Advance to ..." and "Take a trip to ..."
+  /// still point at real spaces. Nothing else is touched - the numbers are the
+  /// game's, not the player's.
+  BankpopBoard renamed({
+    required Map<String, String> renames,
+    required String name,
+    String? boardId,
+  }) {
+    final List<String> keys = renames.keys.toList()
+      ..sort((String a, String b) => b.length.compareTo(a.length));
+
+    String rewrite(String text) {
+      for (final String old in keys) {
+        text = text.replaceAll(old, '\u0000${renames[old]}\u0000');
+      }
+      return text.replaceAll('\u0000', '');
+    }
+
+    return BankpopBoard(
+      spaces: <BankpopSpace>[
+        for (final BankpopSpace space in spaces)
+          renames.containsKey(space.name)
+              ? space.renamed(renames[space.name]!)
+              : space,
+      ],
+      chanceOptions: <String>[
+        for (final String card in chanceOptions) rewrite(card),
+      ],
+      communityChest: <String>[
+        for (final String card in communityChest) rewrite(card),
+      ],
+      boardId: boardId ?? this.boardId,
+      boardName: name,
+      flag: flag,
     );
   }
 

@@ -22,6 +22,7 @@ class GameSession {
     required this.playWithCards,
     required this.playerValue,
     required this.advanceValue,
+    this.boardId = defaultBoardId,
     this.startedAt,
     this.endedAt,
   });
@@ -29,6 +30,10 @@ class GameSession {
   static const String active = 'active';
   static const String suspended = 'suspended';
   static const String ended = 'ended';
+
+  /// The board a game plays on unless it chose another one. Games started
+  /// before country boards existed have no value of their own.
+  static const String defaultBoardId = 'usa';
 
   final String gameId;
   final String bankerId;
@@ -38,6 +43,13 @@ class GameSession {
   final bool playWithCards;
   final double playerValue;
   final double advanceValue;
+
+  /// Which board this game plays on (`india`, `usa`, `custom_<uuid>`, ...).
+  /// The banker picks it when the game is created - a built-in country or one
+  /// of their own - and every device reads it from here so the whole table
+  /// draws the same board and the same cards.
+  final String boardId;
+
   final DateTime? startedAt;
   final DateTime? endedAt;
 
@@ -76,6 +88,7 @@ class GameSession {
         playWithCards: playWithCards,
         playerValue: playerValue,
         advanceValue: advanceValue,
+        boardId: boardId,
         startedAt: startedAt,
         endedAt: endedAt ?? this.endedAt,
       );
@@ -92,6 +105,9 @@ class GameSession {
       playWithCards: row['play_with_cards'] == true,
       playerValue: (row['player_value'] as num?)?.toDouble() ?? 0,
       advanceValue: (row['advance_value'] as num?)?.toDouble() ?? 0,
+      // A game started before board selection existed has no board_id; it was
+      // played on the original board.
+      boardId: row['board_id']?.toString() ?? defaultBoardId,
       startedAt: _parseDate(row['started_at']),
       endedAt: _parseDate(row['ended_at']),
     );
@@ -116,6 +132,7 @@ class GameSession {
     required bool playWithCards,
     required double playerValue,
     required double advanceValue,
+    required String boardId,
   }) async {
     final Map<String, dynamic> row = <String, dynamic>{
       'game_id': gameId,
@@ -126,22 +143,52 @@ class GameSession {
       'play_with_cards': playWithCards,
       'player_value': playerValue,
       'advance_value': advanceValue,
+      'board_id': boardId,
       'started_at': DateTime.now().toUtc().toIso8601String(),
       'updated_at': DateTime.now().toUtc().toIso8601String(),
     };
     try {
-      final dynamic saved = await Supabase.instance.client
-          .from('game_sessions')
-          .insert(row)
-          .select()
-          .maybeSingle();
+      final dynamic saved = await _insert(row);
       if (saved is Map<String, dynamic>) return fromRow(saved);
       return fromRow(row);
+    } on PostgrestException catch (error) {
+      // A project that has not run supabase/game_board_choice.sql yet has no
+      // board_id column. Nothing else about the game depends on it, so the row
+      // is written without it rather than losing the whole session (and with
+      // it the payment mode, the stake and the card switch).
+      if (!_boardColumnMissing(error)) {
+        debugPrint('Could not create the game session: $error');
+        return null;
+      }
+      final Map<String, dynamic> withoutBoard =
+          Map<String, dynamic>.from(row)..remove('board_id');
+      try {
+        final dynamic saved = await _insert(withoutBoard);
+        if (saved is Map<String, dynamic>) return fromRow(saved);
+        return fromRow(withoutBoard);
+      } catch (retryError) {
+        debugPrint('Could not create the game session: $retryError');
+        return null;
+      }
     } catch (error) {
       debugPrint('Could not create the game session: $error');
       return null;
     }
   }
+
+  static Future<dynamic> _insert(Map<String, dynamic> row) =>
+      Supabase.instance.client
+          .from('game_sessions')
+          .insert(row)
+          .select()
+          .maybeSingle();
+
+  /// 42703 is "undefined column"; PGRST204 is the same fact reported from a
+  /// stale PostgREST schema cache.
+  static bool _boardColumnMissing(PostgrestException error) =>
+      error.code == '42703' ||
+      error.code == 'PGRST204' ||
+      error.message.contains('board_id');
 
   /// The session for [gameId], or null when there is none (old game, or a
   /// project without game_sessions.sql).

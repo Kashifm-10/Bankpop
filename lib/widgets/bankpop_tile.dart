@@ -21,6 +21,12 @@ class BankpopTile extends StatelessWidget {
   /// True if the card is mortgaged.
   final bool mortgaged;
 
+  /// The printable board: the card's name is written inside its colour block,
+  /// which is the one thing the on-screen board does not do (there it is a thin
+  /// colour strip). The block is made thicker to hold the name, and everything
+  /// else - colours, artwork, the ring - stays as it is on the screen.
+  final bool printNames;
+
   const BankpopTile({
     super.key,
     required this.space,
@@ -32,6 +38,7 @@ class BankpopTile extends StatelessWidget {
     this.houses = 0,
     this.hotels = 0,
     this.mortgaged = false,
+    this.printNames = false,
   });
 
   @override
@@ -206,21 +213,57 @@ class BankpopTile extends StatelessWidget {
         border = const Border();
     }
 
+    // On screen the strip is a 14px band that only ever carries buildings. On
+    // paper it also has to hold the name, so it takes a share of the tile.
+    final double thickness = printNames
+        ? (isHorizontal
+                ? (height * 0.30).clamp(18.0, 46.0)
+                : (width * 0.30).clamp(18.0, 46.0))
+            .toDouble()
+        : 14;
+
     if (isHorizontal) {
       return Container(
-        height: 14,
+        height: thickness,
         width: double.infinity,
         decoration: BoxDecoration(color: color, border: border),
-        child: _stripMarks(horizontal: true),
+        child: printNames ? _stripName() : _stripMarks(horizontal: true),
       );
     } else {
       return Container(
-        width: 14,
+        width: thickness,
         height: double.infinity,
         decoration: BoxDecoration(color: color, border: border),
-        child: _stripMarks(horizontal: false),
+        child: printNames ? _stripName() : _stripMarks(horizontal: false),
       );
     }
+  }
+
+  /// The card's name, written along the colour block so it reads the same way
+  /// the rest of the board does.
+  Widget _stripName() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 1.5, vertical: 1.5),
+      child: RotatedBox(
+        quarterTurns: _quarterTurns(side),
+        child: Center(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              space.name,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              style: const TextStyle(
+                fontSize: 11,
+                height: 1.05,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget? _stripMarks({required bool horizontal}) {
