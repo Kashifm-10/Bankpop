@@ -1,11 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:mon/models/bankpop_board.dart';
+import 'package:mon/services/player_cards.dart';
 import 'package:mon/widgets/bankpop_deck_sheet.dart';
 import 'package:mon/widgets/bankpop_space_card.dart';
 import 'package:mon/widgets/bankpop_tile.dart';
+import 'package:mon/widgets/card_owner_badge.dart';
 
 class BankpopBoardPopup extends StatefulWidget {
-  const BankpopBoardPopup({super.key});
+  final bool isCardMode;
+  final String gameId;
+
+  const BankpopBoardPopup({
+    super.key,
+    this.isCardMode = false,
+    this.gameId = '',
+  });
 
   @override
   State<BankpopBoardPopup> createState() => _BankpopBoardPopupState();
@@ -13,11 +22,13 @@ class BankpopBoardPopup extends StatefulWidget {
 
 class _BankpopBoardPopupState extends State<BankpopBoardPopup> {
   late Future<BankpopBoard> _future;
+  late Future<Map<int, CardOwner>> _owners;
 
   @override
   void initState() {
     super.initState();
     _future = BankpopBoard.loadFromAsset('assets/JSON/bankpop.json');
+    _owners = PlayerCards.owners(widget.gameId);
   }
 
   @override
@@ -42,7 +53,20 @@ class _BankpopBoardPopupState extends State<BankpopBoardPopup> {
               return Center(
                   child: Text('Could not load board: ${snap.error}'));
             }
-            return _Board(board: snap.data!, size: size);
+            return FutureBuilder<Map<int, CardOwner>>(
+              future: _owners,
+              builder: (context, ownersSnap) {
+                if (ownersSnap.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                return _Board(
+                  board: snap.data!,
+                  size: size,
+                  isCardMode: widget.isCardMode,
+                  owners: ownersSnap.data ?? const <int, CardOwner>{},
+                );
+              },
+            );
           },
         ),
       ),
@@ -53,12 +77,19 @@ class _BankpopBoardPopupState extends State<BankpopBoardPopup> {
 class _Board extends StatelessWidget {
   final BankpopBoard board;
   final double size;
+  final bool isCardMode;
+  final Map<int, CardOwner> owners;
 
-  const _Board({required this.board, required this.size});
+  const _Board({
+    required this.board,
+    required this.size,
+    required this.isCardMode,
+    required this.owners,
+  });
 
   static const int _cornerFlex = 14;
   static const int _tileFlex = 10;
-  static const int _middleFlex = 90; 
+  static const int _middleFlex = 90;
 
   BankpopSpace? _spaceAt(int index) {
     for (final s in board.spaces) {
@@ -68,23 +99,15 @@ class _Board extends StatelessWidget {
   }
 
   @override
-  @override
   Widget build(BuildContext context) {
     final go = _spaceAt(0);
     final jail = _spaceAt(10);
     final freeParking = _spaceAt(20);
     final goToJail = _spaceAt(30);
 
-    // Bottom goes right to left (9 down to 1)
     final bottomTiles = [for (var i = 9; i >= 1; i--) _spaceAt(i)];
-    
-    // LEFT SIDE FIX: Goes top to bottom (19 down to 11)
     final leftTiles = [for (var i = 19; i >= 11; i--) _spaceAt(i)];
-    
-    // Top goes left to right (21 up to 29)
     final topTiles = [for (var i = 21; i <= 29; i++) _spaceAt(i)];
-    
-    // Right goes top to bottom (31 up to 39)
     final rightTiles = [for (var i = 31; i <= 39; i++) _spaceAt(i)];
 
     return Container(
@@ -92,15 +115,12 @@ class _Board extends StatelessWidget {
       height: size,
       decoration: BoxDecoration(
         color: const Color(0xFFF4E0BF),
-        // Removed the outer bottom and right borders
-        borderRadius: BorderRadius.circular(6), // Added rounded corners
+        borderRadius: BorderRadius.circular(6),
       ),
-      // ClipRRect ensures the square tiles don't bleed out of the rounded board
       child: ClipRRect(
         borderRadius: BorderRadius.circular(6),
         child: Column(
           children: [
-            // ── TOP ROW ──
             Expanded(
               flex: _cornerFlex,
               child: Row(
@@ -112,12 +132,10 @@ class _Board extends StatelessWidget {
                 ],
               ),
             ),
-            // ── MIDDLE ──
             Expanded(
               flex: _middleFlex,
               child: Row(
                 children: [
-                  // LEFT COLUMN
                   Expanded(
                     flex: _cornerFlex,
                     child: Column(
@@ -127,12 +145,10 @@ class _Board extends StatelessWidget {
                       ],
                     ),
                   ),
-                  // CENTER LOGO AREA
                   Expanded(
                     flex: _middleFlex,
                     child: _interior(),
                   ),
-                  // RIGHT COLUMN
                   Expanded(
                     flex: _cornerFlex,
                     child: Column(
@@ -145,7 +161,6 @@ class _Board extends StatelessWidget {
                 ],
               ),
             ),
-            // ── BOTTOM ROW ──
             Expanded(
               flex: _cornerFlex,
               child: Row(
@@ -164,8 +179,8 @@ class _Board extends StatelessWidget {
   }
 
   Widget _flexTile(
-    BuildContext context, 
-    BankpopSpace? space, 
+    BuildContext context,
+    BankpopSpace? space,
     {required BoardSide side, required int flex}
   ) {
     return Expanded(
@@ -180,6 +195,10 @@ class _Board extends StatelessWidget {
             side: side,
             width: constraints.maxWidth,
             height: constraints.maxHeight,
+            ownerName: owners[space.index]?.name,
+            houses: owners[space.index]?.houses ?? 0,
+            hotels: owners[space.index]?.hotels ?? 0,
+            mortgaged: owners[space.index]?.mortgaged ?? false,
             onTap: () => _onTap(context, space),
           );
         },
@@ -200,6 +219,21 @@ class _Board extends StatelessWidget {
       showBankpopSpecialInfo(context, space.name);
       return;
     }
+    final CardOwner? owner = owners[space.index];
+    if (owner != null) {
+      showBankpopSpaceCard(
+        context,
+        space,
+        actionWidget: CardOwnerBadge(owner: owner),
+        houses: owner.houses,
+        hotels: owner.hotels,
+      );
+      return;
+    }
+    if (isCardMode) {
+      Navigator.of(context).pop(space);
+      return;
+    }
     showBankpopSpaceCard(context, space);
   }
 
@@ -207,7 +241,6 @@ class _Board extends StatelessWidget {
     return Container(
       decoration: const BoxDecoration(
         color: Color(0xFFF4E0BF),
-        // The center board area draws its own Top and Left border to fit the grid
         border: Border(
           top: BorderSide(color: Colors.black, width: 1.0),
           left: BorderSide(color: Colors.black, width: 1.0),
@@ -215,7 +248,7 @@ class _Board extends StatelessWidget {
       ),
       child: Image.asset(
         'assets/images/play_icon.jpg',
-        fit: BoxFit.cover, 
+        fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) {
           return const SizedBox.shrink();
         },

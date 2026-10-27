@@ -6,6 +6,7 @@ import 'package:lottie/lottie.dart';
 import 'package:mon/pages/banker/bank_details.dart';
 import 'package:mon/pages/player/player_details.dart';
 import 'package:mon/pages/player/player_screen.dart';
+import 'package:mon/widgets/app_message.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -171,9 +172,7 @@ class SelectRoleScreen extends StatelessWidget {
 
 // Extracted method to show snack bar for invalid Game ID
   void _showInvalidGameIdSnackBar(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Invalid Game ID')),
-    );
+    showMessage(context, 'Invalid Game ID');
   }
 
 // Refactored to avoid BuildContext across async operations

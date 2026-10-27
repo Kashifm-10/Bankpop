@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 import 'package:mon/pages/banker/banker_screen.dart';
+import 'package:mon/widgets/app_message.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -18,6 +19,10 @@ class BankValueScreen extends StatefulWidget {
 class _BankValueScreenState extends State<BankValueScreen> {
   bool _isLoading = false;
   String _selectedOption = '';
+
+  /// Cards game: the bank sells board properties to the players. Saved with the
+  /// game so the banker screen knows to offer the Give Card flow.
+  bool _playWithCards = false;
 
   final TextEditingController _bankValueController = TextEditingController();
   final TextEditingController _playerAmountController = TextEditingController();
@@ -45,9 +50,7 @@ class _BankValueScreenState extends State<BankValueScreen> {
     if (bankValueText.isEmpty ||
         playerAmountText.isEmpty ||
         advanceAmountText.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill all')),
-      );
+      showMessage(context, 'Please fill all');
       return;
     }
     setState(() {
@@ -57,9 +60,7 @@ class _BankValueScreenState extends State<BankValueScreen> {
     final playerValue = double.tryParse(_playerAmountController.text.trim());
     final advanceValue = double.parse(_advanceAmountController.text.trim());
     if (bankValue == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid bank value')),
-      );
+      showMessage(context, 'Invalid bank value');
       return;
     }
 
@@ -71,18 +72,54 @@ class _BankValueScreenState extends State<BankValueScreen> {
     await prefs.setDouble('playerValue', playerValue!);
     await prefs.setDouble('advance', advanceValue);
     String? playerID = prefs.getString('playerID');
-    await Supabase.instance.client.from('players_test').insert({
+
+    // Everything a later screen (or a second banker device) needs to run
+    // this game lives on the bank row: the cards switch, the per-player
+    // stake, and the round advance. prefs keeps a local copy for speed, but
+    // the row is the source of truth.
+    final Map<String, dynamic> bankRow = <String, dynamic>{
       'game_id': gameId,
       'role': role,
       'name': playerName,
       'wallet': bankValue,
       'player_id': playerID,
-      'SP/IP': _selectedOption
-    });
+      'SP/IP': _selectedOption,
+      'play_with_cards': _playWithCards,
+      'player_value': playerValue,
+      'advance_value': advanceValue,
+    };
+    try {
+      await Supabase.instance.client.from('players_test').insert(bankRow);
+    } on PostgrestException catch (error) {
+      // The three optional columns need their SQL files (cards_mode.sql
+      // and shared_game_state.sql). A project that has not run them can
+      // still start a game; the affected features fall back to local
+      // prefs instead of failing.
+      final String message = error.message;
+      bool removed = false;
+      if (message.contains('play_with_cards')) {
+        bankRow.remove('play_with_cards');
+        removed = true;
+      }
+      if (message.contains('player_value')) {
+        bankRow.remove('player_value');
+        removed = true;
+      }
+      if (message.contains('advance_value')) {
+        bankRow.remove('advance_value');
+        removed = true;
+      }
+      if (!removed) rethrow;
+      await Supabase.instance.client.from('players_test').insert(bankRow);
+    }
     await prefs.setString('name', 'banker');
     await prefs.setString('role', 'banker');
     await prefs.setString('display_name', 'Bank');
     await prefs.setString('gameID', gameId);
+    // play_with_cards travels on the bank row (players_test), not in prefs:
+    // the switch is a property of the game, shared with every device.
+    // playerValue / advance stay in prefs as a local cache; the banker
+    // screens read them from the row whenever it can be read.
 
     // Proceed to next screen
     // ignore: use_build_context_synchronously
@@ -138,11 +175,19 @@ class _BankValueScreenState extends State<BankValueScreen> {
               end: Alignment.bottomRight,
             ),
           ),
-          child: Padding(
-            padding: EdgeInsets.all(4.w),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
+          // The form grew by the cards switch; a short screen (or a large text
+          // scale) would otherwise overflow with no way to reach Start Game.
+          // Centring is kept while the content still fits.
+          child: LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) =>
+                SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Padding(
+                  padding: EdgeInsets.all(4.w),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
                 Padding(
                   padding: const EdgeInsets.only(right: 15.0),
                   child: SizedBox(
@@ -331,7 +376,34 @@ class _BankValueScreenState extends State<BankValueScreen> {
                     ),
                   ),
                 ),
-                SizedBox(height: 4.h),
+                // Cards game: the bank sells board properties to the players.
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: Text(
+                    'Play with Cards',
+                    style: TextStyle(
+                      fontSize: 15.sp,
+                      fontWeight: FontWeight.bold,
+                      color: const Color(0xFF33691E),
+                    ),
+                  ),
+                  subtitle: Text(
+                    'Enable so players can buy properties from the bank',
+                    style: TextStyle(
+                      fontSize: 12.sp,
+                      color: Colors.black54,
+                    ),
+                  ),
+                  value: _playWithCards,
+                  activeThumbColor: const Color(0xFF689F38),
+                  onChanged: (bool value) {
+                    setState(() {
+                      _playWithCards = value;
+                    });
+                  },
+                ),
+                SizedBox(height: 2.h),
                 SizedBox(
                   width: 50.w,
                   height: 6.h,
@@ -341,10 +413,7 @@ class _BankValueScreenState extends State<BankValueScreen> {
                           _selectedOption == 'ScanPay') {
                         _startGame();
                       } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                              content: Text('Please select payment type')),
-                        );
+                        showMessage(context, 'Please select payment type');
                       }
                     },
                     style: ElevatedButton.styleFrom(
@@ -370,7 +439,10 @@ class _BankValueScreenState extends State<BankValueScreen> {
                         : Text('Start Game', style: TextStyle(fontSize: 18.sp)),
                   ),
                 ),
-              ],
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
         ),

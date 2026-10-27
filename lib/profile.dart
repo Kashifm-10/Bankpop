@@ -3,6 +3,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:mon/pages/home.dart';
 import 'package:mon/pages/profile_edit.dart';
+import 'package:mon/widgets/app_message.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -82,10 +83,8 @@ class _ProfilePageState extends State<ProfilePage> {
 
     if (await canLaunchUrl(emailUri)) {
       await launchUrl(emailUri);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Unable to open email app.")),
-      );
+    } else if (context.mounted) {
+      showMessage(context, 'Unable to open email app.');
     }
   }
 
@@ -578,10 +577,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   subtitle: Text(_appVersion),
                   trailing: TextButton(
                     onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                            content: Text("Checking for updates...")),
-                      );
+                      showMessage(context, 'Checking for updates...');
                     },
                     style: TextButton.styleFrom(
                       backgroundColor: const Color(0xFF8BC34A),

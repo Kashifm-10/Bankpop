@@ -5,10 +5,17 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:lottie/lottie.dart';
+import 'package:mon/models/bankpop_board.dart';
 import 'package:mon/pages/home.dart';
 import 'package:mon/pages/transactions/receive.dart';
+import 'package:mon/services/card_requests.dart';
+import 'package:mon/services/deals.dart';
+import 'package:mon/services/player_cards.dart';
 import 'package:mon/services/wallet_transfer.dart';
 import 'package:mon/pages/transactions/transactions.dart';
+import 'package:mon/widgets/app_message.dart';
+import 'package:mon/widgets/bankpop_board_popup.dart';
+import 'package:mon/widgets/give_card_flow.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -34,7 +41,21 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
   String payOption = 'InstantPay';
   String ID = '';
   bool _isFetching = false; // One fetch in flight at a time
+  bool _isProcessingCardRequest = false; // A building dialog is on screen
   bool? _isAlsoPlayer; // Cached: does this device also hold a player row?
+
+  /// Cards game, read from the bank row of this game. The banker writes it
+  /// once at game start; every device reads it back from the same row.
+  bool _playWithCards = false;
+
+  /// Stake and round advance, read from the bank row. The device that
+  /// started the game typed them, but a second banker device (or this one
+  /// after prefs were cleared) has to be able to read them back.
+  ///
+  /// Null means "not yet known". The prefs copies are consulted as a
+  /// fallback only while the columns are missing from the row.
+  double? _playerValue;
+  double? _advanceValue;
   StreamSubscription<List<Map<String, dynamic>>>? _rosterUpdates;
   StreamSubscription<List<Map<String, dynamic>>>? _requestUpdates;
 
@@ -46,6 +67,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
     _subscribeToRoster(); // Live roster and bank header
     _subscribeToRequests(); // Live join requests
     startPolling(); // Reconciliation, in case Realtime is unavailable
+    _loadStartupSettings();
   }
 
   @override
@@ -114,8 +136,12 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
 
       _applyGameRows((response as List<dynamic>).cast<Map<String, dynamic>>());
 
-      // Check for new requests
+      // Check for new requests. Buildings are handled alongside them, but not
+      // awaited: its approval dialog can sit open for a while, and the roster
+      // has to keep updating while it does.
       await checkForRequests();
+      unawaited(_checkCardRequests());
+      unawaited(_checkDeals());
     } catch (e) {
       debugPrint('Error fetching players: $e');
     } finally {
@@ -154,20 +180,52 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
       }
     }
     if (bankRow == null) return;
+    // A trade that touches a mortgaged card owes the bank 10% interest, and
+    // only this id can route that payment.
+    final String bankPlayerId = bankRow['player_id']?.toString() ?? '';
+    if (bankPlayerId.isNotEmpty) Deals.rememberBankId(bankPlayerId);
 
     final double bankWallet =
         double.parse((bankRow['wallet'] as num).toStringAsFixed(2));
     final String bankPayOption = (bankRow['SP/IP'] as String?) ?? payOption;
+    // play_with_cards lives on the bank row and is the only source of truth.
+    // A project where cards_mode.sql has not been run reports false, which
+    // hides the card buttons.
+    final bool bankCardsMode = bankRow['play_with_cards'] == true;
+
+    // The stake and advance are per-game, not per-device. Read them from the
+    // row whenever it carries them; the prefs copies are a fallback for a
+    // project that has not run shared_game_state.sql yet.
+    double? nextPlayerValue = _playerValue;
+    if (bankRow['player_value'] is num) {
+      nextPlayerValue = (bankRow['player_value'] as num).toDouble();
+    }
+    double? nextAdvanceValue = _advanceValue;
+    if (bankRow['advance_value'] is num) {
+      nextAdvanceValue = (bankRow['advance_value'] as num).toDouble();
+    }
+
     // Only rebuild when the bank state actually moved.
-    if (bankWallet != value || bankPayOption != payOption) {
+    if (bankWallet != value ||
+        bankPayOption != payOption ||
+        bankCardsMode != _playWithCards ||
+        nextPlayerValue != _playerValue ||
+        nextAdvanceValue != _advanceValue) {
       setState(() {
         value = bankWallet;
         payOption = bankPayOption;
+        _playWithCards = bankCardsMode;
+        _playerValue = nextPlayerValue;
+        _advanceValue = nextAdvanceValue;
       });
     }
   }
 
   bool _isProcessingRequest = false; // Add this to your state class
+
+  /// True while a mortgage / unmortgage / sale request is being approved or
+  /// declined, so the reconciler cannot open the same dialog twice.
+  bool _isProcessingDeal = false;
 
   Future<void> checkForRequests() async {
     if (_isProcessingRequest) return; // Prevent concurrent calls
@@ -267,14 +325,16 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
               ),
               TextButton(
                 onPressed: () async {
-                  SharedPreferences prefs =
-                      await SharedPreferences.getInstance();
-
-                  final double? playerValue =
-                      prefs.getDouble('playerValue');
-
-                  if (playerValue == null) {
+                  // The stake is a property of the game, read from the bank
+                  // row. prefs is only a fallback while the row cannot carry
+                  // it (project without shared_game_state.sql).
+                  final double? stakeAmount = _playerValue;
+                  if (stakeAmount == null) {
                     Navigator.of(context).pop();
+                    if (mounted) {
+                      showMessage(this.context,
+                          'Could not read the player stake - try again');
+                    }
                     return;
                   }
 
@@ -284,7 +344,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                     gameId: widget.gameId,
                     playerId: '${request['player_id']}',
                     playerName: '${request['name']}',
-                    amount: playerValue,
+                    amount: stakeAmount,
                     paymentOption: payOption,
                     requestId: '${request['id']}',
                   );
@@ -296,12 +356,9 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                       ID = stake.bankerPlayerId ?? ID;
                     });
                   } else if (mounted) {
-                    ScaffoldMessenger.of(this.context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                            'Could not accept ${request['name']} - try again'),
-                      ),
-                    );
+                    showMessage(
+                        this.context,
+                        'Could not accept ${request['name']} - try again');
                   }
 
                   Navigator.of(context).pop();
@@ -318,6 +375,278 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
         break; // stop showing dialogs after accepting one
       }
     }
+  }
+
+  /// Seeds the screen's local fallbacks before the first bank row arrives.
+  ///
+  /// The cards switch is not read here any more: it is written on the bank row
+  /// at game start and read back by _applyGameRows, which runs on the same
+  /// first tick. [ID] and the two amounts are seeded from prefs only so the
+  /// screen has something to show while the row is in flight, or on a project
+  /// where the row cannot carry them. The row overwrites them the moment it
+  /// lands.
+  Future<void> _loadStartupSettings() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String ownId = prefs.getString('playerID') ?? '';
+    final double? stake = prefs.getDouble('playerValue');
+    final double? advance = prefs.getDouble('advance');
+    if (!mounted) return;
+    if (ownId == ID &&
+        (stake == null || stake == _playerValue) &&
+        (advance == null || advance == _advanceValue)) {
+      return;
+    }
+    setState(() {
+      if (ownId.isNotEmpty) ID = ownId;
+      _playerValue ??= stake;
+      _advanceValue ??= advance;
+    });
+  }
+
+  /// Houses and hotels the players have asked for. Each request is a yes/no for
+  /// the banker: approving charges the player and puts the building up together,
+  /// declining charges nothing.
+  Future<void> _checkCardRequests() async {
+    if (_isProcessingCardRequest) return;
+    _isProcessingCardRequest = true;
+
+    try {
+      final List<CardRequest> requests =
+          await CardRequests.pending(widget.gameId);
+      if (requests.isEmpty || !mounted) return;
+
+      final Map<int, BankpopSpace> spaces = await PlayerCards.spaces();
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      final String bankerId =
+          ID.isNotEmpty ? ID : (prefs.getString('playerID') ?? '');
+      if (!mounted) return;
+
+      for (final CardRequest request in requests) {
+        final BankpopSpace? space = spaces[request.cardIndex];
+        final String cardName = space?.name ?? 'Card #${request.cardIndex}';
+        final bool? approve = await showDialog<bool>(
+          context: context,
+          // A pending request needs an answer: dismissing would only make the
+          // same dialog come back on the next poll.
+          barrierDismissible: false,
+          builder: (BuildContext dialogContext) => AlertDialog(
+            backgroundColor: const Color(0xFFFFF8E1),
+            title: const Text('Building request'),
+            content: Text(
+              '${request.playerName} wants to buy a ${request.kind} on '
+              '$cardName for \u00a3${request.amount.toStringAsFixed(0)}.',
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Decline'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('Approve'),
+              ),
+            ],
+          ),
+        );
+        if (!mounted) return;
+        // Put aside: it stays pending and comes back with the next poll.
+        if (approve == null) break;
+
+        if (approve) {
+          final BuildingOutcome outcome =
+              await CardRequests.approve(request, bankerId: bankerId);
+          if (!mounted) return;
+          showMessage(
+            context,
+            outcome.ok
+                ? '${request.playerName} now has a ${request.kind} on '
+                    '$cardName'
+                : 'Could not approve: ${outcome.error}',
+            title: outcome.ok ? 'Built' : 'Could not approve',
+          );
+          // The bank was just paid, so the header should not wait for the tick.
+          if (outcome.ok) fetchPlayers();
+        } else {
+          await CardRequests.decline(request);
+          if (!mounted) return;
+          showMessage(context, 'Declined ${request.playerName}\'s ${request.kind}',
+              title: 'Declined');
+        }
+        // One per tick keeps the dialogs from stacking.
+        break;
+      }
+    } catch (error) {
+      debugPrint('Could not check building requests: $error');
+    } finally {
+      _isProcessingCardRequest = false;
+    }
+  }
+
+  /// Mortgages, unmortgages and building sales: the player asks, the bank
+  /// settles. Reads the queue on every reconciliation tick and shows one
+  /// approve/decline dialog per request so a stack of pending deals is worked
+  /// through one at a time.
+  Future<void> _checkDeals() async {
+    if (_isProcessingDeal) return;
+    _isProcessingDeal = true;
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      final String bankId =
+          ID.isNotEmpty ? ID : (prefs.getString('playerID') ?? '');
+      if (bankId.isEmpty) return;
+
+      final List<DealRequest> deals =
+          await Deals.pendingFor(widget.gameId, bankId);
+      if (deals.isEmpty || !mounted) return;
+
+      final Map<int, BankpopSpace> spaces = await PlayerCards.spaces();
+      if (!mounted) return;
+
+      for (final DealRequest deal in deals) {
+        // Trades go to other players, not the bank; the banker only settles
+        // mortgage / unmortgage / sell requests.
+        if (deal.isTrade) continue;
+
+        final bool? approve = await _showDealApproval(deal, spaces);
+        if (!mounted) return;
+        if (approve == null) break;
+
+        if (approve) {
+          final DealOutcome outcome = await Deals.approve(deal);
+          if (!mounted) return;
+          showMessage(
+            context,
+            outcome.ok
+                ? '${deal.fromName}\'s ${deal.label} was settled'
+                : 'Could not settle: ${outcome.error}',
+            title: outcome.ok ? 'Settled' : 'Not settled',
+          );
+          if (outcome.ok) fetchPlayers();
+        } else {
+          await Deals.decline(deal.id);
+          if (!mounted) return;
+          showMessage(
+            context,
+            'Declined ${deal.fromName}\'s ${deal.label}',
+            title: 'Declined',
+          );
+        }
+        break; // one deal per tick keeps the dialogs from stacking
+      }
+    } catch (error) {
+      debugPrint('Could not check deals: $error');
+    } finally {
+      _isProcessingDeal = false;
+    }
+  }
+
+  Future<bool?> _showDealApproval(
+    DealRequest deal,
+    Map<int, BankpopSpace> spaces,
+  ) async {
+    final String cards = deal.cards
+        .map((int i) => spaces[i]?.name ?? 'Card #$i')
+        .join(', ');
+    String? autoClosed;
+    Timer? poll;
+    final bool? result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) {
+        poll = Timer.periodic(const Duration(seconds: 2), (Timer t) async {
+          final String? status = await Deals.statusOf(deal.id);
+          if (!dialogContext.mounted) { t.cancel(); return; }
+          if (status == null || status == 'pending') return;
+          t.cancel();
+          autoClosed = status;
+          Navigator.of(dialogContext).pop(null);
+        });
+        return AlertDialog(
+          backgroundColor: const Color(0xFFFFF8E1),
+          title: Text('${deal.fromName} wants to ${deal.label}'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                if (cards.isNotEmpty) Text(cards),
+                if (deal.kind == DealKind.mortgage)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: Text(
+                      'The bank pays half the printed price.',
+                      style: TextStyle(color: Colors.black54, fontSize: 12),
+                    ),
+                  ),
+                if (deal.kind == DealKind.unmortgage)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: Text(
+                      'The player pays mortgage value plus 10% interest.',
+                      style: TextStyle(color: Colors.black54, fontSize: 12),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () {
+                poll?.cancel();
+                Navigator.of(dialogContext).pop(false);
+              },
+              child: const Text('Decline'),
+            ),
+            TextButton(
+              onPressed: () {
+                poll?.cancel();
+                Navigator.of(dialogContext).pop(true);
+              },
+              child: const Text('Approve'),
+            ),
+          ],
+        );
+      },
+    );
+    poll?.cancel();
+    if (autoClosed != null && mounted) {
+      await showMessage(
+        context,
+        autoClosed == 'cancelled'
+            ? '${deal.fromName} cancelled the request.'
+            : 'The request was already settled.',
+        title: autoClosed == 'cancelled' ? 'Cancelled' : 'Already settled',
+      );
+      return null;
+    }
+    return result;
+  }
+
+  /// The board as a reference, opened from the app bar: an owned tile carries
+  /// its owner's name, and its deed carries the owner in place of any action.
+  void _showBoard() {
+    showDialog<void>(
+      context: context,
+      builder: (_) => BankpopBoardPopup(gameId: widget.gameId),
+    );
+  }
+
+  /// Board in cards mode, then a deed with a sell action on it.
+  Future<void> _openGiveCardFlow() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    // The bank row's player_id, which is what a card QR has to pay.
+    final String bankerId = prefs.getString('playerID') ?? ID;
+    if (!mounted) return;
+    if (bankerId.isEmpty) {
+      showMessage(context, 'This device has no player id');
+      return;
+    }
+    await showGiveCardFlow(
+      context: context,
+      gameId: widget.gameId,
+      payOption: payOption,
+      bankerId: bankerId,
+    );
   }
 
   void _showQRDialog(BuildContext context) {
@@ -1043,8 +1372,17 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                     final prefs = await SharedPreferences.getInstance();
                     final payerPlayerID =
                         prefs.getString('playerID') ?? 'UnknownPlayer';
-                    double advanceValue = prefs.getDouble('advance')!;
-                    double advanceAmount = advanceValue;
+                    // The advance is a property of the game, read from the
+                    // bank row; prefs is only a fallback while the row cannot
+                    // carry it.
+                    final double advanceAmount = _advanceValue ?? 0;
+                    if (advanceAmount <= 0) {
+                      if (context.mounted) {
+                        showMessage(context,
+                            'Could not read the advance amount - try again');
+                      }
+                      return;
+                    }
 
                     // Step 1: Fetch payer's wallet
                     final payerResponse = await Supabase.instance.client
@@ -1086,22 +1424,18 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                         if (!transfer.ok) {
                           Navigator.of(context).pop();
                           if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text(
-                                      'Insufficient balance to advance ₹200')),
-                            );
+                            showMessage(context,
+                                'Insufficient balance to advance ₹200');
                           }
                           return;
                         }
 
                         if (context.mounted) {
                           Navigator.of(context).pop();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                                content: Text(
-                                    'Advanced ₹$advanceAmount to ${player.name}')),
-                          );
+                          if (context.mounted) {
+                            showMessage(context,
+                                'Advanced ₹$advanceAmount to ${player.name}');
+                          }
                           await Supabase.instance.client
                               .from('transactions')
                               .insert({
@@ -1119,20 +1453,14 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                       } else {
                         Navigator.of(context).pop();
                         if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                                content: Text(
-                                    'Insufficient balance to advance ₹200')),
-                          );
+                          showMessage(context,
+                              'Insufficient balance to advance ₹200');
                         }
                       }
                     } else {
                       if (context.mounted) {
                         Navigator.of(context).pop();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                              content: Text('Failed to fetch wallet data')),
-                        );
+                        showMessage(context, 'Failed to fetch wallet data');
                       }
                     }
                   },
@@ -1220,11 +1548,22 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                       builder: (_) => TransactionHistoryPage(
                         gameId: widget.gameId,
                         playerId: ID,
+                        showAllPlayers: true,
                       ),
                     ),
                   );
                 },
                 icon: const Icon(FontAwesomeIcons.clockRotateLeft)),
+            const SizedBox(width: 5),
+            // The board itself, to check who owns what. Selling stays in Give
+            // Card; here a tap only ever opens a deed. Cards mode decides
+            // whether there is anything to look at.
+            if (_playWithCards)
+              IconButton(
+                onPressed: _showBoard,
+                icon: const Icon(Icons.grid_on),
+                tooltip: 'Board',
+              ),
             const SizedBox(width: 10),
             IconButton(
               onPressed: () => _showQRDialog(context),
@@ -1314,12 +1653,37 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                       ],
                     ),
                     const SizedBox(height: 10),
-                    if (payOption == 'ScanPay')
-                      const Row(
+                    // Give Card only exists in a game that was started with the
+                    // cards switch on, so it appears with it.
+                    if (payOption == 'ScanPay' || _playWithCards)
+                      Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
-                          ReceiveButton(),
-                          SizedBox(width: 0),
+                          if (payOption == 'ScanPay') ...[
+                            const ReceiveButton(),
+                            const SizedBox(width: 8),
+                          ],
+                          if (_playWithCards)
+                            ElevatedButton.icon(
+                              onPressed: _openGiveCardFlow,
+                              icon: Icon(
+                                FontAwesomeIcons.handHolding,
+                                size: 16.sp,
+                              ),
+                              label: Text(
+                                'Give Card',
+                                style: TextStyle(fontSize: 16.sp),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 5),
+                                backgroundColor: const Color(0xFF1565C0),
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
+                            ),
                           /*                           ElevatedButton.icon(
                             onPressed: () {
                               Navigator.push(
