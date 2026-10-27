@@ -1,0 +1,79 @@
+{
+  "info": {
+    "name": "django-mail-api",
+    "description": "Set the collection variables baseUrl and token (the MAIL_API_TOKEN from .env).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://127.0.0.1:8000" },
+    { "key": "token", "value": "paste-MAIL_API_TOKEN-here" },
+    { "key": "to", "value": "you@gmail.com" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "auth": { "type": "noauth" },
+        "method": "GET",
+        "url": "{{baseUrl}}/api/health/"
+      }
+    },
+    {
+      "name": "Send plain text",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/send-mail/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"to\": \"{{to}}\",\n  \"subject\": \"Test from Postman\",\n  \"text\": \"Hello! This is a plain-text test email.\"\n}",
+          "options": { "raw": { "language": "json" } }
+        }
+      }
+    },
+    {
+      "name": "Send HTML with cc / reply_to",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/send-mail/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"to\": [\"{{to}}\"],\n  \"cc\": [],\n  \"bcc\": [],\n  \"reply_to\": \"customer@example.com\",\n  \"subject\": \"New contact form message\",\n  \"text\": \"Name: Asha\\nMessage: Please call me back.\",\n  \"html\": \"<h2>New contact form message</h2><p><b>Name:</b> Asha</p><p>Please call me back.</p>\"\n}",
+          "options": { "raw": { "language": "json" } }
+        }
+      }
+    },
+    {
+      "name": "Invalid payload (expect 400)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/send-mail/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"to\": \"not-an-email\",\n  \"subject\": \"\"\n}",
+          "options": { "raw": { "language": "json" } }
+        }
+      }
+    },
+    {
+      "name": "No token (expect 401)",
+      "request": {
+        "auth": { "type": "noauth" },
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/send-mail/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"to\": \"{{to}}\",\n  \"subject\": \"Hi\",\n  \"text\": \"Hello\"\n}",
+          "options": { "raw": { "language": "json" } }
+        }
+      }
+    }
+  ]
+}

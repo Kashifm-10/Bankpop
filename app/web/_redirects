@@ -1,0 +1,6 @@
+# Netlify serves a Flutter web build as plain files, so a real path such as
+# /verify?token=... (the link in a verification mail) or /game/ABC/player would
+# 404 before the app loads. The app uses path URLs (lib/services/url_strategy_web.dart),
+# so every unknown path has to reach index.html and let go_router resolve it.
+# `flutter build web` copies this file into build/web/.
+/*    /index.html   200

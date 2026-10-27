@@ -27,20 +27,21 @@ jobs:
           cache: true
 
       - name: Build Flutter APK
+        working-directory: app
         run: |
           flutter pub get --enforce-lockfile
           flutter build apk --release --target-platform=android-arm64
 
       - name: Check APK exists
         run: |
-          ls -lh build/app/outputs/flutter-apk/
+          ls -lh app/build/app/outputs/flutter-apk/
 
       - name: Upload APK to Supabase
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           BUCKET: apk_releases
-          FILE_PATH: build/app/outputs/flutter-apk/app-release.apk
+          FILE_PATH: app/build/app/outputs/flutter-apk/app-release.apk
           REMOTE_NAME: bankpop.apk
 
         run: |

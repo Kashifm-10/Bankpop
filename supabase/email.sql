@@ -1,20 +1,22 @@
--- Verification, forgotten passwords, and the mailbox the app sends from.
+-- Verification, forgotten passwords, and the mailbox the mail is sent from.
 --
--- Run this in the Supabase SQL editor after accounts.sql. Safe to run more than
--- once: every statement checks first.
+-- Run this in the Supabase SQL editor after accounts.sql, then
+-- supabase/mail_provider.sql - the one the mail service reads. Safe to run more
+-- than once: every statement checks first.
 --
 -- What changes:
 --   * players_profile.verified          - false until the link in the mail is opened
 --   * players_profile.reset_password_*  - the temporary password, stored hashed,
 --                                         kept apart from the real password
 --   * email_tokens                      - one row per verification link
---   * email_settings                    - host, port, username, password for SMTP
+--   * email_settings                    - the mailbox: host, port, username,
+--                                         password, and the provider
 --
--- The app itself reads email_settings (a browser cannot open an SMTP socket, so
--- the app sends directly on a phone and posts to the send-mail edge function on
--- web - both read this row). That also means the publishable key can read the
--- SMTP password. Use a mailbox made only for BankPop, with an app password that
--- can be revoked, and never reuse a personal password here.
+-- The app does not send mail itself any more. The service in django-mail-api/
+-- reads this row with the service-role key and sends the message, and
+-- mail_provider.sql takes the SMTP columns away from the app's publishable key
+-- (which could otherwise read the mailbox password) while giving the app back
+-- the one column it still needs, app_url.
 
 begin;
 
@@ -68,12 +70,12 @@ create index if not exists email_tokens_profile_idx
   on public.email_tokens (profile_id, purpose, created_at desc);
 
 -- ---------------------------------------------------------------------------
--- SMTP account
+-- Mail account
 -- ---------------------------------------------------------------------------
 
 create table if not exists public.email_settings (
-  -- Exactly one row. The app reads the newest enabled row, so replacing the
-  -- mailbox means updating this one rather than adding a second.
+  -- Exactly one row. The mail service reads the newest enabled row, so
+  -- replacing the mailbox means updating this one rather than adding a second.
   id          integer primary key default 1 check (id = 1),
   host        text not null,
   port        integer not null default 465,
@@ -82,7 +84,9 @@ create table if not exists public.email_settings (
   sender_name text not null default 'BankPop',
   -- The public address of the web build, used to build the verification link
   -- (for example https://bankpop.app). A phone cannot know it, so this column
-  -- has to be filled in for verification mail sent from Android or iOS.
+  -- has to be filled in for the link in a mail opened on Android or iOS. This
+  -- is the only column the app reads (through email_public_settings, which
+  -- mail_provider.sql creates).
   app_url     text,
   enabled     boolean not null default true,
   created_at  timestamptz not null default now(),
@@ -106,34 +110,13 @@ create trigger email_settings_touched
 commit;
 
 -- ---------------------------------------------------------------------------
--- Fill this in once, in the SQL editor (replace the password and app_url).
--- Gmail needs 2-Step Verification and an App Password, not the account
--- password. Port 465 (implicit TLS) is the one that works both from the app
--- and from the send-mail edge function; Supabase blocks 25 and 587.
+-- Filling the row in is described in supabase/mail_provider.sql, which adds the
+-- provider and From: columns and takes the mailbox away from the app's key.
+-- Run that script before adding the mailbox.
 -- ---------------------------------------------------------------------------
---
--- insert into public.email_settings
---   (host, port, username, password, sender_name, app_url)
--- values
---   ('smtp.gmail.com', 465, 'noreplyoraction@gmail.com',
---    'your-16-character-app-password', 'BankPop', 'https://your-app.example')
--- on conflict (id) do update set
---   host = excluded.host,
---   port = excluded.port,
---   username = excluded.username,
---   password = excluded.password,
---   sender_name = excluded.sender_name,
---   app_url = excluded.app_url,
---   enabled = true;
---
--- Check it without sending anything:
---   select id, host, port, username, sender_name, app_url, enabled,
---          created_at, updated_at,
---          case when password = '' then 'empty' else 'set' end as password
---   from public.email_settings;
 
--- If the verification mail cannot be sent (no SMTP row yet, or the edge
--- function is not deployed), sign-up refuses to leave an account behind that
+-- If the verification mail cannot be sent (no mailbox row yet, or the mail
+-- service is not running), sign-up refuses to leave an account behind that
 -- nobody can enter. To verify an existing account by hand instead:
 --
 --   update public.players_profile set verified = true where email = 'you@example.com';
