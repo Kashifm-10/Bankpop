@@ -100,8 +100,8 @@ abstract final class GameControls {
   static const GameControl giveCard = GameControl(
     icon: Icons.back_hand_outlined,
     art: 'assets/Icons/give_card.png',
-    label: 'Give card',
-    detail: 'Hands a property card from the bank to a player.',
+    label: 'Assign to player',
+    detail: 'Hands a property card from the bank to a player. Use with InstantPay or when playing with cards.',
     color: Color(0xFF1565C0),
   );
 
@@ -149,6 +149,7 @@ abstract final class GameControls {
 
   static const GameControl bankrupt = GameControl(
     icon: Icons.gavel,
+    art: 'assets/Icons/bank.png',
     label: 'Declare bankrupt',
     detail: 'Leaves the table for good: your cash, houses and cards are sold '
         'and the money pays the players you owe.',

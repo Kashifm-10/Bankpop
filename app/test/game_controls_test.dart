@@ -125,7 +125,7 @@ void main() {
     // The last rows can be below the fold on a 568 px window; they have to be
     // reachable by scrolling, which is the point of the sheet's list.
     await tester.scrollUntilVisible(
-      find.text('Give card'),
+      find.text('Assign to player'),
       80,
       scrollable: find
           .descendant(
@@ -137,6 +137,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
-    expect(find.text('Give card'), findsOneWidget);
+    expect(find.text('Assign to player'), findsOneWidget);
   });
 }
