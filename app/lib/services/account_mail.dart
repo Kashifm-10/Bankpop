@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:mon/services/email_sender.dart';
 import 'package:mon/services/email_settings.dart';
+import 'package:mon/services/mail_templates.dart';
 import 'package:mon/services/password.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -67,18 +68,10 @@ class AccountMail {
       final EmailResult sent = await EmailSender.send(
         to: email,
         subject: 'Verify your BankPop account',
-        text: 'Welcome to BankPop.\n\n'
-            'Tap this link to verify your email address:\n$link\n\n'
-            'The link works once and expires in 24 hours. If you did not '
-            'create a BankPop account, you can ignore this email.',
-        html: _html(
-          title: 'Verify your email',
-          body: 'Welcome to BankPop. Tap the button below to verify this '
-              'address and finish setting up your account.',
-          actionLabel: 'Verify my email',
+        text: MailTemplates.verificationText(actionUrl: link),
+        html: MailTemplates.verificationHtml(
           actionUrl: link,
-          footnote: 'The link works once and expires in 24 hours. If you did '
-              'not create a BankPop account, you can ignore this email.',
+          appUrl: appUrl,
         ),
       );
 
@@ -240,20 +233,12 @@ class AccountMail {
       final EmailResult sent = await EmailSender.send(
         to: address,
         subject: 'Your BankPop temporary password',
-        text: 'Use this temporary password to sign in to BankPop:\n\n'
-            '$temporaryPassword\n\n'
-            'Your usual password has not changed. Once you sign in with the '
-            'temporary password, the app asks you to choose a new one.',
-        html: _html(
-          title: 'Your temporary password',
-          body: 'Use the password below to sign in. Your usual password has '
-              'not changed; the app will ask you to choose a new one as soon '
-              'as you sign in with this.',
-          actionLabel: null,
-          actionUrl: null,
-          code: temporaryPassword,
-          footnote: 'If you did not ask to reset your password, you can ignore '
-              'this email - nothing has changed.',
+        text: MailTemplates.resetText(temporaryPassword: temporaryPassword),
+        // A reset needs no link, so a missing app_url is not the failure here
+        // that it is for a verification mail - the mark just stops linking.
+        html: MailTemplates.resetHtml(
+          temporaryPassword: temporaryPassword,
+          appUrl: await _appUrl() ?? '',
         ),
       );
 
@@ -351,37 +336,6 @@ class AccountMail {
 
   static String _sha256(String value) =>
       sha256.convert(utf8.encode(value)).toString();
-
-  static String _html({
-    required String title,
-    required String body,
-    required String? actionLabel,
-    required String? actionUrl,
-    String? code,
-    required String footnote,
-  }) {
-    final String button = actionLabel == null || actionUrl == null
-        ? ''
-        : '<p style="margin:24px 0"><a href="$actionUrl" '
-            'style="background:#689F38;color:#ffffff;text-decoration:none;'
-            'padding:12px 22px;border-radius:10px;font-weight:bold">'
-            '$actionLabel</a></p>'
-            '<p style="font-size:12px;color:#7CB342;word-break:break-all">'
-            '$actionUrl</p>';
-    final String codeBlock = code == null
-        ? ''
-        : '<p style="font-size:26px;letter-spacing:3px;font-weight:bold;'
-            'background:#F1F8E9;padding:14px;border-radius:10px;'
-            'text-align:center">$code</p>';
-    return '<div style="font-family:Arial,Helvetica,sans-serif;color:#33691E;'
-        'max-width:520px;margin:0 auto;padding:8px">'
-        '<h2 style="color:#33691E">$title</h2>'
-        '<p style="color:#558B2F;line-height:1.5">$body</p>'
-        '$codeBlock$button'
-        '<p style="font-size:12px;color:#7CB342;line-height:1.4">$footnote</p>'
-        '<p style="font-size:12px;color:#9E9E9E">BankPop</p>'
-        '</div>';
-  }
 }
 
 /// The sentence an account screen shows after trying to send a mail.
