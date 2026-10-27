@@ -75,8 +75,7 @@ class _CardEffectDialogState extends State<_CardEffectDialog> {
   bool _settled = false;
   bool _busy = false;
 
-  String _money(num value) =>
-      BoardCurrencies.format(widget.currency, value);
+  String _money(num value) => BoardCurrencies.format(widget.currency, value);
 
   @override
   Widget build(BuildContext context) {
@@ -96,7 +95,8 @@ class _CardEffectDialogState extends State<_CardEffectDialog> {
             if (_action.kind != CardActionKind.none) ...<Widget>[
               const SizedBox(height: 12),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(10),
@@ -104,12 +104,22 @@ class _CardEffectDialogState extends State<_CardEffectDialog> {
                 ),
                 child: Row(
                   children: <Widget>[
-                    Icon(_icon, size: 18, color: const Color(0xFF6A1B9A)),
+                    // A reward is the one effect with an illustrated icon;
+                    // the rest keep their glyph.
+                    _action.kind == CardActionKind.reward
+                        ? Image.asset(
+                            'assets/Icons/reward.png',
+                            width: 22,
+                            height: 22,
+                            fit: BoxFit.contain,
+                          )
+                        : Icon(_icon, size: 18, color: const Color(0xFF6A1B9A)),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         _summary,
-                        style: TextStyle(fontSize: 13.sp, color: Colors.black87),
+                        style:
+                            TextStyle(fontSize: 13.sp, color: Colors.black87),
                       ),
                     ),
                   ],
@@ -138,7 +148,8 @@ class _CardEffectDialogState extends State<_CardEffectDialog> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                const Icon(Icons.check_circle, color: Color(0xFF689F38), size: 18),
+                const Icon(Icons.check_circle,
+                    color: Color(0xFF689F38), size: 18),
                 const SizedBox(width: 6),
                 Text('Settled', style: TextStyle(fontSize: 13.sp)),
               ],
@@ -274,8 +285,10 @@ class _CardEffectDialogState extends State<_CardEffectDialog> {
             gameId: widget.gameId,
             playerId: seat.id,
           );
-          houses = cards.fold<int>(0, (int sum, PlayerCard c) => sum + c.houses);
-          hotels = cards.fold<int>(0, (int sum, PlayerCard c) => sum + c.hotels);
+          houses =
+              cards.fold<int>(0, (int sum, PlayerCard c) => sum + c.houses);
+          hotels =
+              cards.fold<int>(0, (int sum, PlayerCard c) => sum + c.hotels);
         } catch (error) {
           debugPrint('Could not read what ${seat.name} has built: $error');
           if (!mounted) return false;
@@ -417,7 +430,8 @@ class _CardEffectDialogState extends State<_CardEffectDialog> {
         int paid = 0;
         return StatefulBuilder(
           builder: (BuildContext context, void Function(void Function()) set) {
-            poll ??= Timer.periodic(const Duration(seconds: 2), (Timer t) async {
+            poll ??=
+                Timer.periodic(const Duration(seconds: 2), (Timer t) async {
               final int nowPaid = await CardCharges.paidCount(ids);
               if (!dialogContext.mounted) {
                 t.cancel();
@@ -532,7 +546,9 @@ class _CardEffectDialogState extends State<_CardEffectDialog> {
   }) async {
     final DateTime now = DateTime.now();
     try {
-      await Supabase.instance.client.from('transactions').insert(<String, dynamic>{
+      await Supabase.instance.client
+          .from('transactions')
+          .insert(<String, dynamic>{
         'game_id': widget.gameId,
         'value': amount,
         'from': fromName,

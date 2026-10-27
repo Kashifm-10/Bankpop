@@ -13,9 +13,18 @@ class GameControl {
     required this.label,
     required this.detail,
     required this.color,
+    this.art,
   });
 
+  /// The glyph, used when the control has no illustrated icon.
   final IconData icon;
+
+  /// An illustrated icon (`assets/Icons/`) that replaces [icon] on the button.
+  ///
+  /// These are drawn full colour rather than tinted, so a control that has art
+  /// is not colour-coded by [color] - the drawing carries the meaning, and the
+  /// palette's accent colour is only kept for the legend text and the glyph
+  /// fallback.
 
   /// The legend heading, and the tooltip/screen-reader label of the button.
   final String label;
@@ -25,6 +34,9 @@ class GameControl {
 
   /// The accent colour for the icon - the button's "purpose" colour.
   final Color color;
+
+  /// Null for a control that still draws its [icon].
+  final String? art;
 }
 
 /// The palette the game screens share. Cream paper, dark brown ink and a small
@@ -47,6 +59,7 @@ abstract final class GameControls {
 
   static const GameControl history = GameControl(
     icon: Icons.history,
+    art: 'assets/Icons/history.png',
     label: 'Transactions',
     detail: 'Every payment made at this table, newest first.',
     color: Color(0xFF6D4C41),
@@ -70,6 +83,7 @@ abstract final class GameControls {
 
   static const GameControl leave = GameControl(
     icon: Icons.logout,
+    art: 'assets/Icons/leave.png',
     label: 'Leave game',
     detail: 'Leaves the table and clears this device\'s active game.',
     color: Color(0xFF8D6E63),
@@ -85,6 +99,7 @@ abstract final class GameControls {
 
   static const GameControl giveCard = GameControl(
     icon: Icons.back_hand_outlined,
+    art: 'assets/Icons/give_card.png',
     label: 'Give card',
     detail: 'Hands a property card from the bank to a player.',
     color: Color(0xFF1565C0),
@@ -92,6 +107,7 @@ abstract final class GameControls {
 
   static const GameControl myCards = GameControl(
     icon: Icons.credit_card,
+    art: 'assets/Icons/my_cards.png',
     label: 'My cards',
     detail: 'Your hand - every card you own. Tap one to read it, or to '
         'mortgage it and sell houses.',
@@ -100,6 +116,7 @@ abstract final class GameControls {
 
   static const GameControl trade = GameControl(
     icon: Icons.swap_horiz,
+    art: 'assets/Icons/trade.png',
     label: 'Trade',
     detail: 'Build an offer of cards, cash or both and send it to a player.',
     color: Color(0xFF7B1FA2),
@@ -200,11 +217,24 @@ class GameIconButton extends StatelessWidget {
               width: size,
               height: size,
               child: Center(
-                child: Icon(
-                  control.icon,
-                  size: size * 0.52,
-                  color: iconColour,
-                ),
+                child: control.art == null
+                    ? Icon(
+                        control.icon,
+                        size: size * 0.52,
+                        color: iconColour,
+                      )
+                    // The illustrated icons are drawn full colour and fade
+                    // rather than take the disabled ink, so a disabled tile
+                    // still reads as the same picture.
+                    : Opacity(
+                        opacity: _active ? 1 : 0.38,
+                        child: Image.asset(
+                          control.art!,
+                          width: size * 0.68,
+                          height: size * 0.68,
+                          fit: BoxFit.contain,
+                        ),
+                      ),
               ),
             ),
           ),

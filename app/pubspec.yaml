@@ -85,12 +85,34 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^5.0.0
-flutter_icons:
+# The launcher icon on every platform, generated from one source image with:
+#
+#   cd app && dart run flutter_launcher_icons
+#
+# Re-run it after replacing the image. Android, iOS, web, Windows and macOS are
+# covered; Linux desktop takes its icon from the bundle and has no setting here.
+flutter_launcher_icons:
+  image_path: "assets/images/app_icon_rounded_logo.png"
   android: true
   ios: true
-  image_path: "assets/images/play_icon.jpg"
-
-#flutter pub run flutter_launcher_icons:main
+  # An iOS app icon must not carry transparency.
+  remove_alpha_ios: true
+  # Android 8 and later mask the icon, so the logo sits on the app's own cream
+  # rather than on a white square.
+  adaptive_icon_background: "#fff8f1"
+  adaptive_icon_foreground: "assets/images/app_icon_rounded_logo.png"
+  web:
+    generate: true
+    image_path: "assets/images/app_icon_rounded_logo.png"
+    background_color: "#fff8f1"
+    theme_color: "#689F38"
+  windows:
+    generate: true
+    image_path: "assets/images/app_icon_rounded_logo.png"
+    icon_size: 256
+  macos:
+    generate: true
+    image_path: "assets/images/app_icon_rounded_logo.png"
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
@@ -104,6 +126,9 @@ flutter:
 
   # To add assets to your application, add an assets section, like this:
   assets:
+    # The illustrated icons the game screens use in place of plain glyphs.
+    - assets/Icons/
+    - assets/images/app_icon_rounded_logo.png
     - assets/images/play_icon.jpg
     - assets/images/advance.png
     - assets/images/pay.png

@@ -27,7 +27,13 @@ void main() {
       ),
     ));
 
-    expect(find.byIcon(Icons.swap_horiz), findsOneWidget);
+    // Trade is illustrated now, so the tile draws the picture instead of the
+    // glyph the control still carries as its fallback.
+    expect(find.byIcon(Icons.swap_horiz), findsNothing);
+    expect(
+      find.image(const AssetImage('assets/Icons/trade.png')),
+      findsOneWidget,
+    );
     expect(
       find.text('Trade'),
       findsNothing,

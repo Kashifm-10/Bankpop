@@ -40,8 +40,7 @@ Future<void> showGiveCardFor({
     showMessage(context, '${space.name} cannot be sold as a card');
     return;
   }
-  final String currency =
-      (await BoardCatalog.boardForGame(gameId)).currency;
+  final String currency = (await BoardCatalog.boardForGame(gameId)).currency;
   if (!context.mounted) return;
 
   // One property, one owner: never offer a card that has already gone.
@@ -83,8 +82,14 @@ Future<void> showGiveCardFor({
             // shown on the screen itself.
             Navigator.of(deedContext).pop();
           },
-          icon: Icon(scanPay ? Icons.qr_code_2 : Icons.person_add_alt_1,
-              size: 18),
+          // One icon for both halves of the flow: the action is "give this
+          // card", whatever the payment option makes it look like.
+          icon: Image.asset(
+            'assets/Icons/give_card.png',
+            width: 22,
+            height: 22,
+            fit: BoxFit.contain,
+          ),
           label: Text(scanPay ? 'Show QR' : 'Assign to player'),
           style: ElevatedButton.styleFrom(
             backgroundColor: const Color(0xFF689F38),

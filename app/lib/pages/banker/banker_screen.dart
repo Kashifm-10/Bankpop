@@ -33,7 +33,6 @@ import 'package:mon/widgets/qr_box.dart';
 import 'package:mon/widgets/app_metrics.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 class BankerGameScreen extends StatefulWidget {
   final double bankValue;
@@ -727,7 +726,8 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
           await CardRequests.pending(widget.gameId);
       if (requests.isEmpty || !mounted) return;
 
-      final Map<int, BankpopSpace> spaces = await PlayerCards.spaces(widget.gameId);
+      final Map<int, BankpopSpace> spaces =
+          await PlayerCards.spaces(widget.gameId);
       final SharedPreferences prefs = await SharedPreferences.getInstance();
       final String bankerId =
           ID.isNotEmpty ? ID : (prefs.getString('playerID') ?? '');
@@ -814,7 +814,8 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
           await Deals.pendingFor(widget.gameId, bankId);
       if (deals.isEmpty || !mounted) return;
 
-      final Map<int, BankpopSpace> spaces = await PlayerCards.spaces(widget.gameId);
+      final Map<int, BankpopSpace> spaces =
+          await PlayerCards.spaces(widget.gameId);
       if (!mounted) return;
 
       for (final DealRequest deal in deals) {
@@ -1084,7 +1085,8 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
         ? board.chanceOptions
         : board.communityChest;
     if (cards.isEmpty) {
-      showMessage(context, 'This board has no ${kind.label.toLowerCase()} cards.');
+      showMessage(
+          context, 'This board has no ${kind.label.toLowerCase()} cards.');
       return;
     }
 
@@ -2400,164 +2402,168 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-            // Paused or ended: the same band the players see, with the way
-            // out of the pause offered here rather than hidden in the menu.
-            if (_session != null && _session!.blocksPlay)
-              GameStatusBanner(
-                session: _session!,
-                bankerView: true,
-                onResume: _session!.isSuspended
-                    ? () => _setSessionStatus(GameSession.active)
-                    : null,
-              ),
-            Card(
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20)),
-              color: const Color(0xFFFFF9C4), // soft pastel yellow
-              elevation: 3,
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                child: Row(
-                  children: <Widget>[
-                    // What the bank is holding, and the code a player pays it
-                    // with, in the one row above the board.
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: <Widget>[
-                              Icon(
-                                FontAwesomeIcons.buildingColumns,
-                                color: Colors.blueGrey.shade700,
-                                size: 22.sp,
-                              ),
-                              const SizedBox(width: 10),
-                              Flexible(
-                                child: Text(
-                                  'Bankpop Union',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 18.sp,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.blueGrey.shade800,
+              // Paused or ended: the same band the players see, with the way
+              // out of the pause offered here rather than hidden in the menu.
+              if (_session != null && _session!.blocksPlay)
+                GameStatusBanner(
+                  session: _session!,
+                  bankerView: true,
+                  onResume: _session!.isSuspended
+                      ? () => _setSessionStatus(GameSession.active)
+                      : null,
+                ),
+              Card(
+                margin:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20)),
+                color: const Color(0xFFFFF9C4), // soft pastel yellow
+                elevation: 3,
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Row(
+                    children: <Widget>[
+                      // What the bank is holding, and the code a player pays it
+                      // with, in the one row above the board.
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: <Widget>[
+                                // The bank's own mark, drawn on the row that
+                                // shows what it holds.
+                                Image.asset(
+                                  'assets/Icons/bank.png',
+                                  width: 30.sp,
+                                  height: 30.sp,
+                                  fit: BoxFit.contain,
+                                ),
+                                const SizedBox(width: 10),
+                                Flexible(
+                                  child: Text(
+                                    'Bankpop Union',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 18.sp,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.blueGrey.shade800,
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          FittedBox(
-                            fit: BoxFit.scaleDown,
-                            alignment: Alignment.centerLeft,
-                            child: AnimatedFlipCounter(
-                              value: value,
-                              fractionDigits: 2,
-                              textStyle: TextStyle(
-                                fontSize: 26.sp,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black87,
-                              ),
-                              duration: const Duration(milliseconds: 500),
+                              ],
                             ),
-                          ),
-                        ],
+                            const SizedBox(height: 6),
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: AnimatedFlipCounter(
+                                value: value,
+                                fractionDigits: 2,
+                                textStyle: TextStyle(
+                                  fontSize: 26.sp,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black87,
+                                ),
+                                duration: const Duration(milliseconds: 500),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    if (payOption == 'ScanPay' && !_viewOnly) ...<Widget>[
-                      const ReceiveButton(),
-                      const SizedBox(width: 6),
+                      const SizedBox(width: 8),
+                      if (payOption == 'ScanPay' && !_viewOnly) ...<Widget>[
+                        const ReceiveButton(),
+                        const SizedBox(width: 6),
+                      ],
+                      SizedBox(
+                        height: 38.sp,
+                        child: Lottie.asset('assets/lottie/coin.json'),
+                      ),
                     ],
-                    SizedBox(
-                      height: 38.sp,
-                      child: Lottie.asset('assets/lottie/coin.json'),
-                    ),
-                  ],
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(
-              height: 5,
-            ),
-            const SizedBox(height: 6),
-            // A wide window (a monitor, or a tablet in landscape) has the room
-            // for the board and the players side by side; a phone keeps them
-            // stacked, board over players.
-            Expanded(
-              child: LayoutBuilder(
-                builder: (BuildContext context, BoxConstraints area) {
-                  final Widget board = Padding(
-                    // The inset a player row has, so on a phone the board is
-                    // exactly as wide as the list under it.
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: BankerBoardPanel(
-                      gameId: widget.gameId,
-                      payOption: payOption,
-                      bankerId: ID,
-                      canGiveCards: _playWithCards && !_viewOnly,
-                      // In a row with the players the board starts where they
-                      // start - at the top - instead of hanging below a band
-                      // of empty paper.
-                      alignment: Alignment.topCenter,
-                    ),
-                  );
-                  // The key names this half of the screen, so the layout can
-                  // be checked as one region while it is still loading and has
-                  // no player rows in it.
-                  final Widget playerList = KeyedSubtree(
-                    key: const ValueKey<String>('banker-players'),
-                    child: isLoading
-                        ? const Center(
-                            child: CircularProgressIndicator(
-                                color: Color(0xFF689F38)),
-                          )
-                        : ListView.builder(
-                            itemCount: players.length,
-                            itemBuilder: (context, index) => Padding(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 16.0, vertical: 5),
-                              child: _buildPlayerRow(context, players[index]),
-                            ),
-                          ),
-                  );
-
-                  if (area.maxWidth < 720) {
-                    // Stacked: the board gets a region of its own height, as
-                    // wide as a player row (the width less the same inset) and
-                    // as tall as that is wide, so the square fills the column
-                    // and no empty paper is left down either side of it. What
-                    // is left below it belongs to the players, and it scrolls.
-                    final double rowWidth = area.maxWidth - 32;
-                    final double side = math.min(
-                      rowWidth,
-                      math.max(0.0, area.maxHeight - 200),
+              const SizedBox(
+                height: 5,
+              ),
+              const SizedBox(height: 6),
+              // A wide window (a monitor, or a tablet in landscape) has the room
+              // for the board and the players side by side; a phone keeps them
+              // stacked, board over players.
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (BuildContext context, BoxConstraints area) {
+                    final Widget board = Padding(
+                      // The inset a player row has, so on a phone the board is
+                      // exactly as wide as the list under it.
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: BankerBoardPanel(
+                        gameId: widget.gameId,
+                        payOption: payOption,
+                        bankerId: ID,
+                        canGiveCards: _playWithCards && !_viewOnly,
+                        // In a row with the players the board starts where they
+                        // start - at the top - instead of hanging below a band
+                        // of empty paper.
+                        alignment: Alignment.topCenter,
+                      ),
                     );
-                    return Column(
+                    // The key names this half of the screen, so the layout can
+                    // be checked as one region while it is still loading and has
+                    // no player rows in it.
+                    final Widget playerList = KeyedSubtree(
+                      key: const ValueKey<String>('banker-players'),
+                      child: isLoading
+                          ? const Center(
+                              child: CircularProgressIndicator(
+                                  color: Color(0xFF689F38)),
+                            )
+                          : ListView.builder(
+                              itemCount: players.length,
+                              itemBuilder: (context, index) => Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 16.0, vertical: 5),
+                                child: _buildPlayerRow(context, players[index]),
+                              ),
+                            ),
+                    );
+
+                    if (area.maxWidth < 720) {
+                      // Stacked: the board gets a region of its own height, as
+                      // wide as a player row (the width less the same inset) and
+                      // as tall as that is wide, so the square fills the column
+                      // and no empty paper is left down either side of it. What
+                      // is left below it belongs to the players, and it scrolls.
+                      final double rowWidth = area.maxWidth - 32;
+                      final double side = math.min(
+                        rowWidth,
+                        math.max(0.0, area.maxHeight - 200),
+                      );
+                      return Column(
+                        children: <Widget>[
+                          SizedBox(height: side, child: board),
+                          const SizedBox(height: 4),
+                          Expanded(child: playerList),
+                        ],
+                      );
+                    }
+
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: <Widget>[
-                        SizedBox(height: side, child: board),
-                        const SizedBox(height: 4),
-                        Expanded(child: playerList),
+                        Expanded(flex: 3, child: board),
+                        const SizedBox(width: 8),
+                        Expanded(flex: 2, child: playerList),
                       ],
                     );
-                  }
-
-                  return Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: <Widget>[
-                      Expanded(flex: 3, child: board),
-                      const SizedBox(width: 8),
-                      Expanded(flex: 2, child: playerList),
-                    ],
-                  );
-                },
+                  },
+                ),
               ),
-            ),
-          ],
+            ],
           ),
         ),
       ),
