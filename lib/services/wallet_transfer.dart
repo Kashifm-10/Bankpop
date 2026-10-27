@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Why a transfer did not happen.
@@ -19,12 +20,14 @@ class StakeOutcome {
     required this.bankerWallet,
     required this.bankerPlayerId,
     required this.atomic,
+    this.staked = true,
   }) : failure = null;
 
   const StakeOutcome.rejected(this.failure)
       : bankerWallet = null,
         bankerPlayerId = null,
-        atomic = false;
+        atomic = false,
+        staked = false;
 
   /// Banker balance after the stake, when the join was accepted.
   final double? bankerWallet;
@@ -34,6 +37,13 @@ class StakeOutcome {
 
   /// False when the atomic path was unavailable and the sequential fallback ran.
   final bool atomic;
+
+  /// True when this call actually moved the money.
+  ///
+  /// A retry of an accepted request finds the player already seated, and the
+  /// stake was taken the first time round. The ledger entry is written only
+  /// for the call that moved the money, so a retry cannot double-count it.
+  final bool staked;
 
   final TransferFailure? failure;
 
@@ -111,7 +121,8 @@ class WalletTransfer {
         },
       );
 
-      final Map<String, dynamic> row = Map<String, dynamic>.from(response as Map);
+      final Map<String, dynamic> row =
+          Map<String, dynamic>.from(response as Map);
       return TransferOutcome.ok(
         payerWallet: (row['payer_wallet'] as num).toDouble(),
         payeeWallet: (row['payee_wallet'] as num).toDouble(),
@@ -172,11 +183,24 @@ class WalletTransfer {
         },
       );
 
-      final Map<String, dynamic> row = Map<String, dynamic>.from(response as Map);
+      final Map<String, dynamic> row =
+          Map<String, dynamic>.from(response as Map);
+      final bool staked = (row['staked'] as bool?) ?? true;
+      final String bankerId = row['banker_player_id']?.toString() ?? '';
+      if (staked) {
+        await _recordStake(
+          gameId: gameId,
+          playerId: playerId,
+          playerName: playerName,
+          bankerId: bankerId,
+          amount: amount,
+        );
+      }
       return StakeOutcome.ok(
         bankerWallet: (row['banker_wallet'] as num).toDouble(),
         bankerPlayerId: row['banker_player_id']?.toString(),
         atomic: true,
+        staked: staked,
       );
     } on PostgrestException catch (error) {
       if (_functionMissing(error)) {
@@ -249,18 +273,23 @@ class WalletTransfer {
         return const TransferOutcome.rejected(TransferFailure.notFound);
       }
       if (payer < amount) {
-        return const TransferOutcome.rejected(TransferFailure.insufficientFunds);
+        return const TransferOutcome.rejected(
+            TransferFailure.insufficientFunds);
       }
 
       final SupabaseClient supabase = Supabase.instance.client;
       await supabase
           .from('players_test')
-          .update({'wallet': payer - amount}).eq('game_id', gameId).eq(
-              'player_id', fromId).eq('role', fromRole);
+          .update({'wallet': payer - amount})
+          .eq('game_id', gameId)
+          .eq('player_id', fromId)
+          .eq('role', fromRole);
       await supabase
           .from('players_test')
-          .update({'wallet': payee + amount}).eq('game_id', gameId).eq(
-              'player_id', toId).eq('role', toRole);
+          .update({'wallet': payee + amount})
+          .eq('game_id', gameId)
+          .eq('player_id', toId)
+          .eq('role', toRole);
 
       return TransferOutcome.ok(
         payerWallet: payer - amount,
@@ -307,6 +336,8 @@ class WalletTransfer {
       }
 
       double bankerWallet = (banker['wallet'] as num).toDouble();
+      final String bankerId = banker['player_id']?.toString() ?? '';
+      bool staked = false;
 
       if (existing == null) {
         await supabase.from('players_test').insert({
@@ -322,6 +353,7 @@ class WalletTransfer {
         await supabase
             .from('players_test')
             .update({'wallet': bankerWallet}).eq('id', banker['id']);
+        staked = true;
       }
 
       await supabase
@@ -330,14 +362,60 @@ class WalletTransfer {
           .eq('game_id', gameId)
           .eq('id', requestId);
 
+      if (staked) {
+        await _recordStake(
+          gameId: gameId,
+          playerId: playerId,
+          playerName: playerName,
+          bankerId: bankerId,
+          amount: amount,
+        );
+      }
+
       return StakeOutcome.ok(
         bankerWallet: bankerWallet,
         bankerPlayerId: banker['player_id']?.toString(),
         atomic: false,
+        staked: staked,
       );
     } catch (error) {
       debugPrint('Fallback stake failed: $error');
       return const StakeOutcome.rejected(TransferFailure.failed);
+    }
+  }
+
+  /// Writes the join into the money history.
+  ///
+  /// The stake is a real movement of money - the bank issues it and the
+  /// player's wallet starts with it - so it belongs in the ledger next to the
+  /// payments, otherwise the history starts at the first payment and never
+  /// shows where the balance came from.
+  ///
+  /// `code` carries the payer/receiver pair, which is what the history screen
+  /// filters on (see section 4.2 of supabase/hardening.sql: the trigger fills
+  /// payer_id and receiver_id from it). Bookkeeping only: the money has
+  /// already moved, so a failure here is logged and does not undo the seat.
+  static Future<void> _recordStake({
+    required String gameId,
+    required String playerId,
+    required String playerName,
+    required String bankerId,
+    required double amount,
+  }) async {
+    try {
+      await Supabase.instance.client
+          .from('transactions')
+          .insert(<String, dynamic>{
+        'game_id': gameId,
+        'value': amount,
+        'from': 'Bank',
+        'to': playerName,
+        'code': '${bankerId}_$playerId',
+        'date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
+        'time': DateFormat('HH:mm:ss').format(DateTime.now()),
+      });
+    } catch (error) {
+      debugPrint('Could not record the join stake: $error');
     }
   }
 

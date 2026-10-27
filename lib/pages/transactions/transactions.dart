@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:mon/models/bankpop_board.dart';
+import 'package:mon/services/board_catalog.dart';
 import 'package:mon/services/card_requests.dart';
 import 'package:mon/services/deals.dart';
 import 'package:mon/services/player_cards.dart';
-import 'package:responsive_sizer/responsive_sizer.dart';
+import 'package:mon/widgets/app_metrics.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:timeago/timeago.dart' as timeago;
@@ -93,11 +94,15 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
   void initState() {
     super.initState();
     _transactionsFuture = fetchTransactions();
-    _cardsFuture = PlayerCards.forPlayer(
-      gameId: widget.gameId,
-      playerId: widget.playerId,
-    );
-    _spacesFuture = PlayerCards.spaces();
+    // The bank never buys a card, so asking for "this player's cards" on the
+    // banker's device is always empty; they get the whole game's ledger instead.
+    _cardsFuture = widget.showAllPlayers
+        ? PlayerCards.forGame(widget.gameId)
+        : PlayerCards.forPlayer(
+            gameId: widget.gameId,
+            playerId: widget.playerId,
+          );
+    _spacesFuture = PlayerCards.spaces(widget.gameId);
     _buildingsFuture = _fetchBuildings();
     _mortgagesFuture = _fetchMortgages();
     _houseSalesFuture = _fetchHouseSales();
@@ -126,8 +131,8 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
           .order('time', ascending: false)
           .limit(200);
       return rows
-          .map((dynamic row) =>
-              CardRequest.fromMap(row as Map<String, dynamic>))
+          .map(
+              (dynamic row) => CardRequest.fromMap(row as Map<String, dynamic>))
           .toList();
     } catch (error) {
       // The table is created by supabase/buildings.sql; until it exists the tab
@@ -167,8 +172,8 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
           .from('deal_requests')
           .select()
           .eq('game_id', widget.gameId)
-          .inFilter('kind', <String>['sell_house', 'sell_hotel'])
-          .eq('status', 'approved');
+          .inFilter('kind', <String>['sell_house', 'sell_hotel']).eq(
+              'status', 'approved');
       final filtered = widget.showAllPlayers
           ? builder
           : builder.eq('from_id', widget.playerId);
@@ -378,50 +383,50 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
     return DefaultTabController(
       length: 4,
       child: Scaffold(
-      backgroundColor: Colors.yellow.shade50,
-      appBar: AppBar(
-        surfaceTintColor: Colors.transparent,
-        automaticallyImplyLeading: false,
-        title: const Text(
-          "Transaction History",
-          style:
-              TextStyle(color: Color(0xFF689F38), fontWeight: FontWeight.bold),
-        ),
         backgroundColor: Colors.yellow.shade50,
-        actions: [
-          IconButton(
-            onPressed: () {
-              Navigator.of(context).pop(); // Exit logic
-            },
-            icon: Icon(
-              FontAwesomeIcons.xmark,
-              size: 20.sp,
-            ),
+        appBar: AppBar(
+          surfaceTintColor: Colors.transparent,
+          automaticallyImplyLeading: false,
+          title: const Text(
+            "Transaction History",
+            style: TextStyle(
+                color: Color(0xFF689F38), fontWeight: FontWeight.bold),
           ),
-          const SizedBox(width: 10),
-        ],
-        // Cards are the second half of the same ledger: the money, and the
-        // properties it bought.
-        bottom: const TabBar(
-          labelColor: Color(0xFF689F38),
-          indicatorColor: Color(0xFF689F38),
-          unselectedLabelColor: Colors.black54,
-          tabs: [
-            Tab(text: 'Transactions'),
-            Tab(text: 'Cards'),
-            Tab(text: 'Houses'),
-            Tab(text: 'Trades'),
+          backgroundColor: Colors.yellow.shade50,
+          actions: [
+            IconButton(
+              onPressed: () {
+                Navigator.of(context).pop(); // Exit logic
+              },
+              icon: Icon(
+                FontAwesomeIcons.xmark,
+                size: 20.sp,
+              ),
+            ),
+            const SizedBox(width: 10),
+          ],
+          // Cards are the second half of the same ledger: the money, and the
+          // properties it bought.
+          bottom: const TabBar(
+            labelColor: Color(0xFF689F38),
+            indicatorColor: Color(0xFF689F38),
+            unselectedLabelColor: Colors.black54,
+            tabs: [
+              Tab(text: 'Transactions'),
+              Tab(text: 'Cards'),
+              Tab(text: 'Houses'),
+              Tab(text: 'Trades'),
+            ],
+          ),
+        ),
+        body: TabBarView(
+          children: [
+            _buildTransactionsTab(),
+            _buildCardsTab(),
+            _buildHousesTab(),
+            _buildTradesTab(),
           ],
         ),
-      ),
-      body: TabBarView(
-        children: [
-          _buildTransactionsTab(),
-          _buildCardsTab(),
-          _buildHousesTab(),
-          _buildTradesTab(),
-        ],
-      ),
       ),
     );
   }
@@ -429,93 +434,93 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
   /// The money history, unchanged, now the first tab.
   Widget _buildTransactionsTab() {
     return Column(
-        children: [
-          SizedBox(height: 10),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 0.0, horizontal: 10),
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
-              decoration: BoxDecoration(
-                color: Colors.yellow.shade50,
-                //   border: Border.all(color: Colors.grey, width: 1),
-                borderRadius: const BorderRadius.all(Radius.circular(12)),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    flex: 4,
-                    child: Text(
-                      "From",
-                      style: TextStyle(
-                          fontSize: 14.sp, fontWeight: FontWeight.bold),
-                      overflow: TextOverflow.ellipsis,
+      children: [
+        SizedBox(height: 10),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 0.0, horizontal: 10),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+            decoration: BoxDecoration(
+              color: Colors.yellow.shade50,
+              //   border: Border.all(color: Colors.grey, width: 1),
+              borderRadius: const BorderRadius.all(Radius.circular(12)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  flex: 4,
+                  child: Text(
+                    "From",
+                    style:
+                        TextStyle(fontSize: 14.sp, fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Expanded(
+                  flex: 3,
+                  child: Text(
+                    "To",
+                    style:
+                        TextStyle(fontSize: 14.sp, fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    "Value",
+                    style: TextStyle(
+                      fontSize: 14.sp,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black,
+                    ),
+                    textAlign: TextAlign.right,
+                  ),
+                ),
+                Expanded(
+                  flex: 3,
+                  child: Text(
+                    "Time",
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14.sp,
+                      color: Colors.black,
                     ),
                   ),
-                  Expanded(
-                    flex: 3,
-                    child: Text(
-                      "To",
-                      style: TextStyle(
-                          fontSize: 14.sp, fontWeight: FontWeight.bold),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  Expanded(
-                    flex: 2,
-                    child: Text(
-                      "Value",
-                      style: TextStyle(
-                        fontSize: 14.sp,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black,
-                      ),
-                      textAlign: TextAlign.right,
-                    ),
-                  ),
-                  Expanded(
-                    flex: 3,
-                    child: Text(
-                      "Time",
-                      textAlign: TextAlign.right,
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14.sp,
-                        color: Colors.black,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
-         const Divider(color: Color(0xFF689F38)),
-          // Transactions list
-          Expanded(
-            child: FutureBuilder<List<Transaction>>(
-              future: _transactionsFuture,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(
-                    child: CircularProgressIndicator(color: Color(0xFF689F38)),
-                  );
-                } else if (snapshot.hasError) {
-                  return Center(child: Text('Error: ${snapshot.error}'));
-                } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                  return const Center(child: Text("No transactions yet."));
-                }
-
-                final transactions = snapshot.data!;
-                return ListView.builder(
-                  padding: const EdgeInsets.all(10),
-                  itemCount: transactions.length,
-                  itemBuilder: (context, index) {
-                    return _buildTransactionRow(transactions[index]);
-                  },
+        ),
+        const Divider(color: Color(0xFF689F38)),
+        // Transactions list
+        Expanded(
+          child: FutureBuilder<List<Transaction>>(
+            future: _transactionsFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(
+                  child: CircularProgressIndicator(color: Color(0xFF689F38)),
                 );
-              },
-            ),
+              } else if (snapshot.hasError) {
+                return Center(child: Text('Error: ${snapshot.error}'));
+              } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                return const Center(child: Text("No transactions yet."));
+              }
+
+              final transactions = snapshot.data!;
+              return ListView.builder(
+                padding: const EdgeInsets.all(10),
+                itemCount: transactions.length,
+                itemBuilder: (context, index) {
+                  return _buildTransactionRow(transactions[index]);
+                },
+              );
+            },
           ),
-        ],
+        ),
+      ],
     );
   }
 
@@ -686,7 +691,8 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
                   Expanded(
                     child: Text(
                       request.isHotel ? 'Hotel' : 'House',
-                      style: TextStyle(fontSize: 12.sp, color: Colors.grey[700]),
+                      style:
+                          TextStyle(fontSize: 12.sp, color: Colors.grey[700]),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -699,7 +705,10 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    '£${request.amount.toStringAsFixed(0)}',
+                    BoardCurrencies.format(
+                      BoardCatalog.activeCurrency,
+                      request.amount,
+                    ),
                     style: TextStyle(
                       fontSize: 12.sp,
                       fontWeight: FontWeight.w600,
@@ -709,8 +718,8 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
                   if (who.isNotEmpty)
                     Text(
                       who,
-                      style: TextStyle(
-                          fontSize: 11.sp, color: Colors.grey[600]),
+                      style:
+                          TextStyle(fontSize: 11.sp, color: Colors.grey[600]),
                       overflow: TextOverflow.ellipsis,
                     ),
                 ],
@@ -773,8 +782,8 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
                   Expanded(
                     child: Text(
                       isMortgage ? 'Mortgaged' : 'Unmortgaged',
-                      style: TextStyle(
-                          fontSize: 12.sp, color: Colors.grey[700]),
+                      style:
+                          TextStyle(fontSize: 12.sp, color: Colors.grey[700]),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -849,8 +858,8 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
                   Expanded(
                     child: Text(
                       isHotel ? 'Hotel sold' : 'House sold',
-                      style: TextStyle(
-                          fontSize: 12.sp, color: Colors.grey[700]),
+                      style:
+                          TextStyle(fontSize: 12.sp, color: Colors.grey[700]),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -873,8 +882,8 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
                   if (who.isNotEmpty)
                     Text(
                       who,
-                      style: TextStyle(
-                          fontSize: 11.sp, color: Colors.grey[600]),
+                      style:
+                          TextStyle(fontSize: 11.sp, color: Colors.grey[600]),
                       overflow: TextOverflow.ellipsis,
                     ),
                 ],
@@ -946,19 +955,13 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
     }
     final List<String> givenBits = <String>[
       if (trade.cards.isNotEmpty)
-        trade.cards
-            .map((int i) => spaces[i]?.name ?? 'Card #$i')
-            .join(', '),
-      if (trade.offerCash > 0)
-        '\u00a3${trade.offerCash.toStringAsFixed(0)}',
+        trade.cards.map((int i) => spaces[i]?.name ?? 'Card #$i').join(', '),
+      if (trade.offerCash > 0) '\u00a3${trade.offerCash.toStringAsFixed(0)}',
     ];
     final List<String> gotBits = <String>[
       if (trade.wants.isNotEmpty)
-        trade.wants
-            .map((int i) => spaces[i]?.name ?? 'Card #$i')
-            .join(', '),
-      if (trade.wantsCash > 0)
-        '\u00a3${trade.wantsCash.toStringAsFixed(0)}',
+        trade.wants.map((int i) => spaces[i]?.name ?? 'Card #$i').join(', '),
+      if (trade.wantsCash > 0) '\u00a3${trade.wantsCash.toStringAsFixed(0)}',
     ];
     final String given = givenBits.isEmpty ? '' : givenBits.join(' + ');
     final String got = gotBits.isEmpty ? '' : gotBits.join(' + ');
@@ -980,8 +983,8 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
                 Expanded(
                   child: Text(
                     '${_displayName(trade.fromName)} \u2192 ${_displayName(trade.toName)}',
-                    style: TextStyle(
-                        fontSize: 13.sp, fontWeight: FontWeight.w600),
+                    style:
+                        TextStyle(fontSize: 13.sp, fontWeight: FontWeight.w600),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),

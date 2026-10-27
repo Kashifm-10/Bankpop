@@ -107,8 +107,8 @@ class CardRequests {
           .eq('status', 'pending')
           .order('id');
       return rows
-          .map((dynamic row) =>
-              CardRequest.fromMap(row as Map<String, dynamic>))
+          .map(
+              (dynamic row) => CardRequest.fromMap(row as Map<String, dynamic>))
           .toList();
     } catch (error) {
       // The table is optional until supabase/buildings.sql is run.
@@ -141,18 +141,21 @@ class CardRequests {
       }
 
       final DateTime now = DateTime.now();
-      final Map<String, dynamic> row =
-          await supabase.from(_table).insert(<String, dynamic>{
-        'game_id': gameId,
-        'card_index': cardIndex,
-        'player_id': playerId,
-        'player_name': playerName,
-        'kind': kind,
-        'amount': amount,
-        'status': 'pending',
-        'date': DateFormat('yyyy-MM-dd').format(now),
-        'time': DateFormat('HH:mm:ss').format(now),
-      }).select('id').single();
+      final Map<String, dynamic> row = await supabase
+          .from(_table)
+          .insert(<String, dynamic>{
+            'game_id': gameId,
+            'card_index': cardIndex,
+            'player_id': playerId,
+            'player_name': playerName,
+            'kind': kind,
+            'amount': amount,
+            'status': 'pending',
+            'date': DateFormat('yyyy-MM-dd').format(now),
+            'time': DateFormat('HH:mm:ss').format(now),
+          })
+          .select('id')
+          .single();
       return AskOutcome(
         AskResult.sent,
         requestId: (row['id'] as num?)?.toInt(),
@@ -228,7 +231,8 @@ class CardRequests {
           .eq('status', 'pending')
           .select('id');
       if (claimed.isEmpty) {
-        return const BuildingOutcome.rejected('that request was already handled');
+        return const BuildingOutcome.rejected(
+            'that request was already handled');
       }
 
       // The card has to exist before any money moves.
@@ -259,7 +263,8 @@ class CardRequests {
       }
       if (!request.isHotel && houses >= 4) {
         await _close(supabase, request.id, 'rejected');
-        return const BuildingOutcome.rejected('that card already has four houses');
+        return const BuildingOutcome.rejected(
+            'that card already has four houses');
       }
 
       final TransferOutcome transfer = await WalletTransfer.pay(
@@ -332,8 +337,7 @@ class CardRequests {
     try {
       await supabase
           .from(_table)
-          .update(<String, dynamic>{'status': status})
-          .eq('id', id);
+          .update(<String, dynamic>{'status': status}).eq('id', id);
     } catch (error) {
       debugPrint('Could not close request $id: $error');
     }

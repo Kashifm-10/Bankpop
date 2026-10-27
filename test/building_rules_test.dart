@@ -124,8 +124,7 @@ void main() {
   });
 
   test('Stations and Utilities take no buildings', () {
-    final BankpopSpace station =
-        _space(5, 'Station One', color: 'Station');
+    final BankpopSpace station = _space(5, 'Station One', color: 'Station');
     final BuildingDecision decision = BuildingRules.next(
       space: station,
       set: <BankpopSpace>[station],
@@ -137,5 +136,65 @@ void main() {
 
     expect(decision.allowed, isFalse);
     expect(decision.reason, contains('colour properties'));
+  });
+
+  test('houses only come down while the set is level', () {
+    // The reported bug: 2, 1 and 0 houses in one set, because the card with a
+    // single house was allowed to sell it.
+    final BankpopSpace third = _space(6, 'Mill Lane');
+    final List<BankpopSpace> set = <BankpopSpace>[first, second, third];
+    final Map<int, int> houses = <int, int>{
+      first.index: 2,
+      second.index: 1,
+      third.index: 0,
+    };
+
+    final BuildingDecision tooEarly = BuildingRules.sell(
+      space: second,
+      set: set,
+      houses: 1,
+      hotels: 0,
+      housesByCard: houses,
+    );
+    expect(tooEarly.allowed, isFalse);
+    expect(tooEarly.reason, contains('Sell evenly'));
+
+    final BuildingDecision allowed = BuildingRules.sell(
+      space: first,
+      set: set,
+      houses: 2,
+      hotels: 0,
+      housesByCard: houses,
+    );
+    expect(allowed.allowed, isTrue);
+    expect(allowed.kind, BuildingKind.house);
+    expect(allowed.price, 25);
+  });
+
+  test('a hotel can be sold back for half its price', () {
+    final BuildingDecision decision = BuildingRules.sell(
+      space: first,
+      set: browns,
+      houses: 4,
+      hotels: 1,
+      housesByCard: <int, int>{first.index: 4, second.index: 4},
+    );
+
+    expect(decision.allowed, isTrue);
+    expect(decision.kind, BuildingKind.hotel);
+    expect(decision.price, 25);
+  });
+
+  test('a card with nothing built cannot sell', () {
+    final BuildingDecision decision = BuildingRules.sell(
+      space: first,
+      set: browns,
+      houses: 0,
+      hotels: 0,
+      housesByCard: <int, int>{first.index: 0, second.index: 0},
+    );
+
+    expect(decision.allowed, isFalse);
+    expect(decision.reason, contains('nothing to sell'));
   });
 }

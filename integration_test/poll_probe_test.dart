@@ -17,7 +17,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:mon/pages/banker/banker_screen.dart';
 import 'package:mon/pages/player/player_screen.dart';
-import 'package:responsive_sizer/responsive_sizer.dart';
+import 'package:responsive_sizer/responsive_sizer.dart' hide DeviceExt;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import 'package:mon/models/bankpop_board.dart';
+import 'package:mon/services/board_catalog.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// One row of `player_cards`: a property that changed hands in this game.
@@ -14,7 +15,7 @@ class PlayerCard {
     required this.from,
     required this.to,
     required this.date,
-    required    this.time,
+    required this.time,
     this.houses = 0,
     this.hotels = 0,
     this.mortgaged = false,
@@ -150,27 +151,13 @@ class PlayerCards {
   static const String _table = 'player_cards';
 
   /// Board index -> space, for turning a stored `card_index` back into a name
-  /// and a colour. Loaded once per app run; an empty map if the asset is
-  /// unreadable, in which case callers fall back to "Card #n".
-  static Map<int, BankpopSpace>? _spaces;
-
-  static Future<Map<int, BankpopSpace>> spaces() async {
-    final Map<int, BankpopSpace>? cached = _spaces;
-    if (cached != null) return cached;
-    try {
-      final BankpopBoard board =
-          await BankpopBoard.loadFromAsset('assets/JSON/bankpop.json');
-      final Map<int, BankpopSpace> map = <int, BankpopSpace>{
-        for (final BankpopSpace space in board.spaces) space.index: space,
-      };
-      _spaces = map;
-      return map;
-    } catch (error) {
-      debugPrint('Could not load the board for card names: $error');
-      _spaces = const <int, BankpopSpace>{};
-      return _spaces!;
-    }
-  }
+  /// and a colour. The names come from the board the game plays on, which this
+  /// device keeps from the moment the game starts ([BoardCatalog.boardForGame]),
+  /// so the cards read correctly without asking the database again; an empty
+  /// map if the board is unreadable, in which case callers fall back to
+  /// "Card #n".
+  static Future<Map<int, BankpopSpace>> spaces(String gameId) =>
+      BoardCatalog.spacesForGame(gameId);
 
   /// Name of whoever already holds this board index in this game, or null while
   /// it is still unsold.
@@ -287,16 +274,19 @@ class PlayerCards {
   }) async {
     final DateTime now = DateTime.now();
     try {
-      final Map<String, dynamic> row =
-          await Supabase.instance.client.from(_table).insert(<String, dynamic>{
-        'game_id': gameId,
-        'card_index': cardIndex,
-        'from': fromName,
-        'to': toName,
-        'code': '${payerId}_$receiverId',
-        'date': DateFormat('yyyy-MM-dd').format(now),
-        'time': DateFormat('HH:mm:ss').format(now),
-      }).select('id').single();
+      final Map<String, dynamic> row = await Supabase.instance.client
+          .from(_table)
+          .insert(<String, dynamic>{
+            'game_id': gameId,
+            'card_index': cardIndex,
+            'from': fromName,
+            'to': toName,
+            'code': '${payerId}_$receiverId',
+            'date': DateFormat('yyyy-MM-dd').format(now),
+            'time': DateFormat('HH:mm:ss').format(now),
+          })
+          .select('id')
+          .single();
       return ClaimResult.ok((row['id'] as num?)?.toInt());
     } on PostgrestException catch (error) {
       // 23505 is the unique index on (game_id, card_index): the other device won
@@ -325,10 +315,12 @@ class PlayerCards {
 
   /// This player's cards in this game, newest first.
   ///
-  /// The indexed filter matches the two id columns the trigger fills. Until the
-  /// trigger is deployed those columns are null, so an undefined-column reply
-  /// falls back to matching the ids inside `code` - the same arrangement the
-  /// transaction history uses.
+  /// Only the receiver side counts. `payer_id` is whoever paid for the card,
+  /// and the bank pays on every card it sells, so matching it would put every
+  /// issued property into the banker's own hand. The indexed filter uses the
+  /// id columns the trigger fills; until the trigger is deployed those are
+  /// null, so an undefined-column reply falls back to reading the ids inside
+  /// `code` - the same arrangement the transaction history uses.
   static Future<List<PlayerCard>> forPlayer({
     required String gameId,
     required String playerId,
@@ -342,7 +334,7 @@ class PlayerCards {
           .from(_table)
           .select()
           .eq('game_id', gameId)
-          .or('receiver_id.eq.$playerId,payer_id.eq.$playerId')
+          .eq('receiver_id', playerId)
           .order('date', ascending: false)
           .order('time', ascending: false)
           .limit(200);
@@ -354,16 +346,48 @@ class PlayerCards {
           .from(_table)
           .select()
           .eq('game_id', gameId)
-          .like('code', '%$playerId%')
+          .like('code', '%${playerId}_%')
           .order('date', ascending: false)
           .order('time', ascending: false)
           .limit(200);
     }
 
-    return rows
-        .map((dynamic row) =>
-            PlayerCard.fromMap(row as Map<String, dynamic>))
-        .toList();
+    // Both queries can also match the payer's half of `code` (the fallback is
+    // a LIKE, and a trigger-less project may hold a stale receiver_id), so the
+    // final say is the receiver half of each row.
+    final List<PlayerCard> mine = <PlayerCard>[];
+    for (final dynamic raw in rows) {
+      final Map<String, dynamic> row = raw as Map<String, dynamic>;
+      if (_receiverIdOf(row) != playerId) continue;
+      if (row['to']?.toString() == 'Bank') continue;
+      mine.add(PlayerCard.fromMap(row));
+    }
+    return mine;
+  }
+
+  /// Every card that moved in this game, newest first - the bank's ledger.
+  ///
+  /// The banker never receives a card themselves, so [forPlayer] leaves them
+  /// with an empty page; this is the whole game instead: what the bank sold, to
+  /// whom, and when.
+  static Future<List<PlayerCard>> forGame(String gameId) async {
+    if (gameId.isEmpty) return const <PlayerCard>[];
+    try {
+      final List<dynamic> rows = await Supabase.instance.client
+          .from(_table)
+          .select()
+          .eq('game_id', gameId)
+          .order('date', ascending: false)
+          .order('time', ascending: false)
+          .limit(200);
+      return rows
+          .map((dynamic row) =>
+              PlayerCard.fromMap(row as Map<String, dynamic>))
+          .toList();
+    } catch (error) {
+      debugPrint('Could not read the game\'s cards: $error');
+      return const <PlayerCard>[];
+    }
   }
 
   static bool _columnsMissing(PostgrestException error) {

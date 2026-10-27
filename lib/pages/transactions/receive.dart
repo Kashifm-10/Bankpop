@@ -1,9 +1,9 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'package:qr_flutter/qr_flutter.dart';
-import 'package:responsive_sizer/responsive_sizer.dart';
+import 'package:mon/widgets/game_controls.dart';
+import 'package:mon/widgets/qr_box.dart';
+import 'package:mon/widgets/app_metrics.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ReceiveButton extends StatelessWidget {
@@ -33,7 +33,6 @@ class ReceiveButton extends StatelessWidget {
       context: context,
       builder: (context) {
         return AlertDialog(
-          backgroundColor: const Color(0xFFFFF8E1),
           title: const Text('Enter Value'),
           content: TextField(
             controller: controller,
@@ -75,7 +74,6 @@ class ReceiveButton extends StatelessWidget {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: Colors.yellow.shade50,
         title: Text(
           name,
           style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold),
@@ -87,11 +85,9 @@ class ReceiveButton extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              QrImageView(
+              QrBox(
                 data: qrData,
-                version: QrVersions.auto,
                 size: 50.w,
-                gapless: false,
               ),
               SizedBox(height: 2.h),
               Text('Value: $value',
@@ -113,21 +109,11 @@ class ReceiveButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ElevatedButton.icon(
-      icon: Icon(FontAwesomeIcons.qrcode, size: 16.sp),
+    // The same sticker tile the rest of the game screens use: the label lives
+    // in the tooltip and in the info sheet, not in the button.
+    return GameIconButton(
+      control: GameControls.receive,
       onPressed: () => _showValueDialog(context),
-      style: ElevatedButton.styleFrom(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        backgroundColor: Colors.green,
-        foregroundColor: Colors.white,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
-      ),
-      label: Text(
-        "Receive",
-        style: TextStyle(fontSize: 16.sp),
-      ),
     );
   }
 }
