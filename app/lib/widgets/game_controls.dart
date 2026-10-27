@@ -100,8 +100,8 @@ abstract final class GameControls {
   static const GameControl giveCard = GameControl(
     icon: Icons.back_hand_outlined,
     art: 'assets/Icons/give_card.png',
-    label: 'Assign to player',
-    detail: 'Hands a property card from the bank to a player. Use with InstantPay or when playing with cards.',
+    label: 'Give card',
+    detail: 'Hands a property card from the bank to a player. Use with InstantPay or when playing with cards. The banker assigns the card to the selected player.',
     color: Color(0xFF1565C0),
   );
 
