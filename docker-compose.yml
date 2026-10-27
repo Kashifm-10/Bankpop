@@ -1,0 +1,73 @@
+# Both halves of Bankpop in containers, for a machine without Flutter and
+# Python set up - or for a demo.
+#
+#   docker compose up          start the mail service and the app, then open
+#                              http://localhost:8080
+#   docker compose up mail     only the mail service, on http://localhost:8000
+#   docker compose up app      only the app, on http://localhost:8080
+#   docker compose down        stop both
+#   docker compose logs -f     follow what either half is saying
+#
+# The mailbox is not in this file: the mail service reads it from the Supabase
+# `email_settings` row using SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY from
+# django-mail-api/.env (see supabase/mail_provider.sql). The app reads its
+# MAIL_API_TOKEN from that same file, so the token is written once.
+#
+# The first `docker compose up` pulls the Flutter SDK image, which is a large
+# download; after that the app's pub cache and build live in the image's
+# volumes except for .dart_tool, which lands in app/ because the source is
+# mounted (that is what keeps hot reload working).
+
+services:
+  mail:
+    build: ./django-mail-api
+    env_file:
+      - ./django-mail-api/.env
+    environment:
+      # A container has no .env file in the image (.dockerignore keeps it out),
+      # so everything the service needs arrives as environment variables.
+      DJANGO_DEBUG: "0"
+      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1"
+    ports:
+      - "${MAIL_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  app:
+    image: ghcr.io/cirruslabs/flutter:stable
+    working_dir: /app
+    # The browser runs on the host, so it reaches the service on the published
+    # port - not on the compose network's `mail` name.
+    environment:
+      MAIL_API_URL: "http://127.0.0.1:${MAIL_PORT:-8000}"
+      WEB_PORT: "${WEB_PORT:-8080}"
+    volumes:
+      - ./app:/app
+      # Read-only, and only for the token: the app must not hold the mailbox,
+      # and this file holds no mailbox either.
+      - ./django-mail-api/.env:/mail.env:ro
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    depends_on:
+      mail:
+        condition: service_healthy
+    tty: true
+    stdin_open: true
+    command:
+      - bash
+      - -lc
+      - >
+        token=$$(sed -n 's/^[[:space:]]*MAIL_API_TOKEN=//p' /mail.env | tail -1 | tr -d '\r"');
+        if [ -z "$$token" ]; then echo 'MAIL_API_TOKEN is empty in django-mail-api/.env' >&2; exit 1; fi;
+        flutter pub get &&
+        flutter run -d web-server --web-port "$$WEB_PORT" --web-hostname 0.0.0.0
+        --dart-define=MAIL_API_URL="$$MAIL_API_URL"
+        --dart-define=MAIL_API_TOKEN="$$token"

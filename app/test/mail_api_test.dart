@@ -10,7 +10,8 @@ import 'package:http/testing.dart';
 import 'package:mon/services/mail_api.dart';
 
 MailApi _service(Future<http.Response> Function(http.Request) answer,
-        {String baseUrl = 'https://mail.example', String token = 'token-123'}) =>
+        {String baseUrl = 'https://mail.example',
+        String token = 'token-123'}) =>
     MailApi(baseUrl: baseUrl, token: token, client: MockClient(answer));
 
 void main() {
@@ -70,8 +71,10 @@ void main() {
       throwsA(
         isA<MailApiException>()
             .having((MailApiException e) => e.statusCode, 'statusCode', 401)
-            .having((MailApiException e) => e.message, 'message', 'unauthorized')
-            .having((MailApiException e) => e.unreachable, 'unreachable', isFalse),
+            .having(
+                (MailApiException e) => e.message, 'message', 'unauthorized')
+            .having(
+                (MailApiException e) => e.unreachable, 'unreachable', isFalse),
       ),
     );
   });
@@ -96,13 +99,15 @@ void main() {
   });
 
   test('an unanswered request is unreachable, not a refusal', () async {
-    final MailApi api = _service((_) async => throw Exception('connection reset'));
+    final MailApi api =
+        _service((_) async => throw Exception('connection reset'));
 
     await expectLater(
       api.send(to: 'a@b.com', subject: 'Hi', text: 'x', html: 'y'),
       throwsA(
         isA<MailApiException>()
-            .having((MailApiException e) => e.unreachable, 'unreachable', isTrue)
+            .having(
+                (MailApiException e) => e.unreachable, 'unreachable', isTrue)
             .having((MailApiException e) => e.statusCode, 'statusCode', 0),
       ),
     );
@@ -122,5 +127,78 @@ void main() {
                 contains('HTTP 502')),
       ),
     );
+  });
+
+  // One build is opened on a laptop against the local service and on the
+  // deployed site against the hosted one, so the address cannot be a constant.
+  group('where the app looks for the service', () {
+    test('a page served from localhost uses the loopback service', () {
+      for (final String page in <String>[
+        'http://localhost:5180',
+        'http://127.0.0.1:8899',
+        'http://localhost',
+      ]) {
+        expect(
+          MailApi.resolveBaseUrl(
+            origin: page,
+            hostedUrl: 'https://mail.example',
+          ),
+          MailApi.localService,
+          reason: page,
+        );
+      }
+    });
+
+    test('the deployed site uses the hosted service', () {
+      expect(
+        MailApi.resolveBaseUrl(
+          origin: 'https://bankpop.netlify.app',
+          hostedUrl: 'https://mail.example',
+        ),
+        'https://mail.example',
+      );
+    });
+
+    test('a build setting beats the page it is running on', () {
+      expect(
+        MailApi.resolveBaseUrl(
+          origin: 'http://localhost:5180',
+          buildUrl: 'https://staging.example',
+          hostedUrl: 'https://mail.example',
+        ),
+        'https://staging.example',
+      );
+    });
+
+    test('no page at all (a phone) uses the hosted service', () {
+      expect(
+        MailApi.resolveBaseUrl(origin: '', hostedUrl: 'https://mail.example'),
+        'https://mail.example',
+      );
+    });
+
+    test('a hosted page with nowhere to post is not configured', () {
+      final MailApi api =
+          MailApi(origin: 'https://bankpop.netlify.app', token: 'token');
+
+      expect(api.configured, isFalse);
+    });
+
+    test('a local page needs no setting at all', () {
+      final MailApi api = MailApi(origin: 'http://localhost:5180', token: 't');
+
+      expect(api.configured, isTrue);
+      expect(api.baseUrl, MailApi.localService);
+    });
+
+    test('an explicit address still wins, and loses its trailing slash', () {
+      final MailApi api = MailApi(
+        baseUrl: 'https://mail.example//',
+        origin: 'http://localhost:5180',
+        token: 't',
+      );
+
+      expect(api.baseUrl, 'https://mail.example');
+    });
   });
 }

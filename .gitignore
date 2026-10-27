@@ -11,6 +11,9 @@ Thumbs.db
 .env
 .env.local
 
+# dev.sh leaves its pid file and the mail service's log here
+.dev/
+
 # Build output left at the root before the app moved into app/. The live copies
 # are app/build, app/.dart_tool and app/.flutter-plugins-dependencies now; these
 # two lines only keep the old directories out of `git status`.

@@ -21,6 +21,65 @@ Bankpop/
 `app/` and `django-mail-api/` are independent: neither builds the other, and the
 only thing they share is one row in Supabase (see [Mail](#mail)).
 
+## Running
+
+One command starts both halves - the mail service in the background, then the
+Flutter app, with the service's token passed in from `django-mail-api/.env`:
+
+```
+bash dev.sh
+```
+
+Its other commands, for when one half is already running:
+
+```
+bash dev.sh app       # the app alone
+bash dev.sh mail      # the mail service alone, in this terminal, for its logs
+bash dev.sh status    # ask the mail service whether it can send
+bash dev.sh stop      # stop a mail service left running by dev.sh
+```
+
+On Windows that is Git Bash: the script uses `flutter`, the
+`django-mail-api/.venv` interpreter and `curl`. `MAIL_PORT=8001 bash dev.sh`
+moves the service (the app follows it), and `DEVICE=web-server bash dev.sh`
+serves the app on a port instead of opening Chrome.
+
+The same two halves in containers, for a machine without Flutter or Python set
+up:
+
+```
+docker compose up          # mail service on :8000, app on :8080
+docker compose up mail     # or one at a time
+docker compose up app
+docker compose down
+```
+
+The first `up` pulls the Flutter SDK image, which is a large download. `dev.sh`
+is the quicker loop once Flutter is installed, because it does not rebuild
+dependencies inside a container.
+
+### Where the app finds the mail service
+
+The address follows the page the app is running on, so one build works
+everywhere:
+
+| The app is open on | It posts to |
+| --- | --- |
+| `localhost` / `127.0.0.1`, on any port (`dev.sh`, `flutter run`) | `http://127.0.0.1:8000` |
+| the deployed site, or a phone | the hosted service |
+
+The hosted address is `MailApi.hostedService` in
+[`app/lib/services/mail_api.dart`](app/lib/services/mail_api.dart), or
+`--dart-define=MAIL_API_HOSTED_URL=https://...` for a build. Until it is filled
+in, a hosted build says it has no mail service instead of posting into nothing.
+`--dart-define=MAIL_API_URL=https://...` overrides both, which is how a staging
+build points at a staging service.
+
+The token is always a build setting - `MAIL_API_TOKEN` from
+`django-mail-api/.env`, passed by `dev.sh` and by the compose file. A web build
+cannot keep a secret, so the token is a speed bump; what stops abuse is on the
+server (recipient allowlist, rate limit, fixed sender).
+
 ## The app
 
 ```
@@ -52,16 +111,10 @@ Its README covers Gmail, other providers, testing and deploying. In short:
   redeploy and without shipping the password in the app.
 - The service reads that row with a Supabase **service-role key**
   (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` in its `.env`).
-- The app only needs the service's address and its `MAIL_API_TOKEN`, passed at
-  build time:
-
-  ```
-  flutter run -d chrome \
-    --dart-define=MAIL_API_URL=http://127.0.0.1:8000 \
-    --dart-define=MAIL_API_TOKEN=<the service's MAIL_API_TOKEN>
-  ```
-
-  Without them the account screens say so instead of failing quietly.
+- The app only needs the service's address and its `MAIL_API_TOKEN`; see
+  [Where the app finds the mail service](#where-the-app-finds-the-mail-service).
+  `bash dev.sh` does both. Without them the account screens say so instead of
+  failing quietly.
 
 ## Database
 
