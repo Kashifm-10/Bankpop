@@ -56,6 +56,11 @@ class _AuthScreenState extends State<AuthScreen> {
   /// inbox", because this account cannot sign in until the link is opened.
   String? _pendingEmail;
 
+  /// Why the verification mail did not go out, when it did not. The account
+  /// exists either way, so the screen says what failed and offers the resend
+  /// instead of throwing the sign-up away.
+  String? _pendingMailProblem;
+
   /// Set when a sign-in was refused only because the address is unverified, so
   /// the screen can offer the resend without the player retyping anything.
   String? _unverifiedEmail;
@@ -123,6 +128,7 @@ class _AuthScreenState extends State<AuthScreen> {
     setState(() {
       _busy = false;
       _pendingEmail = result.email ?? email;
+      _pendingMailProblem = result.mailProblem;
       _password.clear();
       _confirm.clear();
     });
@@ -144,10 +150,12 @@ class _AuthScreenState extends State<AuthScreen> {
     if (!result.ok) {
       setState(() {
         _busy = false;
-        _error = result.error;
+        // An unverified address is not an error to shout about: it gets its own
+        // notice, with the address it was refused for and the resend beside it.
         _unverifiedEmail = result.needsVerification
             ? result.email ?? _email.text.trim()
             : null;
+        _error = result.needsVerification ? null : result.error;
       });
       return;
     }
@@ -288,10 +296,12 @@ class _AuthScreenState extends State<AuthScreen> {
               child: _pendingEmail != null
                   ? _PendingVerification(
                       email: _pendingEmail!,
+                      problem: _pendingMailProblem,
                       busy: _resending,
                       onResend: () => _resend(_pendingEmail!),
                       onBack: () => setState(() {
                         _pendingEmail = null;
+                        _pendingMailProblem = null;
                         _isSignUp = false;
                         _error = null;
                       }),
@@ -417,17 +427,11 @@ class _AuthScreenState extends State<AuthScreen> {
                           ),
                         ],
                         if (_unverifiedEmail != null) ...<Widget>[
-                          SizedBox(height: 0.6.h),
-                          TextButton(
-                            onPressed: _resending
-                                ? null
-                                : () => _resend(_unverifiedEmail!),
-                            child: Text(
-                              _resending
-                                  ? 'Sending...'
-                                  : 'Resend the verification email',
-                              style: const TextStyle(color: Color(0xFF2E7D32)),
-                            ),
+                          SizedBox(height: 1.2.h),
+                          _VerificationPendingNotice(
+                            email: _unverifiedEmail!,
+                            busy: _resending,
+                            onResend: () => _resend(_unverifiedEmail!),
                           ),
                         ],
                         if (!_isSignUp) ...<Widget>[
@@ -564,12 +568,17 @@ class _PendingVerification extends StatelessWidget {
     required this.busy,
     required this.onResend,
     required this.onBack,
+    this.problem,
   });
 
   final String email;
   final bool busy;
   final VoidCallback onResend;
   final VoidCallback onBack;
+
+  /// Why the link did not go out, when it did not. The account is created
+  /// either way, so this is a note about the mail rather than a failed sign-up.
+  final String? problem;
 
   @override
   Widget build(BuildContext context) {
@@ -581,7 +590,7 @@ class _PendingVerification extends StatelessWidget {
             size: 58, color: Color(0xFF689F38)),
         SizedBox(height: 2.h),
         Text(
-          'Check your inbox',
+          'Check your mail to verify',
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 22.sp,
@@ -591,8 +600,14 @@ class _PendingVerification extends StatelessWidget {
         ),
         SizedBox(height: 1.h),
         Text(
-          'We sent a verification link to $email. Open it, then come back '
-          'and sign in.',
+          problem == null
+              ? 'Your account is created. We sent a verification link to '
+                  '$email - open it to verify this address, then come back and '
+                  'sign in.'
+              : 'Your account is created, but the verification email could not '
+                  'be sent to $email. The account is waiting for its link: '
+                  'tap Resend below, or use the sign-in screen once the mail '
+                  'service is back.',
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 14.sp,
@@ -600,6 +615,26 @@ class _PendingVerification extends StatelessWidget {
             color: const Color(0xFF558B2F),
           ),
         ),
+        if (problem != null) ...<Widget>[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFE9E9),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE1B3B3)),
+            ),
+            child: Text(
+              'Why: $problem',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 12.5,
+                height: 1.4,
+                color: Color(0xFF8E2B2B),
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 10),
         const Text(
           'Until that link is opened, signing in to this account is refused. '
@@ -645,6 +680,81 @@ class _PendingVerification extends StatelessWidget {
           style: TextStyle(fontSize: 11.5, color: Color(0xFF9E9E9E)),
         ),
       ],
+    );
+  }
+}
+
+/// What the sign-in form shows when the password was right but the address has
+/// not been verified yet: the address it was refused for, what to do about it,
+/// and the resend that sends another link without asking for anything else.
+class _VerificationPendingNotice extends StatelessWidget {
+  const _VerificationPendingNotice({
+    required this.email,
+    required this.busy,
+    required this.onResend,
+  });
+
+  final String email;
+  final bool busy;
+  final VoidCallback onResend;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF3CD),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE0C97F)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const Icon(Icons.mark_email_unread_outlined,
+                  size: 18, color: Color(0xFF8D6E00)),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'Verification pending',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF7A5F00),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'This account cannot sign in until $email is verified. Open the '
+            'link we mailed to it, then sign in again. No link, or it has '
+            'expired? Send a fresh one:',
+            style: const TextStyle(
+              fontSize: 12.5,
+              height: 1.4,
+              color: Color(0xFF7A5F00),
+            ),
+          ),
+          TextButton.icon(
+            onPressed: busy ? null : onResend,
+            icon: Icon(
+              busy ? Icons.hourglass_top : Icons.forward_to_inbox,
+              size: 18,
+              color: const Color(0xFF2E7D32),
+            ),
+            label: Text(
+              busy ? 'Sending...' : 'Resend the verification email',
+              style: const TextStyle(
+                color: Color(0xFF2E7D32),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

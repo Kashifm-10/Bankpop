@@ -3,4 +3,10 @@
 # 404 before the app loads. The app uses path URLs (lib/services/url_strategy_web.dart),
 # so every unknown path has to reach index.html and let go_router resolve it.
 # `flutter build web` copies this file into build/web/.
+
+# The verification mail links to this page, not to the app: it is a plain file
+# beside index.html and has to be served as itself rather than swallowed by the
+# catch-all below.
+/verify.html    /verify.html   200
+
 /*    /index.html   200

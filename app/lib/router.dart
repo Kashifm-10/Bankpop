@@ -23,6 +23,7 @@ import 'package:mon/pages/role.dart';
 import 'package:mon/profile.dart';
 import 'package:mon/routes.dart';
 import 'package:mon/services/game_access.dart';
+import 'package:mon/services/game_guard.dart';
 
 /// The app's screens as URLs.
 ///
@@ -36,6 +37,10 @@ import 'package:mon/services/game_access.dart';
 /// why the screens no longer read the id from SharedPreferences alone.
 final GoRouter appRouter = GoRouter(
   initialLocation: AppRoutes.splash,
+  // A device at a table stays at the table: the address bar, a stale bookmark
+  // or a deep link lands back on the game it is playing instead of opening a
+  // second lobby beside it. See [GameGuard] for the three ways out.
+  redirect: (BuildContext context, GoRouterState state) => _stayInGame(state),
   routes: <RouteBase>[
     GoRoute(
       path: AppRoutes.splash,
@@ -235,6 +240,31 @@ final GoRouter appRouter = GoRouter(
 /// not "this route is broken".
 double _money(GoRouterState state) =>
     double.tryParse(state.uri.queryParameters['bank'] ?? '') ?? 0;
+
+/// Sends the player back to their live table when they ask for another page.
+///
+/// The game's own pages are allowed, and so are the screens a launch or an
+/// emailed link can land on - being bounced away from the password screen would
+/// lock a device out of its own account.
+String? _stayInGame(GoRouterState state) {
+  final String? gameRoute = GameGuard.gameRoute;
+  if (gameRoute == null) return null;
+  final String path = state.uri.path;
+  const List<String> neverRedirected = <String>[
+    AppRoutes.splash,
+    AppRoutes.gameDenied,
+    AppRoutes.setPassword,
+    AppRoutes.changePassword,
+    AppRoutes.verifyEmail,
+  ];
+  if (neverRedirected.contains(path) || path.startsWith('/game/')) return null;
+  // Another page was asked for while the table is live: turn it around and let
+  // the game screen ask whether they meant to leave. Confirming there is the
+  // only way out, which is what makes the browser's back button behave like the
+  // phone's.
+  GameGuard.requestLeavePrompt();
+  return gameRoute;
+}
 
 /// Runs before a game screen is built. The database row is the only proof of a
 /// seat, so the answer can take a moment; go_router waits for it, which is why

@@ -39,24 +39,29 @@ class SelectRoleScreen extends StatelessWidget {
     Map<String, dynamic>? result;
 
     if (scanOption == true) {
-      // Step 2A: Push to QR scanner
+      // Step 2A: Push to QR scanner. Closing it without a code is the player
+      // deciding not to join after all, so nothing is sent and nothing is said.
       // ignore: use_build_context_synchronously
       final scannedResult = await _navigateToQRScanner(context);
-      if (scannedResult == null) return; // If no valid result, exit
+      if (scannedResult == null) return;
       result = scannedResult;
     } else {
       // Step 2B: Show input dialog to manually enter Game ID
       // ignore: use_build_context_synchronously
-      String? enteredId = await _showGameIdInputDialog(context);
-      if (enteredId != null && enteredId.trim().isNotEmpty) {
-        final trimmedId = enteredId.trim();
-        result =
-            // ignore: use_build_context_synchronously
-            await _checkGameIdAndShowNameDialog(context, trimmedId, playerID);
-      }
+      final String? enteredId = await _showGameIdInputDialog(context);
+      // Cancel, back or a tap outside leaves this null. No request was made, so
+      // the "not approved" box must not appear over a dialog that was simply
+      // closed.
+      if (enteredId == null || enteredId.trim().isEmpty) return;
+      final String trimmedId = enteredId.trim();
+      result =
+          // ignore: use_build_context_synchronously
+          await _checkGameIdAndShowNameDialog(context, trimmedId, playerID);
     }
 
-    // Step 3: Process result (after name entry and joining)
+    // Step 3: Process result (after name entry and joining). A null here means a
+    // join was actually attempted and did not go through, and
+    // [_explainedRefusal] says whether the reason was already shown.
     if (result != null) {
       // ignore: use_build_context_synchronously
       _navigateToPlayersScreen(context, result);
@@ -150,6 +155,7 @@ class SelectRoleScreen extends StatelessWidget {
       // ignore: use_build_context_synchronously
       _showInvalidGameIdSnackBar(
           context); // Showing the error on invalid Game ID
+      _explainedRefusal = true;
       return null;
     }
 
@@ -162,6 +168,7 @@ class SelectRoleScreen extends StatelessWidget {
     if (session != null) BoardCatalog.use(session.boardId);
     if (session != null && session.isEnded) {
       if (context.mounted) showMessage(context, 'That game has already ended.');
+      _explainedRefusal = true;
       return null;
     }
 
@@ -238,6 +245,12 @@ class SelectRoleScreen extends StatelessWidget {
         });
       } catch (e) {
         debugPrint('Error inserting request: $e');
+        _explainedRefusal = true;
+        if (context.mounted) {
+          showMessage(context,
+              'The join request could not be sent. Check the connection and '
+              'try again.');
+        }
         return null;
       }
     }

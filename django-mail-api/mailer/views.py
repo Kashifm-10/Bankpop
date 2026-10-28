@@ -49,7 +49,30 @@ def _client_ip(request):
     return request.META.get('REMOTE_ADDR', 'unknown')
 
 
+_LOOPBACK_ADDRESSES = frozenset({'127.0.0.1', '::1'})
+
+
+def _is_local_dev(request):
+    """True for a request from this machine while the service is in DEBUG.
+
+    A web build served from localhost posts to the loopback service, and a
+    plain `flutter run` or `flutter build web` carries no MAIL_API_TOKEN, so
+    every signup would end in "the service refused this build's token" on the
+    one setup where the token cannot be stale. DEBUG plus a loopback peer is
+    that setup: only this computer can reach a loopback address, and a
+    deployed service runs with DEBUG off.
+
+    REMOTE_ADDR, not the forwarded header: a client that sends
+    `X-Forwarded-For: 127.0.0.1` must not be able to authorize itself.
+    """
+    if not settings.DEBUG:
+        return False
+    return request.META.get('REMOTE_ADDR', '') in _LOOPBACK_ADDRESSES
+
+
 def _is_authorized(request):
+    if _is_local_dev(request):
+        return True
     if not settings.MAIL_API_TOKEN:
         return False
     scheme, _, token = request.headers.get('Authorization', '').partition(' ')
@@ -139,6 +162,8 @@ def _clean_payload(data):
 def send_mail(request):
     if not _is_authorized(request):
         return JsonResponse({'error': 'unauthorized'}, status=401)
+    if not request.headers.get('Authorization'):
+        logger.info('Accepted a local request without a token (DEBUG on loopback)')
 
     try:
         data = json.loads(request.body)

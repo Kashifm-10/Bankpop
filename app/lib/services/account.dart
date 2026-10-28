@@ -63,18 +63,28 @@ class AuthResult {
 /// The outcome of creating an account.
 ///
 /// A created account is not signed in: the verification link has to be opened
-/// first. [SignUpResult.failed] is also what a player sees when the account row
-/// was written but the verification mail could not be sent - the row is then
-/// removed, so a retry starts clean instead of leaving an account nobody can
-/// enter.
+/// first. [SignUpResult.mailProblem] reports the one thing that can go wrong
+/// after the row is written - the verification mail could not be sent. The
+/// account is kept when that happens, because the sign-in screen can send
+/// another link the moment the mail service is back: deleting it would mean
+/// typing the whole form again, and the address would be taken by a row nobody
+/// could enter.
 class SignUpResult {
-  const SignUpResult.created(this.email) : error = null;
-  const SignUpResult.failed(this.error) : email = null;
+  const SignUpResult.created(this.email, {this.mailProblem}) : error = null;
+  const SignUpResult.failed(this.error)
+      : email = null,
+        mailProblem = null;
 
   final String? email;
   final String? error;
 
+  /// Set when the account exists but its verification mail did not go out.
+  final String? mailProblem;
+
   bool get ok => error == null;
+
+  /// True when the account was created and the mail is on its way.
+  bool get mailSent => ok && mailProblem == null;
 }
 
 /// Email + password accounts, kept entirely in `players_profile`.
@@ -208,15 +218,12 @@ class Account {
         email: address,
       );
       if (!mail.ok) {
-        // No mail means no way to verify, so the account would be a dead end.
-        // Removing it lets the player try again once the mail is fixed.
-        try {
-          await supabase.from('players_profile').delete().eq('id', id);
-        } catch (cleanupError) {
-          debugPrint(
-              'Could not remove the unverifiable account: $cleanupError');
-        }
-        return SignUpResult.failed(mail.message);
+        // The account stays. Signing in is refused until the address is
+        // verified either way, and the sign-in screen can send a fresh link
+        // (AccountMail.resendVerification) without the password - so a mail
+        // service that is down no longer throws the sign-up away.
+        debugPrint('The verification mail did not go out: ${mail.message}');
+        return SignUpResult.created(address, mailProblem: mail.message);
       }
 
       return SignUpResult.created(address);

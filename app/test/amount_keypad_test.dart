@@ -48,7 +48,8 @@ void main() {
 
     await tester.tap(find.text('1'));
     await tester.tap(find.text('2'));
-    await tester.tap(find.text('Decimal'));
+    // The decimal point is a key of its own now, beside zero and backspace.
+    await tester.tap(find.text('.'));
     await tester.tap(find.text('5'));
     await tester.pumpAndSettle();
     expect(find.text('12.5'), findsOneWidget);

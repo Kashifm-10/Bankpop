@@ -15,7 +15,9 @@ import 'package:mon/services/board_catalog.dart';
 import 'package:mon/services/card_deck.dart';
 import 'package:mon/services/card_requests.dart';
 import 'package:mon/services/deals.dart';
+import 'package:mon/services/game_guard.dart';
 import 'package:mon/services/game_session.dart';
+import 'package:mon/services/payment_alerts.dart';
 import 'package:mon/services/player_cards.dart';
 import 'package:mon/services/player_exit.dart';
 import 'package:mon/services/wallet_transfer.dart';
@@ -28,8 +30,10 @@ import 'package:mon/widgets/player_badge.dart';
 import 'package:mon/widgets/game_controls.dart';
 import 'package:mon/widgets/app_content.dart';
 import 'package:mon/widgets/player_palette.dart';
+import 'package:mon/widgets/square_action_grid.dart';
 import 'package:mon/widgets/game_status_banner.dart';
 import 'package:mon/widgets/qr_box.dart';
+import 'package:mon/widgets/amount_keypad.dart';
 import 'package:mon/widgets/app_metrics.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -87,6 +91,9 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
     _subscribeToSession(); // Live suspend/resume/end
     _loadSession(); // First read, before the socket connects
     startPolling(); // Reconciliation, in case Realtime is unavailable
+    // The browser's back button and a typed address land here: the router turns
+    // them around, and this asks the same question the phone's back button does.
+    GameGuard.leaveRequests.addListener(_onLeaveRequested);
     _loadStartupSettings();
     // The board this game was started on, before anything reads a card name.
     BoardCatalog.useForGame(widget.gameId);
@@ -94,11 +101,31 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
 
   @override
   void dispose() {
+    GameGuard.leaveRequests.removeListener(_onLeaveRequested);
     _rosterUpdates?.cancel();
     _requestUpdates?.cancel();
     _sessionUpdates?.cancel();
     _pollingTimer?.cancel(); // Clean up timer
     super.dispose();
+  }
+
+  /// True while the "did you mean to leave" box is up, so a second back press
+  /// does not stack another one on top of it.
+  bool _leavePromptOpen = false;
+
+  /// Another page was asked for while this table is live. The router keeps the
+  /// device here; this is the question about whether that was the point.
+  Future<void> _onLeaveRequested() async {
+    if (!mounted || _leavePromptOpen) return;
+    _leavePromptOpen = true;
+    // The router asks mid-navigation; the dialog opens on the next turn rather
+    // than during it.
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
+    final bool shouldLeave = await _onWillPop();
+    _leavePromptOpen = false;
+    if (!shouldLeave || !mounted) return;
+    await _returnToTitle();
   }
 
   Future<void> _loadSession() async {
@@ -125,6 +152,14 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
   /// a polled one cannot disagree.
   void _applySession(GameSession session) {
     if (!mounted || session.gameId != widget.gameId) return;
+    // This device is at this table: other pages belong to it until the banker
+    // leaves, or the table is paused or ended.
+    GameGuard.enter(
+      gameId: widget.gameId,
+      banker: true,
+      suspended: session.isSuspended,
+      ended: session.isEnded,
+    );
     final bool changed = _session?.status != session.status ||
         payOption != session.paymentOption ||
         _playWithCards != session.playWithCards ||
@@ -423,8 +458,24 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
       await checkForRequests();
       unawaited(_checkCardRequests());
       unawaited(_checkDeals());
+      // Money can arrive without this device doing anything: a scanned pay QR,
+      // a rent window, a card bought off the board.
+      final String me = ID.isNotEmpty
+          ? ID
+          : ((await SharedPreferences.getInstance()).getString('playerID') ??
+              '');
+      if (me.isNotEmpty && mounted) {
+        unawaited(PaymentAlerts.check(
+          context: context,
+          gameId: widget.gameId,
+          playerId: me,
+        ));
+      }
     } catch (e) {
       debugPrint('Error fetching players: $e');
+      // The first read failing must not leave the list on its spinner: the next
+      // poll fills it in, and the bank header is already drawn.
+      if (isLoading && mounted) setState(() => isLoading = false);
     } finally {
       _isFetching = false;
     }
@@ -1180,27 +1231,24 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
     );
   }
 
-  ButtonStyle _buttonStyle() {
-    return ElevatedButton.styleFrom(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
-      ),
-    );
-  }
+  /// True while the advance overlay is on screen, so it is only ever closed
+  /// once - by the payment that opened it, or by the caller giving up.
+  bool _advancingShown = false;
 
+  /// The overlay shown while the bank hands a player their round advance.
+  ///
+  /// The animation repeats, and the caller closes it when the work is done: a
+  /// one-shot play froze on its last frame while the round trip was still
+  /// running, which read as a stuck screen. [closeAdvancing] runs from a
+  /// `finally`, so a failed payment always takes the overlay down.
   void advancing() {
-    showDialog(
+    if (!mounted || _advancingShown) return;
+    _advancingShown = true;
+    showDialog<void>(
       barrierDismissible: false,
       context: context,
       barrierColor: Colors.transparent,
       builder: (BuildContext dialogContext) {
-        // Auto-close after 2 seconds
-        /*  Future.delayed(const Duration(seconds: 2), () {
-          if (Navigator.of(dialogContext).canPop()) {
-            Navigator.of(dialogContext).pop();
-          }
-        }); */
-
         return Dialog(
           backgroundColor: Colors.transparent,
           child: Center(
@@ -1211,7 +1259,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                 children: [
                   Lottie.asset(
                     'assets/lottie/advancing.json',
-                    repeat: false,
+                    repeat: true,
                   ),
                 ],
               ),
@@ -1219,7 +1267,22 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
           ),
         );
       },
-    );
+    ).whenComplete(() => _advancingShown = false);
+  }
+
+  /// Takes the advance overlay down if it is still up.
+  void closeAdvancing() {
+    if (!_advancingShown || !mounted) return;
+    _advancingShown = false;
+    Navigator.of(context).pop();
+  }
+
+  /// Closes the advance overlay and then says what happened, in that order: a
+  /// message opened on top of the overlay would be the route the overlay's own
+  /// pop took down.
+  void _finishAdvance(String message) {
+    closeAdvancing();
+    if (mounted) showMessage(context, message);
   }
 
   Widget _buildPlayerRow(BuildContext context, Player player) {
@@ -1274,8 +1337,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                 ),
               ],
             ),
-          ),
-          // scaleDown lets a long balance shrink into its third of the row
+          ),          // scaleDown lets a long balance shrink into its third of the row
           // instead of pushing the action buttons past the right edge on a
           // narrow phone.
           Expanded(
@@ -1314,583 +1376,78 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                   if (!player.standing.isGone && !_viewOnly)
                     ElevatedButton(
                       onPressed: () async {
-                        bool isProcessing = false;
-                        final TextEditingController amountController =
-                            TextEditingController();
-                        isProcessing = false;
-                        String statusLabel = "Enter Amount"; // dynamic label
-                        await showDialog<double>(
-                          barrierDismissible: false,
-                          context: context,
-                          builder: (context) {
-                            return StatefulBuilder(
-                              builder: (context, setState) {
-                                return AlertDialog(
-                                  content: SizedBox(
-                                    width: 50.w, // adjust as needed
-                                    //  height: 30.h, // adjust as needed
+                        // The same keypad the player screen pays with: the bank
+                        // paying a player and a player paying the bank were two
+                        // full copies of it, and this one is now the shared one.
+                        final SharedPreferences prefs =
+                            await SharedPreferences.getInstance();
+                        final String payerId = ID.isNotEmpty
+                            ? ID
+                            : (prefs.getString('playerID') ?? '');
+                        if (payerId.isEmpty) {
+                          if (!mounted) return;
+                          await showMessage(
+                              context, 'This device has no player id.');
+                          return;
+                        }
+                        final String payerName =
+                            prefs.getString('profile_name') ??
+                                prefs.getString('display_name') ??
+                                'Bank';
+                        if (!mounted) return;
 
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Column(
-                                          children: [
-                                            const SizedBox(height: 10),
-                                            Container(
-                                              margin:
-                                                  const EdgeInsets.symmetric(
-                                                      vertical: 0,
-                                                      horizontal: 10),
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      vertical: 10,
-                                                      horizontal: 10),
-                                              width: double.infinity,
-                                              // height: 7.h,
-                                              decoration: BoxDecoration(
-                                                color: Colors.green.shade400,
-                                                borderRadius:
-                                                    BorderRadius.circular(10),
-                                              ),
-                                              child: Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.end,
-                                                children: [
-                                                  /*  Align(alignment: Alignment.topLeft,
-                                child: Text(
-                                  "Paying to ${player.name}",
-                                  style: const TextStyle(color: Colors.black),
-                                ),
-                              ), */
-                                                  Text(
-                                                    statusLabel,
-                                                    style: TextStyle(
-                                                        color: Colors.black,
-                                                        fontSize: 16.sp),
-                                                  ),
-                                                  const SizedBox(height: 5),
-                                                  Text(
-                                                    amountController
-                                                            .text.isEmpty
-                                                        ? '0'
-                                                        : amountController.text,
-                                                    style: TextStyle(
-                                                        color: Colors.black,
-                                                        fontSize: 16.sp),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                            const SizedBox(height: 20),
-
-                                            // Row 1
-                                            GridView.count(
-                                              childAspectRatio: 2,
-                                              shrinkWrap: true,
-                                              crossAxisCount: 3,
-                                              crossAxisSpacing: 10,
-                                              mainAxisSpacing: 10,
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      horizontal: 10),
-                                              children: [
-                                                ElevatedButton(
-                                                  onPressed: isProcessing
-                                                      ? null
-                                                      : () {
-                                                          setState(() {
-                                                            amountController
-                                                                .text += '1';
-                                                          });
-                                                        },
-                                                  style: _buttonStyle(),
-                                                  child: const Text(
-                                                    '1',
-                                                    style: TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: Colors.black,
-                                                      fontSize: 18,
-                                                    ),
-                                                  ),
-                                                ),
-                                                ElevatedButton(
-                                                  onPressed: isProcessing
-                                                      ? null
-                                                      : () {
-                                                          setState(() {
-                                                            amountController
-                                                                .text += '2';
-                                                          });
-                                                        },
-                                                  style: _buttonStyle(),
-                                                  child: const Text(
-                                                    '2',
-                                                    style: TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: Colors.black,
-                                                      fontSize: 18,
-                                                    ),
-                                                  ),
-                                                ),
-                                                ElevatedButton(
-                                                  onPressed: isProcessing
-                                                      ? null
-                                                      : () {
-                                                          setState(() {
-                                                            amountController
-                                                                .text += '3';
-                                                          });
-                                                        },
-                                                  style: _buttonStyle(),
-                                                  child: const Text(
-                                                    '3',
-                                                    style: TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: Colors.black,
-                                                      fontSize: 18,
-                                                    ),
-                                                  ),
-                                                ),
-                                                ElevatedButton(
-                                                  onPressed: isProcessing
-                                                      ? null
-                                                      : () {
-                                                          setState(() {
-                                                            amountController
-                                                                .text += '4';
-                                                          });
-                                                        },
-                                                  style: _buttonStyle(),
-                                                  child: const Text(
-                                                    '4',
-                                                    style: TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: Colors.black,
-                                                      fontSize: 18,
-                                                    ),
-                                                  ),
-                                                ),
-                                                ElevatedButton(
-                                                  onPressed: isProcessing
-                                                      ? null
-                                                      : () {
-                                                          setState(() {
-                                                            amountController
-                                                                .text += '5';
-                                                          });
-                                                        },
-                                                  style: _buttonStyle(),
-                                                  child: const Text(
-                                                    '5',
-                                                    style: TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: Colors.black,
-                                                      fontSize: 18,
-                                                    ),
-                                                  ),
-                                                ),
-                                                ElevatedButton(
-                                                  onPressed: isProcessing
-                                                      ? null
-                                                      : () {
-                                                          setState(() {
-                                                            amountController
-                                                                .text += '6';
-                                                          });
-                                                        },
-                                                  style: _buttonStyle(),
-                                                  child: const Text(
-                                                    '6',
-                                                    style: TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: Colors.black,
-                                                      fontSize: 18,
-                                                    ),
-                                                  ),
-                                                ),
-                                                ElevatedButton(
-                                                  onPressed: isProcessing
-                                                      ? null
-                                                      : () {
-                                                          setState(() {
-                                                            amountController
-                                                                .text += '7';
-                                                          });
-                                                        },
-                                                  style: _buttonStyle(),
-                                                  child: const Text(
-                                                    '7',
-                                                    style: TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: Colors.black,
-                                                      fontSize: 18,
-                                                    ),
-                                                  ),
-                                                ),
-                                                ElevatedButton(
-                                                  onPressed: isProcessing
-                                                      ? null
-                                                      : () {
-                                                          setState(() {
-                                                            amountController
-                                                                .text += '8';
-                                                          });
-                                                        },
-                                                  style: _buttonStyle(),
-                                                  child: const Text(
-                                                    '8',
-                                                    style: TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: Colors.black,
-                                                      fontSize: 18,
-                                                    ),
-                                                  ),
-                                                ),
-                                                ElevatedButton(
-                                                  onPressed: isProcessing
-                                                      ? null
-                                                      : () {
-                                                          setState(() {
-                                                            amountController
-                                                                .text += '9';
-                                                          });
-                                                        },
-                                                  style: _buttonStyle(),
-                                                  child: const Text(
-                                                    '9',
-                                                    style: TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: Colors.black,
-                                                      fontSize: 18,
-                                                    ),
-                                                  ),
-                                                ),
-                                                ElevatedButton(
-                                                  onPressed: isProcessing ||
-                                                          amountController.text
-                                                              .contains('.')
-                                                      ? null
-                                                      : () {
-                                                          setState(() {
-                                                            amountController
-                                                                .text += '.';
-                                                          });
-                                                        },
-                                                  style: _buttonStyle(),
-                                                  child: const Text(
-                                                    '.',
-                                                    style: TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: Colors.black,
-                                                      fontSize: 18,
-                                                    ),
-                                                  ),
-                                                ),
-                                                ElevatedButton(
-                                                  onPressed: isProcessing
-                                                      ? null
-                                                      : () {
-                                                          setState(() {
-                                                            amountController
-                                                                .text += '0';
-                                                          });
-                                                        },
-                                                  style: _buttonStyle(),
-                                                  child: const Text(
-                                                    '0',
-                                                    style: TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: Colors.black,
-                                                      fontSize: 18,
-                                                    ),
-                                                  ),
-                                                ),
-                                                ElevatedButton(
-                                                  onPressed: isProcessing
-                                                      ? null
-                                                      : () {
-                                                          setState(() {
-                                                            if (amountController
-                                                                .text
-                                                                .isNotEmpty) {
-                                                              amountController
-                                                                      .text =
-                                                                  amountController
-                                                                      .text
-                                                                      .substring(
-                                                                          0,
-                                                                          amountController.text.length -
-                                                                              1);
-                                                            }
-                                                          });
-                                                        },
-                                                  style: _buttonStyle(),
-                                                  child: const Icon(
-                                                      Icons.backspace,
-                                                      color: Colors.grey),
-                                                ),
-                                                ElevatedButton(
-                                                  onPressed: isProcessing
-                                                      ? null
-                                                      : () {
-                                                          Navigator.of(context)
-                                                              .pop();
-                                                        },
-                                                  style:
-                                                      ElevatedButton.styleFrom(
-                                                          shape:
-                                                              RoundedRectangleBorder(
-                                                            borderRadius:
-                                                                BorderRadius
-                                                                    .circular(
-                                                                        10),
-                                                          ),
-                                                          backgroundColor:
-                                                              Colors.red,
-                                                          foregroundColor:
-                                                              Colors.white),
-                                                  child: const Text('X'),
-                                                ),
-                                                ElevatedButton(
-                                                  onPressed: isProcessing
-                                                      ? null
-                                                      : () {
-                                                          setState(() {
-                                                            amountController
-                                                                .clear();
-                                                          });
-                                                        },
-                                                  style:
-                                                      ElevatedButton.styleFrom(
-                                                          shape:
-                                                              RoundedRectangleBorder(
-                                                            borderRadius:
-                                                                BorderRadius
-                                                                    .circular(
-                                                                        10),
-                                                          ),
-                                                          backgroundColor:
-                                                              Colors.yellow,
-                                                          foregroundColor:
-                                                              Colors.black),
-                                                  child: const Text('C'),
-                                                ),
-                                                ElevatedButton(
-                                                  onPressed: isProcessing
-                                                      ? null
-                                                      : () async {
-                                                          final value =
-                                                              double.tryParse(
-                                                                  amountController
-                                                                      .text);
-                                                          if (value != null &&
-                                                              value > 0) {
-                                                            setState(() {
-                                                              isProcessing =
-                                                                  true;
-                                                              statusLabel =
-                                                                  "Processing payment...";
-                                                            });
-
-                                                            final prefs =
-                                                                await SharedPreferences
-                                                                    .getInstance();
-                                                            final payerPlayerID =
-                                                                prefs.getString(
-                                                                        'playerID') ??
-                                                                    'UnknownPlayer';
-                                                            final rewardAmount =
-                                                                value;
-
-                                                            // Fetch payer wallet
-                                                            final payerResponse = await Supabase
-                                                                .instance.client
-                                                                .from(
-                                                                    'players_test')
-                                                                .select(
-                                                                    'wallet')
-                                                                .eq(
-                                                                    'game_id',
-                                                                    widget
-                                                                        .gameId)
-                                                                .eq('player_id',
-                                                                    payerPlayerID)
-                                                                .maybeSingle();
-
-                                                            // Fetch receiver wallet (the selected player)
-                                                            final receiverResponse = await Supabase
-                                                                .instance.client
-                                                                .from(
-                                                                    'players_test')
-                                                                .select(
-                                                                    'wallet')
-                                                                .eq(
-                                                                    'game_id',
-                                                                    widget
-                                                                        .gameId)
-                                                                .eq(
-                                                                    'player_id',
-                                                                    player
-                                                                        .playerID)
-                                                                .maybeSingle();
-
-                                                            if (payerResponse != null &&
-                                                                receiverResponse !=
-                                                                    null &&
-                                                                payerResponse[
-                                                                        'wallet'] !=
-                                                                    null &&
-                                                                receiverResponse[
-                                                                        'wallet'] !=
-                                                                    null) {
-                                                              double
-                                                                  payerWallet =
-                                                                  (payerResponse[
-                                                                              'wallet']
-                                                                          as num)
-                                                                      .toDouble();
-                                                              if (payerWallet >=
-                                                                  rewardAmount) {
-                                                                // One atomic call: the database locks
-                                                                // both rows, re-checks the funds and
-                                                                // writes both wallets, so a payment
-                                                                // landing at the same moment can no
-                                                                // longer lose this one.
-                                                                final TransferOutcome
-                                                                    transfer =
-                                                                    await WalletTransfer
-                                                                        .pay(
-                                                                  gameId: widget
-                                                                      .gameId,
-                                                                  fromId:
-                                                                      payerPlayerID,
-                                                                  fromRole:
-                                                                      WalletTransfer
-                                                                          .bankerRole,
-                                                                  toId: player
-                                                                      .playerID,
-                                                                  toRole: WalletTransfer
-                                                                      .playerRole,
-                                                                  amount:
-                                                                      rewardAmount,
-                                                                );
-
-                                                                if (!transfer
-                                                                    .ok) {
-                                                                  setState(() {
-                                                                    statusLabel =
-                                                                        "Insufficient balance X";
-                                                                    isProcessing =
-                                                                        false;
-                                                                  });
-                                                                  return;
-                                                                }
-
-                                                                // Log transaction
-                                                                await Supabase
-                                                                    .instance
-                                                                    .client
-                                                                    .from(
-                                                                        'transactions')
-                                                                    .insert({
-                                                                  'game_id':
-                                                                      widget
-                                                                          .gameId,
-                                                                  'value':
-                                                                      rewardAmount,
-                                                                  'from':
-                                                                      "Bank", // or use actual name if needed
-                                                                  'to': player
-                                                                      .name,
-                                                                  'code':
-                                                                      "${payerPlayerID}_${player.playerID}",
-                                                                  'date': DateFormat(
-                                                                          'yyyy-MM-dd')
-                                                                      .format(DateTime
-                                                                          .now()),
-                                                                  'time': DateFormat(
-                                                                          'HH:mm:ss')
-                                                                      .format(DateTime
-                                                                          .now()),
-                                                                });
-
-                                                                // Show success
-                                                                setState(() {
-                                                                  statusLabel =
-                                                                      "Rewarded ₹$rewardAmount to ${player.name} ✓";
-                                                                });
-
-                                                                await Future.delayed(
-                                                                    const Duration(
-                                                                        seconds:
-                                                                            2));
-                                                                if (context
-                                                                    .mounted)
-                                                                  Navigator.of(
-                                                                          context)
-                                                                      .pop();
-                                                              } else {
-                                                                setState(() {
-                                                                  statusLabel =
-                                                                      "Insufficient balance X";
-                                                                  isProcessing =
-                                                                      false;
-                                                                });
-                                                              }
-                                                            } else {
-                                                              setState(() {
-                                                                statusLabel =
-                                                                    "Failed to fetch wallet data ⊘";
-                                                                isProcessing =
-                                                                    false;
-                                                              });
-                                                            }
-                                                          } else {
-                                                            setState(() {
-                                                              statusLabel =
-                                                                  "Invalid amount !!";
-                                                            });
-                                                          }
-                                                        },
-                                                  style:
-                                                      ElevatedButton.styleFrom(
-                                                    shape:
-                                                        RoundedRectangleBorder(
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                              10),
-                                                    ),
-                                                    backgroundColor:
-                                                        Colors.green,
-                                                    foregroundColor:
-                                                        Colors.white,
-                                                  ),
-                                                  child: const Icon(Icons
-                                                      .keyboard_arrow_right),
-                                                ),
-                                              ],
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              },
+                        final bool paid = await showAmountKeypad(
+                          context,
+                          title: 'Reward ${player.name}',
+                          payee: player.name,
+                          holderName: payerName,
+                          cardDigits: payerId
+                              .replaceAll(RegExp(r'\D'), '')
+                              .padLeft(4, '0'),
+                          onPay: (double amount) async {
+                            // One atomic call: the database locks both rows,
+                            // re-checks the funds and writes both wallets.
+                            final TransferOutcome transfer =
+                                await WalletTransfer.pay(
+                              gameId: widget.gameId,
+                              fromId: payerId,
+                              fromRole: WalletTransfer.bankerRole,
+                              toId: player.playerID,
+                              toRole: WalletTransfer.playerRole,
+                              amount: amount,
                             );
+                            if (!transfer.ok) {
+                              return transfer.failure ==
+                                      TransferFailure.insufficientFunds
+                                  ? 'Insufficient balance'
+                                  : 'The payment did not go through - try again';
+                            }
+
+                            // The ledger row is the history of money that has
+                            // already moved, so failing to write it must not
+                            // report the payment as failed.
+                            try {
+                              await Supabase.instance.client
+                                  .from('transactions')
+                                  .insert({
+                                'game_id': widget.gameId,
+                                'value': amount,
+                                'from': 'Bank',
+                                'to': player.name,
+                                'code': '${payerId}_${player.playerID}',
+                                'date': DateFormat('yyyy-MM-dd')
+                                    .format(DateTime.now()),
+                                'time': DateFormat('HH:mm:ss')
+                                    .format(DateTime.now()),
+                              });
+                            } catch (error) {
+                              debugPrint('Could not record the payment: $error');
+                            }
+                            return null;
                           },
                         );
+                        if (!paid || !mounted) return;
+                        fetchPlayers();
                       },
                       style: ElevatedButton.styleFrom(
                         // The old 25.sp box plus 5 px of padding was narrower than
@@ -1913,13 +1470,14 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                           borderRadius: BorderRadius.circular(10),
                         ),
                       ),
+                      // The bank paying this player: the illustrated reward
+                      // icon, drawn full colour rather than tinted, so it is the
+                      // same mark the legend explains.
                       child: Image.asset(
-                        'assets/images/pay.png',
+                        'assets/Icons/reward.png',
                         fit: BoxFit.contain,
                         width: 20.sp,
                         height: 20.sp,
-                        color: const Color(0xFF689F38),
-                        colorBlendMode: BlendMode.srcIn,
                       ),
                     ),
                   if (!player.standing.isGone && !_viewOnly)
@@ -1927,100 +1485,114 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                   if (!player.standing.isGone && !_viewOnly)
                     ElevatedButton(
                       onPressed: () async {
-                        advancing();
-                        final prefs = await SharedPreferences.getInstance();
-                        final payerPlayerID =
-                            prefs.getString('playerID') ?? 'UnknownPlayer';
                         // The advance is a property of the game, read from the
-                        // bank row; prefs is only a fallback while the row cannot
-                        // carry it.
+                        // bank row; prefs is only a fallback while the row
+                        // cannot carry it.
                         final double advanceAmount = _advanceValue ?? 0;
                         if (advanceAmount <= 0) {
-                          if (context.mounted) {
-                            showMessage(context,
-                                'Could not read the advance amount - try again');
-                          }
+                          showMessage(context,
+                              'Could not read the advance amount - try again');
                           return;
                         }
+                        // Money left the bank on a single tap, in a row of small
+                        // buttons: the button asks first, then pays.
+                        final bool confirmed = await showAppConfirm(
+                          context,
+                          title: 'Advance ${player.name}?',
+                          icon: Icons.trending_up,
+                          confirmLabel: 'Pay '
+                              '${BoardCurrencies.format(BoardCatalog.activeCurrency, advanceAmount)}',
+                          message: 'Pays ${player.name} the round advance out of '
+                              'the bank. The bank pays it, not the other players, '
+                              'and it is the same amount for every seat.',
+                        );
+                        if (!confirmed || !mounted) return;
 
-                        // Step 1: Fetch payer's wallet
-                        final payerResponse = await Supabase.instance.client
-                            .from('players_test')
-                            .select('wallet')
-                            .eq('game_id', widget.gameId)
-                            .eq('player_id', payerPlayerID)
-                            .maybeSingle();
+                        advancing();
+                        // Every way out of this handler takes the overlay down:
+                        // a failure used to leave it up, animation finished and
+                        // frozen, over a screen that would not move.
+                        try {
+                          final prefs =
+                              await SharedPreferences.getInstance();
+                          final payerPlayerID =
+                              prefs.getString('playerID') ?? 'UnknownPlayer';
 
-                        // Step 2: Fetch receiver's wallet
-                        final receiverResponse = await Supabase.instance.client
-                            .from('players_test')
-                            .select('wallet')
-                            .eq('game_id', widget.gameId)
-                            .eq('player_id', player.playerID)
-                            .maybeSingle();
-
-                        if (payerResponse != null &&
-                            receiverResponse != null &&
-                            payerResponse['wallet'] != null &&
-                            receiverResponse['wallet'] != null) {
-                          double payerWallet =
-                              (payerResponse['wallet'] as num).toDouble();
-                          if (payerWallet >= advanceAmount) {
-                            // One atomic call: the database locks both rows,
-                            // re-checks the funds and writes both wallets, so a
-                            // payment landing at the same moment cannot lose this
-                            // one.
-                            final TransferOutcome transfer =
-                                await WalletTransfer.pay(
-                              gameId: widget.gameId,
-                              fromId: payerPlayerID,
-                              fromRole: WalletTransfer.bankerRole,
-                              toId: player.playerID,
-                              toRole: WalletTransfer.playerRole,
-                              amount: advanceAmount,
-                            );
-
-                            if (!transfer.ok) {
-                              Navigator.of(context).pop();
-                              if (context.mounted) {
-                                showMessage(context,
-                                    'Insufficient balance to advance ₹200');
+                          // Both wallets in one round trip: the transfer below
+                          // re-checks the funds anyway.
+                          final response = await Supabase.instance.client
+                              .from('players_test')
+                              .select('player_id, wallet')
+                              .eq('game_id', widget.gameId)
+                              .inFilter('player_id', <String>[
+                            payerPlayerID,
+                            player.playerID,
+                          ]);
+                          final List<Map<String, dynamic>> rows =
+                              (response as List<dynamic>)
+                                  .cast<Map<String, dynamic>>();
+                          double? walletOf(String id) {
+                            for (final Map<String, dynamic> row in rows) {
+                              if (row['player_id']?.toString() == id) {
+                                return (row['wallet'] as num?)?.toDouble();
                               }
-                              return;
                             }
+                            return null;
+                          }
 
-                            if (context.mounted) {
-                              Navigator.of(context).pop();
-                              if (context.mounted) {
-                                showMessage(context,
-                                    'Advanced ₹$advanceAmount to ${player.name}');
-                              }
-                              await Supabase.instance.client
-                                  .from('transactions')
-                                  .insert({
-                                'game_id': widget.gameId,
-                                'value': advanceAmount,
-                                'from': "Bank (Advance)",
-                                'to': player.name,
-                                'code': "${payerPlayerID}_${player.playerID}",
-                                'date': DateFormat('yyyy-MM-dd')
-                                    .format(DateTime.now()),
-                                'time': DateFormat('HH:mm:ss')
-                                    .format(DateTime.now()),
-                              });
-                            }
-                          } else {
-                            Navigator.of(context).pop();
-                            if (context.mounted) {
-                              showMessage(context,
-                                  'Insufficient balance to advance ₹200');
-                            }
+                          final double? payerWallet = walletOf(payerPlayerID);
+                          final double? receiverWallet =
+                              walletOf(player.playerID);
+                          if (payerWallet == null || receiverWallet == null) {
+                            _finishAdvance('Failed to fetch wallet data');
+                            return;
                           }
-                        } else {
-                          if (context.mounted) {
-                            Navigator.of(context).pop();
-                            showMessage(context, 'Failed to fetch wallet data');
+                          if (payerWallet < advanceAmount) {
+                            _finishAdvance('Insufficient balance to advance '
+                                '₹$advanceAmount');
+                            return;
                           }
+
+                          // One atomic call: the database locks both rows,
+                          // re-checks the funds and writes both wallets, so a
+                          // payment landing at the same moment cannot lose this
+                          // one.
+                          final TransferOutcome transfer =
+                              await WalletTransfer.pay(
+                            gameId: widget.gameId,
+                            fromId: payerPlayerID,
+                            fromRole: WalletTransfer.bankerRole,
+                            toId: player.playerID,
+                            toRole: WalletTransfer.playerRole,
+                            amount: advanceAmount,
+                          );
+                          if (!transfer.ok) {
+                            _finishAdvance('Insufficient balance to advance '
+                                '₹$advanceAmount');
+                            return;
+                          }
+
+                          await Supabase.instance.client
+                              .from('transactions')
+                              .insert({
+                            'game_id': widget.gameId,
+                            'value': advanceAmount,
+                            'from': "Bank (Advance)",
+                            'to': player.name,
+                            'code': "${payerPlayerID}_${player.playerID}",
+                            'date': DateFormat('yyyy-MM-dd')
+                                .format(DateTime.now()),
+                            'time': DateFormat('HH:mm:ss')
+                                .format(DateTime.now()),
+                          });
+                          _finishAdvance(
+                              'Advanced ₹$advanceAmount to ${player.name}');
+                        } catch (error) {
+                          debugPrint('Could not pay the advance: $error');
+                          _finishAdvance(
+                              'The advance could not be paid - try again');
+                        } finally {
+                          closeAdvancing();
                         }
                       },
                       style: ElevatedButton.styleFrom(
@@ -2266,6 +1838,8 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
   /// `pushReplacement`: leaving is a decision, so the browser's back button
   /// must not walk straight back into the table that was just left.
   Future<void> _returnToTitle() async {
+    // Left on purpose: the router stops sending this device back to the table.
+    GameGuard.leave();
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.remove('gameID');
     if (!mounted) return;
@@ -2304,9 +1878,11 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
       : GameControls.suspend;
 
   /// Exactly the icons this screen is showing.
-  /// The banker's controls, as the info button lists them. The board and Give
-  /// Card are gone: the board is part of the screen now, and a tap on one of
-  /// its cards is the way a card is given.
+  ///
+  /// The board has no icon of its own here - it is part of the screen - but the
+  /// two illustrated actions that sit on it do: the reward button in every
+  /// player row, and the give-card action on a property's deed once the game
+  /// plays with cards.
   List<GameControl> get _screenControls => <GameControl>[
         GameControls.history,
         GameControls.drawCard,
@@ -2314,6 +1890,11 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
         _suspendControl,
         GameControls.leave,
         if (payOption == 'ScanPay') GameControls.receive,
+        // Only a live table has cards to sell, actors to pay and packs to deal.
+        if (_playWithCards && !_viewOnly) GameControls.giveCard,
+        if (_playWithCards && !_viewOnly) GameControls.chanceDeck,
+        if (_playWithCards && !_viewOnly) GameControls.chestDeck,
+        if (!_viewOnly) GameControls.reward,
       ];
 
   @override
@@ -2343,18 +1924,6 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
           actions: [
             Row(
               children: <Widget>[
-                GameIconButton(
-                  control: GameControls.history,
-                  size: 36,
-                  onPressed: () => context.push(
-                    AppRoutes.history(
-                      widget.gameId,
-                      playerId: ID,
-                      showAllPlayers: true,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 4),
                 // Chance and Community Chest are dealt by the banker, not
                 // shown as a list of the whole pack.
                 GameIconButton(
@@ -2412,83 +1981,192 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                       ? () => _setSessionStatus(GameSession.active)
                       : null,
                 ),
-              Card(
-                margin:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20)),
-                color: const Color(0xFFFFF9C4), // soft pastel yellow
-                elevation: 3,
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  child: Row(
-                    children: <Widget>[
-                      // What the bank is holding, and the code a player pays it
-                      // with, in the one row above the board.
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+              // The bank card and its actions, laid out the way the player's
+              // wallet is: the card keeps its height, the stickers beside it are
+              // squares of that height, and the card gives up exactly the width
+              // they need. A phone stacks them, card over stickers.
+              Padding(
+                padding: const EdgeInsets.only(top: 10, bottom: 5),
+                child: LayoutBuilder(
+                  builder: (BuildContext context, BoxConstraints row) {
+                    const double gap = 12;
+                    final Widget card = Card(
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 10),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20)),
+                      color: const Color(0xFFFFF9C4), // soft pastel yellow
+                      elevation: 3,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 12),
+                        child: Row(
                           children: <Widget>[
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: <Widget>[
-                                // The bank's own mark, drawn on the row that
-                                // shows what it holds.
-                                Image.asset(
-                                  'assets/Icons/bank.png',
-                                  width: 30.sp,
-                                  height: 30.sp,
-                                  fit: BoxFit.contain,
-                                ),
-                                const SizedBox(width: 10),
-                                Flexible(
-                                  child: Text(
-                                    'Bankpop Union',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 18.sp,
-                                      fontWeight: FontWeight.w600,
-                                      color: Colors.blueGrey.shade800,
+                            // What the bank is holding, in the one row above
+                            // the board.
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: <Widget>[
+                                  Row(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: <Widget>[
+                                      // The bank's own mark, drawn on the row
+                                      // that shows what it holds.
+                                      Image.asset(
+                                        'assets/Icons/bank.png',
+                                        width: 30.sp,
+                                        height: 30.sp,
+                                        fit: BoxFit.contain,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Flexible(
+                                        child: Text(
+                                          'Bankpop Union',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontSize: 18.sp,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.blueGrey.shade800,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 6),
+                                  FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    alignment: Alignment.centerLeft,
+                                    child: AnimatedFlipCounter(
+                                      value: value,
+                                      fractionDigits: 2,
+                                      textStyle: TextStyle(
+                                        fontSize: 26.sp,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.black87,
+                                      ),
+                                      duration:
+                                          const Duration(milliseconds: 500),
                                     ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                            const SizedBox(height: 6),
-                            FittedBox(
-                              fit: BoxFit.scaleDown,
-                              alignment: Alignment.centerLeft,
-                              child: AnimatedFlipCounter(
-                                value: value,
-                                fractionDigits: 2,
-                                textStyle: TextStyle(
-                                  fontSize: 26.sp,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.black87,
-                                ),
-                                duration: const Duration(milliseconds: 500),
+                            const SizedBox(width: 8),
+                            SizedBox(
+                              height: 38.sp,
+                              // Looped, like the other marks on the screen:
+                              // played once it stopped on a last frame, which
+                              // reads as a frozen screen rather than a balanced
+                              // one.
+                              child: Lottie.asset(
+                                'assets/lottie/coin.json',
+                                repeat: true,
                               ),
                             ),
                           ],
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      if (payOption == 'ScanPay' && !_viewOnly) ...<Widget>[
-                        const ReceiveButton(),
-                        const SizedBox(width: 6),
-                      ],
-                      SizedBox(
-                        height: 38.sp,
-                        child: Lottie.asset('assets/lottie/coin.json'),
+                    );
+
+                    // The stickers the banker needs while looking at the
+                    // table: the history, and the two packs. Each keeps its
+                    // name in a tooltip and in the info sheet, like every other
+                    // button here.
+                    List<Widget> buttons(
+                            bool fill, double width, double height) =>
+                        <Widget>[
+                          if (payOption == 'ScanPay' && !_viewOnly)
+                            ReceiveButton(
+                              fill: fill,
+                              width: width,
+                              height: height,
+                            ),
+                          GameIconButton(
+                            control: GameControls.history,
+                            fill: fill,
+                            width: width,
+                            height: height,
+                            onPressed: () => context.push(
+                              AppRoutes.history(
+                                widget.gameId,
+                                playerId: ID,
+                                showAllPlayers: true,
+                              ),
+                            ),
+                          ),
+                          // The two packs the table draws from, drawn as the
+                          // cards themselves: one tap deals the next card of
+                          // that pack. Only a cards game ever deals one.
+                          if (_playWithCards && !_viewOnly) ...<Widget>[
+                            GameIconButton(
+                              control: GameControls.chanceDeck,
+                              fill: fill,
+                              width: width,
+                              height: height,
+                              artScale: 0.9,
+                              onPressed: () => _drawCard(CardDeckKind.chance),
+                            ),
+                            GameIconButton(
+                              control: GameControls.chestDeck,
+                              fill: fill,
+                              width: width,
+                              height: height,
+                              artScale: 0.9,
+                              onPressed: () => _drawCard(CardDeckKind.chest),
+                            ),
+                          ],
+                        ];
+
+                    final int count = buttons(false, 48, 48).length;
+                    if (row.maxWidth < 640 || count == 0) {
+                      return Column(
+                        children: <Widget>[
+                          card,
+                          if (count > 0)
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 16),
+                              child: Wrap(
+                                alignment: WrapAlignment.end,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                spacing: 10,
+                                runSpacing: 6,
+                                children: buttons(false, 48, 48),
+                              ),
+                            ),
+                        ],
+                      );
+                    }
+
+                    final int columns = count == 1 ? 1 : (count / 2).ceil();
+                    final int rows = (count / columns).ceil();
+                    return IntrinsicHeight(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          Expanded(child: card),
+                          const SizedBox(width: 4),
+                          SquareActionGrid(
+                            columns: columns,
+                            rows: rows,
+                            gap: gap,
+                            sectionWidth: row.maxWidth,
+                            child: SquareActionCells(
+                              buttons: buttons(true, 0, 0),
+                              columns: columns,
+                              rows: rows,
+                              gap: gap,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                        ],
                       ),
-                    ],
-                  ),
+                    );
+                  },
                 ),
-              ),
-              const SizedBox(
-                height: 5,
               ),
               const SizedBox(height: 6),
               // A wide window (a monitor, or a tablet in landscape) has the room

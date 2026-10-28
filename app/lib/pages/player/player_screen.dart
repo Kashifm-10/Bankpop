@@ -17,7 +17,9 @@ import 'package:mon/services/card_charges.dart';
 import 'package:mon/services/card_deck.dart';
 import 'package:mon/services/card_requests.dart';
 import 'package:mon/services/deals.dart';
+import 'package:mon/services/game_guard.dart';
 import 'package:mon/services/game_session.dart';
+import 'package:mon/services/payment_alerts.dart';
 import 'package:mon/services/player_cards.dart';
 import 'package:mon/services/player_exit.dart';
 import 'package:mon/services/rent.dart';
@@ -35,6 +37,7 @@ import 'package:mon/widgets/game_controls.dart';
 import 'package:mon/widgets/rent_qr_dialog.dart';
 import 'package:mon/widgets/game_status_banner.dart';
 import 'package:mon/widgets/player_palette.dart';
+import 'package:mon/widgets/square_action_grid.dart';
 import 'package:mon/widgets/trade_builder_dialog.dart';
 import 'package:mon/widgets/app_metrics.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -198,6 +201,9 @@ class _PlayersScreenState extends State<PlayersScreen> {
     _subscribeToSession(); // Live suspend / resume / end
     _loadSession(); // First read, before the socket connects
     startPolling(); // Reconciliation, in case Realtime is unavailable
+    // The browser's back button and a typed address land here: the router turns
+    // them around, and this asks the same question the phone's back button does.
+    GameGuard.leaveRequests.addListener(_onLeaveRequested);
     setAvatar();
     // The board this game is played on, before anything reads a card name.
     BoardCatalog.useForGame(widget.gameId);
@@ -205,10 +211,30 @@ class _PlayersScreenState extends State<PlayersScreen> {
 
   @override
   void dispose() {
+    GameGuard.leaveRequests.removeListener(_onLeaveRequested);
     _rosterUpdates?.cancel();
     _sessionUpdates?.cancel();
     pollingTimer?.cancel();
     super.dispose();
+  }
+
+  /// True while the "did you mean to leave" box is up, so a second back press
+  /// does not stack another one on top of it.
+  bool _leavePromptOpen = false;
+
+  /// Another page was asked for while this table is live. The router keeps the
+  /// device here; this is the question about whether that was the point.
+  Future<void> _onLeaveRequested() async {
+    if (!mounted || _leavePromptOpen) return;
+    _leavePromptOpen = true;
+    // The router asks mid-navigation; the dialog opens on the next turn rather
+    // than during it.
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
+    final bool shouldLeave = await _onWillPop();
+    _leavePromptOpen = false;
+    if (!shouldLeave || !mounted) return;
+    await _returnToTitle();
   }
 
   Future<void> _loadSession() async {
@@ -257,6 +283,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
       ],
     );
     if (!mounted) return;
+    GameGuard.leave();
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.remove('gameID');
     if (!mounted) return;
@@ -277,6 +304,14 @@ class _PlayersScreenState extends State<PlayersScreen> {
 
   void _applySession(GameSession session) {
     if (!mounted || session.gameId != widget.gameId) return;
+    // This device is at this table: other pages belong to it until the player
+    // leaves, or the table is paused or ended.
+    GameGuard.enter(
+      gameId: widget.gameId,
+      banker: false,
+      suspended: session.isSuspended,
+      ended: session.isEnded,
+    );
     final bool rulesChanged = _playWithCards != session.playWithCards ||
         _advanceValue != session.advanceValue ||
         payOption != session.paymentOption;
@@ -363,6 +398,9 @@ class _PlayersScreenState extends State<PlayersScreen> {
   /// `pushReplacement` so the browser's back button does not reopen the table
   /// this button just closed.
   Future<void> _returnToTitle() async {
+    // This device is out of the game: nothing may send it back to the table
+    // from here on.
+    GameGuard.leave();
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.remove('gameID');
     if (!mounted) return;
@@ -415,8 +453,21 @@ class _PlayersScreenState extends State<PlayersScreen> {
       unawaited(_loadSession());
       unawaited(_checkDeals());
       unawaited(_checkCardCharges());
+      // Money can arrive without this device doing anything: a scanned QR, a
+      // rent window, a reward or an advance picked in the banker's list.
+      final String me = playerID ?? '';
+      if (me.isNotEmpty && mounted) {
+        unawaited(PaymentAlerts.check(
+          context: context,
+          gameId: widget.gameId,
+          playerId: me,
+        ));
+      }
     } catch (e) {
       debugPrint('Error fetching players: $e');
+      // A failed first read must not leave the screen on its loading spinner:
+      // the wallet is already here, and the next poll fills the roster in.
+      if (isLoading && mounted) setState(() => isLoading = false);
     } finally {
       _isFetching = false;
     }
@@ -2570,6 +2621,94 @@ class _PlayersScreenState extends State<PlayersScreen> {
         _payControl,
       ];
 
+  /// The wallet card and its actions, laid out for the window they are in.
+  ///
+  /// A phone stacks them: the card fills the width and the stickers sit under
+  /// it at their normal size. A wide window puts them beside the card, and the
+  /// two halves are measured from the stickers rather than guessed at: the card
+  /// keeps whatever the grid does not need (within limits), and the stickers
+  /// then grow into that space, so the grid always reaches the right edge
+  /// instead of leaving a bare gutter.
+  Widget _walletSection({
+    required Widget card,
+    required List<Widget> Function(bool fill, double width, double height)
+        actions,
+  }) {
+    // The gutter between stickers, and inside the grid.
+    const double gap = 12;
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        // Below this the two columns leave the stickers no room to breathe.
+        final bool wide = constraints.maxWidth >= 640;
+        if (!wide) {
+          return Column(
+            children: <Widget>[
+              const SizedBox(height: 10),
+              card,
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                // Three buttons no longer fit on one line on a narrow phone,
+                // so they wrap instead of overflowing.
+                child: Wrap(
+                  alignment: WrapAlignment.end,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 10,
+                  runSpacing: 6,
+                  children: actions(false, 48, 48),
+                ),
+              ),
+              const SizedBox(height: 5),
+            ],
+          );
+        }
+
+        final int count = actions(false, 48, 48).length;
+        if (count == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(top: 10, bottom: 5),
+            child: card,
+          );
+        }
+
+        final int columns = count == 1 ? 1 : (count / 2).ceil();
+        final int rows = (count / columns).ceil();
+        return Padding(
+          padding: const EdgeInsets.only(top: 10, bottom: 5),
+          // The card and its stickers are sized together, because the grid is
+          // made of squares: the card's height is what says how big a square
+          // can be, and the card then gives up exactly the width those squares
+          // need. Anything else either stretches a sticker into a rectangle or
+          // leaves bare paper beside the grid.
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                // The card keeps its own 16 px side margins, so it still
+                // starts where it always did, and fills whatever width the
+                // grid does not claim.
+                Expanded(child: card),
+                const SizedBox(width: 4),
+                SquareActionGrid(
+                  columns: columns,
+                  rows: rows,
+                  gap: gap,
+                  sectionWidth: constraints.maxWidth,
+                  child: SquareActionCells(
+                    buttons: actions(true, 0, 0),
+                    columns: columns,
+                    rows: rows,
+                    gap: gap,
+                  ),
+                ),
+                const SizedBox(width: 16),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
@@ -2596,43 +2735,20 @@ class _PlayersScreenState extends State<PlayersScreen> {
               color: const Color(0xFF689F38), // deep green icon
             ),
           ),
-          // Icon-only, in the same sticker style as the actions under the
+          // Icon-only, in the same sticker style as the actions beside the
           // wallet. Each one keeps its name in a tooltip, and the info button
-          // lists them all for a first-time player.
+          // lists them all for a first-time player. History and the board moved
+          // into the action grid, so only leaving and the legend stay up here.
           actions: [
             Row(
               children: <Widget>[
-                GameIconButton(
-                  control: GameControls.history,
-                  size: 36,
-                  onPressed: () => context.push(
-                    AppRoutes.history(
-                      widget.gameId,
-                      playerId: playerID ?? '-',
-                    ),
-                  ),
-                ),
-                if (_playWithCards) const SizedBox(width: 4),
-                // The board itself, to check who owns what. A tap only opens a
-                // deed, and only a cards game has anything to look at.
-                if (_playWithCards)
-                  GameIconButton(
-                    control: GameControls.board,
-                    size: 36,
-                    onPressed: _showBoard,
-                  ),
-                const SizedBox(width: 4),
                 GameIconButton(
                   control: GameControls.leave,
                   size: 36,
                   onPressed: () async {
                     final bool shouldLeave = await _onWillPop();
                     if (!shouldLeave) return;
-                    final SharedPreferences prefs =
-                        await SharedPreferences.getInstance();
-                    await prefs.remove('gameID');
-                    if (!mounted) return;
-                    context.pushReplacement(AppRoutes.home);
+                    await _returnToTitle();
                   },
                 ),
                 const SizedBox(width: 4),
@@ -2697,276 +2813,293 @@ class _PlayersScreenState extends State<PlayersScreen> {
                       itemCount: players.length + 1, // +1 for the top item
                       itemBuilder: (context, index) {
                         if (index == 0) {
-                          // Return the top item
-                          return Column(
-                            children: [
-                              const SizedBox(height: 10),
-                              Card(
-                                margin: const EdgeInsets.symmetric(
-                                    horizontal: 16, vertical: 10),
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(20)),
-                                color: Colors.blueGrey.shade500,
-                                elevation: 5,
-                                child: Stack(
-                                  children: [
-                                    Positioned(
-                                      bottom: 0,
-                                      right: 10,
-                                      child: Image.asset(
-                                        'assets/images/c_logo.png',
-                                        fit: BoxFit.contain,
-                                        cacheWidth:
-                                            160, // see the note on the other two
-                                        width: 23
-                                            .sp, // Use MediaQuery or a fixed size if sp is undefined
-                                        height: 23.sp,
-                                        colorBlendMode: BlendMode
-                                            .srcIn, // Ensures image is tinted red
-                                      ),
+                          // The card and its actions, laid out for the
+                          // window they are drawn in.
+                          return _walletSection(
+                            card: Card(
+                              margin: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 10),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(20)),
+                              color: Colors.blueGrey.shade500,
+                              elevation: 5,
+                              child: Stack(
+                                children: [
+                                  Positioned(
+                                    bottom: 0,
+                                    right: 10,
+                                    child: Image.asset(
+                                      'assets/images/c_logo.png',
+                                      fit: BoxFit.contain,
+                                      cacheWidth:
+                                          160, // see the note on the other two
+                                      width: 23
+                                          .sp, // Use MediaQuery or a fixed size if sp is undefined
+                                      height: 23.sp,
+                                      colorBlendMode: BlendMode
+                                          .srcIn, // Ensures image is tinted red
                                     ),
-                                    Padding(
-                                      padding: const EdgeInsets.all(16),
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          // Row for Cardholder's Name and Card Number
-                                          Row(
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.spaceBetween,
-                                            children: [
-                                              // Expanded so the number shrinks instead of
-                                              // pushing the position Lottie off a narrow
-                                              // phone's card.
-                                              Expanded(
-                                                child: Column(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.start,
-                                                  children: [
-                                                    // Cardholder's name
-                                                    Row(
-                                                      children: [
-                                                        Text(
-                                                          _cardName,
-                                                          style: TextStyle(
-                                                            fontSize: 20.sp,
-                                                            fontWeight:
-                                                                FontWeight.bold,
-                                                            color: Colors.white,
-                                                          ),
-                                                        )
-                                                      ],
-                                                    ),
-                                                    const SizedBox(height: 5),
-                                                    // Dummy credit card number
-                                                    FittedBox(
-                                                      fit: BoxFit.scaleDown,
-                                                      alignment:
-                                                          Alignment.centerLeft,
-                                                      child: Text(
-                                                        '**** **** **** ${_cardDigits.substring(0, 4)}', // First 4 digits of this device's id
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.all(16),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        // Row for Cardholder's Name and Card Number
+                                        Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            // Expanded so the number shrinks instead of
+                                            // pushing the position Lottie off a narrow
+                                            // phone's card.
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  // Cardholder's name
+                                                  Row(
+                                                    children: [
+                                                      Text(
+                                                        _cardName,
                                                         style: TextStyle(
-                                                          fontSize: 22.sp,
+                                                          fontSize: 20.sp,
                                                           fontWeight:
-                                                              FontWeight.w600,
-                                                          color: Colors.blueGrey
+                                                              FontWeight.bold,
+                                                          color: Colors.white,
+                                                        ),
+                                                      )
+                                                    ],
+                                                  ),
+                                                  const SizedBox(height: 5),
+                                                  // Dummy credit card number
+                                                  FittedBox(
+                                                    fit: BoxFit.scaleDown,
+                                                    alignment:
+                                                        Alignment.centerLeft,
+                                                    child: Text(
+                                                      '**** **** **** ${_cardDigits.substring(0, 4)}', // First 4 digits of this device's id
+                                                      style: TextStyle(
+                                                        fontSize: 22.sp,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                        color: Colors.blueGrey
+                                                            .shade100,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Lottie.asset(
+                                              positionStatus == "first"
+                                                  ? 'assets/lottie/first.json'
+                                                  : positionStatus == "second"
+                                                      ? 'assets/lottie/second.json'
+                                                      : positionStatus ==
+                                                              "almostlast"
+                                                          ? 'assets/lottie/almost_last.json'
+                                                          : positionStatus ==
+                                                                  "last"
+                                                              ? 'assets/lottie/last.json'
+                                                              : 'assets/lottie/neutral.json',
+                                              height: 10.h,
+                                            ),
+                                          ],
+                                        ),
+
+                                        const SizedBox(height: 15),
+
+                                        // Row for Expiration Date and CVV
+                                        Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Expanded(
+                                              child: FittedBox(
+                                                fit: BoxFit.scaleDown,
+                                                alignment:
+                                                    Alignment.centerLeft,
+                                                child: AnimatedFlipCounter(
+                                                  value: value,
+                                                  fractionDigits: 2,
+                                                  textStyle: TextStyle(
+                                                    fontSize: 28.sp,
+                                                    fontWeight:
+                                                        FontWeight.bold,
+                                                    color: Colors.white
+                                                        .withValues(
+                                                            alpha: 0.9),
+                                                  ),
+                                                  duration: const Duration(
+                                                      milliseconds: 500),
+                                                ),
+                                              ),
+                                            ),
+                                            Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 10.0),
+                                              child: Row(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.start,
+                                                children: [
+                                                  Column(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      Text(
+                                                        'EXPIRY',
+                                                        style: TextStyle(
+                                                          fontSize: 12.sp,
+                                                          color: Colors.white
+                                                              .withValues(
+                                                                  alpha: 0.7),
+                                                        ),
+                                                      ),
+                                                      const SizedBox(
+                                                          height: 5),
+                                                      Text(
+                                                        DateFormat('MM/yy')
+                                                            .format(DateTime
+                                                                .now()),
+                                                        style: TextStyle(
+                                                          fontSize: 16.sp,
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                          color: Colors
+                                                              .blueGrey
                                                               .shade100,
                                                         ),
                                                       ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Lottie.asset(
-                                                positionStatus == "first"
-                                                    ? 'assets/lottie/first.json'
-                                                    : positionStatus == "second"
-                                                        ? 'assets/lottie/second.json'
-                                                        : positionStatus ==
-                                                                "almostlast"
-                                                            ? 'assets/lottie/almost_last.json'
-                                                            : positionStatus ==
-                                                                    "last"
-                                                                ? 'assets/lottie/last.json'
-                                                                : 'assets/lottie/neutral.json',
-                                                height: 10.h,
-                                              ),
-                                            ],
-                                          ),
-
-                                          const SizedBox(height: 15),
-
-                                          // Row for Expiration Date and CVV
-                                          Row(
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.spaceBetween,
-                                            children: [
-                                              Expanded(
-                                                child: FittedBox(
-                                                  fit: BoxFit.scaleDown,
-                                                  alignment:
-                                                      Alignment.centerLeft,
-                                                  child: AnimatedFlipCounter(
-                                                    value: value,
-                                                    fractionDigits: 2,
-                                                    textStyle: TextStyle(
-                                                      fontSize: 28.sp,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: Colors.white
-                                                          .withValues(
-                                                              alpha: 0.9),
-                                                    ),
-                                                    duration: const Duration(
-                                                        milliseconds: 500),
+                                                    ],
                                                   ),
-                                                ),
+                                                  const SizedBox(width: 20),
+                                                  Column(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      Text(
+                                                        'CVV',
+                                                        style: TextStyle(
+                                                          fontSize: 12.sp,
+                                                          color: Colors.white
+                                                              .withValues(
+                                                                  alpha: 0.7),
+                                                        ),
+                                                      ),
+                                                      const SizedBox(
+                                                          height: 5),
+                                                      Text(
+                                                        _cardDigits.substring(
+                                                            _cardDigits
+                                                                    .length -
+                                                                3), // Dummy CVV
+                                                        style: TextStyle(
+                                                          fontSize: 16.sp,
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                          color: Colors
+                                                              .blueGrey
+                                                              .shade100,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ],
                                               ),
-                                              Padding(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                        horizontal: 10.0),
-                                                child: Row(
-                                                  mainAxisAlignment:
-                                                      MainAxisAlignment.start,
-                                                  children: [
-                                                    Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        Text(
-                                                          'EXPIRY',
-                                                          style: TextStyle(
-                                                            fontSize: 12.sp,
-                                                            color: Colors.white
-                                                                .withValues(
-                                                                    alpha: 0.7),
-                                                          ),
-                                                        ),
-                                                        const SizedBox(
-                                                            height: 5),
-                                                        Text(
-                                                          DateFormat('MM/yy')
-                                                              .format(DateTime
-                                                                  .now()),
-                                                          style: TextStyle(
-                                                            fontSize: 16.sp,
-                                                            fontWeight:
-                                                                FontWeight.bold,
-                                                            color: Colors
-                                                                .blueGrey
-                                                                .shade100,
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    const SizedBox(width: 20),
-                                                    Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        Text(
-                                                          'CVV',
-                                                          style: TextStyle(
-                                                            fontSize: 12.sp,
-                                                            color: Colors.white
-                                                                .withValues(
-                                                                    alpha: 0.7),
-                                                          ),
-                                                        ),
-                                                        const SizedBox(
-                                                            height: 5),
-                                                        Text(
-                                                          _cardDigits.substring(
-                                                              _cardDigits
-                                                                      .length -
-                                                                  3), // Dummy CVV
-                                                          style: TextStyle(
-                                                            fontSize: 16.sp,
-                                                            fontWeight:
-                                                                FontWeight.bold,
-                                                            color: Colors
-                                                                .blueGrey
-                                                                .shade100,
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-
-                                          const SizedBox(height: 10),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 16.0),
-                                // Three buttons no longer fit on one line on a narrow
-                                // phone, so they wrap instead of overflowing.
-                                child: Wrap(
-                                  alignment: WrapAlignment.end,
-                                  crossAxisAlignment: WrapCrossAlignment.center,
-                                  spacing: 10,
-                                  runSpacing: 6,
-                                  children: [
-                                    if (payOption == 'ScanPay' && !_viewOnly)
-                                      const ReceiveButton(),
-                                    // Always available: a player should be able to look
-                                    // at what they hold, cards game or not.
-                                    GameIconButton(
-                                      control: GameControls.myCards,
-                                      onPressed: _showMyCards,
-                                    ),
-                                    if (_playWithCards && !_viewOnly)
-                                      GameIconButton(
-                                        control: GameControls.trade,
-                                        onPressed: _openTradeBuilder,
-                                      ),
-                                    // Spelled out rather than an icon: it is the
-                                    // one action here that cannot be undone.
-                                    if (!_viewOnly)
-                                      TextButton.icon(
-                                        onPressed: _declareBankrupt,
-                                        icon: const Icon(Icons.gavel, size: 18),
-                                        label: const Text('Declare bankrupt'),
-                                        style: TextButton.styleFrom(
-                                          foregroundColor:
-                                              const Color(0xFFB71C1C),
-                                          textStyle: const TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                          ),
+                                            ),
+                                          ],
                                         ),
-                                      ),
-                                    if (!_viewOnly)
-                                      GameIconButton(
-                                        control: _payControl,
-                                        onPressed: () {
-                                          if (payOption == 'ScanPay') {
-                                            context.push(
-                                              AppRoutes.scanPay(widget.gameId),
-                                            );
-                                          } else {
-                                            payBank();
-                                          }
-                                        },
-                                      ),
-                                  ],
+
+                                        const SizedBox(height: 10),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            actions: (bool fill, double width, double height) =>
+                                <Widget>[
+                              if (payOption == 'ScanPay' && !_viewOnly)
+                                ReceiveButton(
+                                  fill: fill,
+                                  width: width,
+                                  height: height,
+                                ),
+                              // Always available: a player should be able to
+                              // look at what they hold, cards game or not.
+                              GameIconButton(
+                                control: GameControls.myCards,
+                                fill: fill,
+                                width: width,
+                                height: height,
+                                onPressed: _showMyCards,
+                              ),
+                              if (_playWithCards && !_viewOnly)
+                                GameIconButton(
+                                  control: GameControls.trade,
+                                  fill: fill,
+                                  width: width,
+                                  height: height,
+                                  onPressed: _openTradeBuilder,
+                                ),
+                              // The same sticker as every other action on the
+                              // screen; its name is in the tooltip and in the
+                              // info sheet, not spelled out beside it in a
+                              // different shape.
+                              if (!_viewOnly)
+                                GameIconButton(
+                                  control: GameControls.bankrupt,
+                                  fill: fill,
+                                  width: width,
+                                  height: height,
+                                  onPressed: _declareBankrupt,
+                                ),
+                              if (!_viewOnly)
+                                GameIconButton(
+                                  control: _payControl,
+                                  fill: fill,
+                                  width: width,
+                                  height: height,
+                                  onPressed: () {
+                                    if (payOption == 'ScanPay') {
+                                      context.push(
+                                        AppRoutes.scanPay(widget.gameId),
+                                      );
+                                    } else {
+                                      payBank();
+                                    }
+                                  },
+                                ),
+                              // The board itself, to check who owns what: a tap
+                              // only opens a deed, and only a cards game has
+                              // anything to look at.
+                              if (_playWithCards)
+                                GameIconButton(
+                                  control: GameControls.board,
+                                  fill: fill,
+                                  width: width,
+                                  height: height,
+                                  onPressed: _showBoard,
+                                ),
+                              GameIconButton(
+                                control: GameControls.history,
+                                fill: fill,
+                                width: width,
+                                height: height,
+                                onPressed: () => context.push(
+                                  AppRoutes.history(
+                                    widget.gameId,
+                                    playerId: playerID ?? '-',
+                                  ),
                                 ),
                               ),
-                              const SizedBox(
-                                height: 5,
-                              )
                             ],
                           );
                         } else {

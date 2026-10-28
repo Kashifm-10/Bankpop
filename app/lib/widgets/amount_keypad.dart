@@ -143,6 +143,10 @@ class _AmountKeypadState extends State<_AmountKeypad> {
     final Color surface =
         dark ? const Color(0xFF26291F) : const Color(0xFFFFF8E1);
     final Color ink = dark ? const Color(0xFFE0E0E0) : const Color(0xFF33691E);
+    // The key faces stay a shade above the dialog, so the grid reads as keys
+    // rather than as holes punched in the card.
+    final Color keyFace = dark ? const Color(0xFF3B3F33) : Colors.white;
+    final Color keyInk = dark ? Colors.white : const Color(0xFF2C2C2C);
 
     return PopScope(
       canPop: false,
@@ -213,8 +217,10 @@ class _AmountKeypadState extends State<_AmountKeypad> {
                   ),
                 ),
                 const SizedBox(height: 10),
-                // 1-9, then clear, 0 and pay: the same grid the two screens
-                // used, so muscle memory survives the merge.
+                // The keys the amount is typed on: 1-9, then the three that
+                // finish it - the decimal point, zero, and backspace. Backspace
+                // held down clears the whole amount, which is what the old red
+                // "C" key did before it made way for the point.
                 GridView.count(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
@@ -234,30 +240,68 @@ class _AmountKeypadState extends State<_AmountKeypad> {
                       '8',
                       '9',
                     ])
-                      _key(digit, () => _append(digit)),
-                    _key('C', _clear, background: const Color(0xFFEF9A9A)),
-                    _key('0', () => _append('0')),
+                      _key(
+                        _label(digit, keyInk),
+                        () => _append(digit),
+                        background: keyFace,
+                      ),
                     _key(
-                      _processing ? '...' : 'PAY',
-                      _submit,
-                      background: _green,
-                      foreground: Colors.white,
+                      _label('.', keyInk),
+                      _dot,
+                      background: keyFace,
+                    ),
+                    _key(
+                      _label('0', keyInk),
+                      () => _append('0'),
+                      background: keyFace,
+                    ),
+                    _key(
+                      Icon(
+                        Icons.backspace_outlined,
+                        size: 20,
+                        color: keyInk,
+                      ),
+                      _backspace,
+                      background: keyFace,
+                      onLongPress: _clear,
                     ),
                   ],
                 ),
-                const SizedBox(height: 6),
-                Row(
-                  children: <Widget>[
-                    TextButton(
-                      onPressed: _processing ? null : _dot,
-                      child: const Text('Decimal'),
+                const SizedBox(height: 10),
+                // The one wide button under the keys: nothing is charged until
+                // this is pressed.
+                SizedBox(
+                  height: 52,
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _processing ? null : _submit,
+                    style: ElevatedButton.styleFrom(
+                      elevation: 0,
+                      backgroundColor: _green,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: _green.withValues(alpha: 0.6),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
                     ),
-                    const Spacer(),
-                    TextButton(
-                      onPressed: _processing ? null : _backspace,
-                      child: const Text('Backspace'),
-                    ),
-                  ],
+                    child: _processing
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text(
+                            'PAY',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1.4,
+                            ),
+                          ),
+                  ),
                 ),
               ],
             ),
@@ -267,23 +311,36 @@ class _AmountKeypadState extends State<_AmountKeypad> {
     );
   }
 
+  /// A digit as it is drawn on a key.
+  Widget _label(String text, Color colour) => Text(
+        text,
+        style: TextStyle(
+          fontSize: 19,
+          fontWeight: FontWeight.w700,
+          color: colour,
+        ),
+      );
+
   Widget _key(
-    String label,
+    Widget child,
     VoidCallback onTap, {
     Color? background,
-    Color? foreground,
+    VoidCallback? onLongPress,
   }) {
-    return ElevatedButton(
+    final Widget button = ElevatedButton(
       onPressed: _processing ? null : onTap,
       style: ElevatedButton.styleFrom(
         elevation: 0,
         backgroundColor: background ?? Colors.white,
-        foregroundColor: foreground ?? Colors.black,
         padding: EdgeInsets.zero,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
-      child: Text(label),
+      child: child,
+    );
+    if (onLongPress == null) return button;
+    return GestureDetector(
+      onLongPress: _processing ? null : onLongPress,
+      child: button,
     );
   }
 }

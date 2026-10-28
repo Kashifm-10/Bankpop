@@ -19,13 +19,6 @@ class GameControl {
   /// The glyph, used when the control has no illustrated icon.
   final IconData icon;
 
-  /// An illustrated icon (`assets/Icons/`) that replaces [icon] on the button.
-  ///
-  /// These are drawn full colour rather than tinted, so a control that has art
-  /// is not colour-coded by [color] - the drawing carries the meaning, and the
-  /// palette's accent colour is only kept for the legend text and the glyph
-  /// fallback.
-
   /// The legend heading, and the tooltip/screen-reader label of the button.
   final String label;
 
@@ -35,7 +28,12 @@ class GameControl {
   /// The accent colour for the icon - the button's "purpose" colour.
   final Color color;
 
-  /// Null for a control that still draws its [icon].
+  /// An illustrated icon (`assets/Icons/`) that replaces [icon] on the button.
+  ///
+  /// These are drawn full colour rather than tinted, so a control that has art
+  /// is not colour-coded by [color] - the drawing carries the meaning, and the
+  /// palette's accent colour is only kept for the legend text and the glyph
+  /// fallback. Null for a control that still draws its [icon].
   final String? art;
 }
 
@@ -68,7 +66,7 @@ abstract final class GameControls {
   static const GameControl board = GameControl(
     icon: Icons.grid_on,
     label: 'Board',
-    detail: 'The board, with who owns what. Tap a space to read its deed.',
+    detail: 'The board, with who owns what. Tap a property to read its deed.',
     color: Color(0xFF2E7D32),
   );
 
@@ -85,15 +83,15 @@ abstract final class GameControls {
     icon: Icons.logout,
     art: 'assets/Icons/leave.png',
     label: 'Leave game',
-    detail: 'Leaves the table and clears this device\'s active game.',
+    detail: 'Leaves this table and goes back to Your Games. The game keeps '
+        'running for everyone else.',
     color: Color(0xFF8D6E63),
   );
 
   static const GameControl receive = GameControl(
     icon: Icons.qr_code_2,
     label: 'Show QR',
-    detail: 'Shows a QR code with your name and an amount, so another '
-        'player can scan it and pay you.',
+    detail: 'Shows your QR code, so another player can scan it and pay you.',
     color: Color(0xFF00796B),
   );
 
@@ -101,7 +99,8 @@ abstract final class GameControls {
     icon: Icons.back_hand_outlined,
     art: 'assets/Icons/give_card.png',
     label: 'Give card',
-    detail: 'Hands a property card from the bank to a player. Use with InstantPay or when playing with cards. The banker assigns the card to the selected player.',
+    detail: 'On a property\'s deed: sells that card to a player - by QR in a '
+        'ScanPay game, or to the player you pick in an InstantPay game.',
     color: Color(0xFF1565C0),
   );
 
@@ -109,9 +108,20 @@ abstract final class GameControls {
     icon: Icons.credit_card,
     art: 'assets/Icons/my_cards.png',
     label: 'My cards',
-    detail: 'Your hand - every card you own. Tap one to read it, or to '
-        'mortgage it and sell houses.',
+    detail: 'The cards you own. Tap one to read its deed, mortgage it or sell '
+        'its houses.',
     color: Color(0xFF1565C0),
+  );
+
+  /// The bank paying a player: the reward button in the banker's player rows,
+  /// and the payout line on a Chance or Community Chest card.
+  static const GameControl reward = GameControl(
+    icon: Icons.redeem,
+    art: 'assets/Icons/reward.png',
+    label: 'Reward player',
+    detail: 'Gives cash from the bank to the player you pick, or pays out the '
+        'reward a card names.',
+    color: Color(0xFF2E7D32),
   );
 
   static const GameControl trade = GameControl(
@@ -120,6 +130,26 @@ abstract final class GameControls {
     label: 'Trade',
     detail: 'Build an offer of cards, cash or both and send it to a player.',
     color: Color(0xFF7B1FA2),
+  );
+
+  /// The two packs the banker deals from, drawn as the cards themselves. A
+  /// cards game is the only one where a card can be dealt, so these two are
+  /// only on the screen in one.
+  static const GameControl chanceDeck = GameControl(
+    icon: Icons.casino_outlined,
+    art: 'assets/images/Chance.png',
+    label: 'Chance deck',
+    detail: 'Deals the next Chance card and shows the table what it asks for.',
+    color: Color(0xFF6A1B9A),
+  );
+
+  static const GameControl chestDeck = GameControl(
+    icon: Icons.inventory_2_outlined,
+    art: 'assets/images/Community_Chest.png',
+    label: 'Community Chest deck',
+    detail: 'Deals the next Community Chest card and shows the table what it '
+        'asks for.',
+    color: Color(0xFF6A1B9A),
   );
 
   /// One scanner for the whole hand: it reads a player's pay QR and the bank's
@@ -143,13 +173,14 @@ abstract final class GameControls {
   static const GameControl showBankQr = GameControl(
     icon: Icons.groups,
     label: 'Bank QR',
-    detail: 'Shows the bank\'s QR so players can join and buy cards.',
+    detail: 'Shows the bank\'s QR, so a player who is not at the table yet can '
+        'scan it and join this game.',
     color: Color(0xFF1E88E5),
   );
 
   static const GameControl bankrupt = GameControl(
     icon: Icons.gavel,
-    art: 'assets/Icons/bank.png',
+    art: null,
     label: 'Declare bankrupt',
     detail: 'Leaves the table for good: your cash, houses and cards are sold '
         'and the money pays the players you owe.',
@@ -176,7 +207,11 @@ class GameIconButton extends StatelessWidget {
     required this.control,
     required this.onPressed,
     this.size = 48,
+    this.width,
+    this.height,
+    this.fill = false,
     this.enabled = true,
+    this.artScale = 0.68,
   });
 
   final GameControl control;
@@ -185,9 +220,32 @@ class GameIconButton extends StatelessWidget {
   /// The square the sticker occupies. App bars get the compact size; the
   /// action rows under the balance card get the full touch target.
   final double size;
+
+  /// A tile that is not a square, for a grid whose cells divide the space they
+  /// are given rather than sitting at a fixed size in it. Defaults to [size].
+  final double? width;
+  final double? height;
+
+  /// True when the tile is handed a cell and should fill it, rather than
+  /// drawing at its own size inside it. The wide wallet grid works this way so
+  /// its stickers leave no bare paper between them.
+  final bool fill;
   final bool enabled;
 
+  /// How much of [size] the illustrated art fills. Most icons are drawn with a
+  /// margin around them; a deck of cards is a tall face and wants more of the
+  /// tile, or it is only a sliver of paper in the middle.
+  final double artScale;
+
   bool get _active => enabled && onPressed != null;
+
+  /// The smaller of the tile's two sides: the artwork is square, so this is
+  /// what it has to fit inside.
+  double get _shorterSide {
+    final double w = width ?? size;
+    final double h = height ?? size;
+    return w < h ? w : h;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -215,26 +273,55 @@ class GameIconButton extends StatelessWidget {
           child: InkWell(
             onTap: _active ? onPressed : null,
             child: SizedBox(
-              width: size,
-              height: size,
+              // A filled tile takes the whole cell; the others keep their own
+              // size, which is what the app bars and phone rows want.
+              width: fill ? double.infinity : width ?? size,
+              height: fill ? double.infinity : height ?? size,
               child: Center(
+                // The artwork is drawn from the shorter side, so an oblong
+                // tile keeps a round-looking icon in the middle of it.
                 child: control.art == null
-                    ? Icon(
-                        control.icon,
-                        size: size * 0.52,
-                        color: iconColour,
-                      )
+                    ? fill
+                        // A filled tile has no side to multiply, so the glyph
+                        // is drawn large and scaled down to the space it is
+                        // given.
+                        ? FractionallySizedBox(
+                            widthFactor: artScale,
+                            heightFactor: artScale,
+                            child: FittedBox(
+                              child: Icon(
+                                control.icon,
+                                size: 64,
+                                color: iconColour,
+                              ),
+                            ),
+                          )
+                        : Icon(
+                            control.icon,
+                            size: _shorterSide * 0.52,
+                            color: iconColour,
+                          )
                     // The illustrated icons are drawn full colour and fade
                     // rather than take the disabled ink, so a disabled tile
                     // still reads as the same picture.
                     : Opacity(
                         opacity: _active ? 1 : 0.38,
-                        child: Image.asset(
-                          control.art!,
-                          width: size * 0.68,
-                          height: size * 0.68,
-                          fit: BoxFit.contain,
-                        ),
+                        child: fill
+                            ? Padding(
+                                padding: EdgeInsets.all(
+                                  size * (1 - artScale) / 2,
+                                ),
+                                child: Image.asset(
+                                  control.art!,
+                                  fit: BoxFit.contain,
+                                ),
+                              )
+                            : Image.asset(
+                                control.art!,
+                                width: _shorterSide * artScale,
+                                height: _shorterSide * artScale,
+                                fit: BoxFit.contain,
+                              ),
                       ),
               ),
             ),

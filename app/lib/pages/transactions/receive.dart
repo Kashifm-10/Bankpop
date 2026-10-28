@@ -7,7 +7,24 @@ import 'package:mon/widgets/app_metrics.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ReceiveButton extends StatelessWidget {
-  const ReceiveButton({super.key});
+  const ReceiveButton({
+    super.key,
+    this.size = 48,
+    this.width,
+    this.height,
+    this.fill = false,
+  });
+
+  /// The sticker's square, so a wide screen can draw it at the same size as
+  /// the buttons beside it.
+  final double size;
+
+  /// The tile a wide screen's grid gives it, when it is not a square.
+  final double? width;
+  final double? height;
+
+  /// True when the tile should fill the cell the grid hands it.
+  final bool fill;
 
   Future<void> _showValueDialog(BuildContext context) async {
     final prefs = await SharedPreferences.getInstance();
@@ -113,6 +130,10 @@ class ReceiveButton extends StatelessWidget {
     // in the tooltip and in the info sheet, not in the button.
     return GameIconButton(
       control: GameControls.receive,
+      size: size,
+      width: width,
+      height: height,
+      fill: fill,
       onPressed: () => _showValueDialog(context),
     );
   }

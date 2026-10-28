@@ -93,9 +93,13 @@ class _SplashScreenState extends State<SplashScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
+            // The launch animation repeats until the story is over: played
+            // once it stopped on its last frame while the three-second wait was
+            // still running, which read as a hung launch.
             Lottie.asset(
               'assets/lottie/splash.json',
               height: 50.h,
+              repeat: true,
             ),
             if (_version.isNotEmpty)
               Padding(

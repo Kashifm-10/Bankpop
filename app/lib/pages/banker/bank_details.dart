@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:lottie/lottie.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mon/models/bankpop_board.dart';
@@ -41,7 +42,25 @@ class _BankValueScreenState extends State<BankValueScreen> {
 
   /// The country boards on offer. Creating a board lives in Boards & cards, not
   /// in the middle of a game set-up.
-  late Future<List<BoardListing>> _boardsFuture;
+  ///
+  /// Held here rather than read by a `FutureBuilder`: that starts in `waiting`
+  /// even for a future which has already completed, so flipping the cards
+  /// switch flashed a spinner over a row that was about to be there. Null only
+  /// until the first read lands.
+  List<BoardListing>? _boards;
+
+  /// Read once when the screen opens, so the flags are already there by the
+  /// time the cards switch is flipped.
+  Future<void> _loadBoards() async {
+    final List<BoardListing> cached = await BoardCatalog.available();
+    if (!mounted) return;
+    setState(() => _boards = cached);
+    // Then the table itself, so a board created in another tab - or on another
+    // device - is in the row too. The cached list stays on screen meanwhile.
+    final List<BoardListing> fresh = await BoardCatalog.available(refresh: true);
+    if (!mounted || identical(fresh, cached)) return;
+    setState(() => _boards = fresh);
+  }
 
   final TextEditingController _bankValueController = TextEditingController();
   final TextEditingController _playerAmountController = TextEditingController();
@@ -51,7 +70,7 @@ class _BankValueScreenState extends State<BankValueScreen> {
   @override
   void initState() {
     super.initState();
-    _boardsFuture = BoardCatalog.available(refresh: true);
+    _loadBoards();
   }
 
   String generateGameId(int length) {
@@ -190,51 +209,117 @@ class _BankValueScreenState extends State<BankValueScreen> {
       return;
     }
 
-    await GameSession.create(
-      gameId: gameId,
-      bankerId: playerID ?? '',
-      bankerName: playerName,
-      paymentOption: _selectedOption,
-      playWithCards: _playWithCards,
-      playerValue: playerValue,
-      advanceValue: advanceValue,
-      boardId: boardId,
-    );
-
-    await prefs.setString('name', 'banker');
-    await prefs.setString('role', 'banker');
-    await prefs.setString('display_name', 'Bank');
-    await prefs.setString('gameID', gameId);
-    // Local copies, used only while the session row cannot be read (a project
-    // that has not run game_sessions.sql yet, or a socket-less first frame).
-    await prefs.setBool('playWithCards', _playWithCards);
-    await prefs.setString('payOption', _selectedOption);
-    // This device's copy of the board, so the banker screen draws the right
-    // board even before the session row comes back from the server.
-    await prefs.setString('board_id', boardId);
-    BoardCatalog.use(boardId);
-    // The board is settled for the whole game, so this device keeps its own
-    // copy of it now: every board and card lookup in the game then reads from
-    // the phone instead of the database.
-    await BoardCatalog.cacheForGame(gameId, boardId);
-    // Both packs are shuffled once, now, and kept with the game: every draw
-    // the banker makes from here on follows that order on every device.
+    // Everything after the bank row can fail on a slow connection - the session
+    // row, the board, the card packs. The button must stop spinning either way,
+    // so the whole of it is one guarded step.
     try {
-      final BankpopBoard board = await BoardCatalog.boardForGame(gameId);
-      await CardDeck.startGame(
+      await GameSession.create(
         gameId: gameId,
-        chance: board.chanceOptions,
-        chest: board.communityChest,
+        bankerId: playerID ?? '',
+        bankerName: playerName,
+        paymentOption: _selectedOption,
+        playWithCards: _playWithCards,
+        playerValue: playerValue,
+        advanceValue: advanceValue,
+        boardId: boardId,
       );
-    } catch (error) {
-      // The game still plays; the banker's draw shuffles a pack of its own.
-      debugPrint('Could not shuffle the card packs: $error');
-    }
 
-    if (!mounted) return;
-    // The setup screen is not somewhere the back button should return to once
-    // the table exists.
-    context.pushReplacement(AppRoutes.banker(gameId, bankValue: bankValue));
+      await prefs.setString('name', 'banker');
+      await prefs.setString('role', 'banker');
+      await prefs.setString('display_name', 'Bank');
+      await prefs.setString('gameID', gameId);
+      // Local copies, used only while the session row cannot be read (a project
+      // that has not run game_sessions.sql yet, or a socket-less first frame).
+      await prefs.setBool('playWithCards', _playWithCards);
+      await prefs.setString('payOption', _selectedOption);
+      // This device's copy of the board, so the banker screen draws the right
+      // board even before the session row comes back from the server.
+      await prefs.setString('board_id', boardId);
+      BoardCatalog.use(boardId);
+      // The board is settled for the whole game, so this device keeps its own
+      // copy of it now: every board and card lookup in the game then reads from
+      // the phone instead of the database.
+      await BoardCatalog.cacheForGame(gameId, boardId);
+      // Both packs are shuffled once, now, and kept with the game: every draw
+      // the banker makes from here on follows that order on every device.
+      try {
+        final BankpopBoard board = await BoardCatalog.boardForGame(gameId);
+        await CardDeck.startGame(
+          gameId: gameId,
+          chance: board.chanceOptions,
+          chest: board.communityChest,
+        );
+      } catch (error) {
+        // The game still plays; the banker's draw shuffles a pack of its own.
+        debugPrint('Could not shuffle the card packs: $error');
+      }
+
+      if (!mounted) return;
+      // The setup screen is not somewhere the back button should return to once
+      // the table exists.
+      context.pushReplacement(AppRoutes.banker(gameId, bankValue: bankValue));
+    } catch (error) {
+      debugPrint('Could not start the game: $error');
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      await showMessage(context,
+          'The game was created but could not be opened here. Pull It up '
+          'again from Your Games.');
+    }
+  }
+
+  /// The row of flags the board is picked with.
+  ///
+  /// Drawn straight from [_boards], so flipping the cards switch shows the
+  /// flags that were already read instead of a spinner over them.
+  Widget _buildBoardPicker() {
+    final List<BoardListing>? boards = _boards;
+    if (boards == null) {
+      return const Center(
+        child: Text(
+          'Reading the boards...',
+          style: TextStyle(color: Colors.black54),
+        ),
+      );
+    }
+    if (boards.isEmpty) {
+      return const Center(
+        child: Text(
+          'No country boards available',
+          style: TextStyle(color: Colors.black54),
+        ),
+      );
+    }
+    return ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(
+        dragDevices: PointerDeviceKind.values.toSet(),
+      ),
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        itemCount: boards.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 6),
+        itemBuilder: (BuildContext context, int index) {
+          final BoardListing board = boards[index];
+          final bool isSelected = _boardId == board.boardId;
+          return Center(
+            child: CountryChip(
+              label: board.name,
+              flag: board.flag,
+              icon: board.isMine && board.flag.isEmpty
+                  ? Icons.person_outline
+                  : null,
+              labelVisible: isSelected,
+              selected: isSelected,
+              onTap: () => setState(() {
+                _boardId = board.boardId;
+                _boardLabel = board.name;
+              }),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   @override
@@ -529,70 +614,7 @@ class _BankValueScreenState extends State<BankValueScreen> {
                             ),
                           ),
                         ),
-                        SizedBox(
-                          height: 46,
-                          child: FutureBuilder<List<BoardListing>>(
-                            future: _boardsFuture,
-                            builder: (context, snap) {
-                              final List<BoardListing> boards =
-                                  snap.data ?? const <BoardListing>[];
-                              if (snap.connectionState ==
-                                  ConnectionState.waiting) {
-                                return const Center(
-                                  child: SizedBox(
-                                    height: 20,
-                                    width: 20,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2),
-                                  ),
-                                );
-                              }
-                              if (boards.isEmpty) {
-                                return const Center(
-                                  child: Text(
-                                    'No country boards available',
-                                    style: TextStyle(color: Colors.black54),
-                                  ),
-                                );
-                              }
-                              return ScrollConfiguration(
-                                behavior:
-                                    ScrollConfiguration.of(context).copyWith(
-                                  dragDevices: PointerDeviceKind.values.toSet(),
-                                ),
-                                child: ListView.separated(
-                                  scrollDirection: Axis.horizontal,
-                                  padding:
-                                      const EdgeInsets.symmetric(horizontal: 2),
-                                  itemCount: boards.length,
-                                  separatorBuilder: (_, __) =>
-                                      const SizedBox(width: 6),
-                                  itemBuilder:
-                                      (BuildContext context, int index) {
-                                    final BoardListing board = boards[index];
-                                    final bool isSelected =
-                                        _boardId == board.boardId;
-                                    return Center(
-                                      child: CountryChip(
-                                        label: board.name,
-                                        flag: board.flag,
-                                        icon: board.isMine && board.flag.isEmpty
-                                            ? Icons.person_outline
-                                            : null,
-                                        labelVisible: isSelected,
-                                        selected: isSelected,
-                                        onTap: () => setState(() {
-                                          _boardId = board.boardId;
-                                          _boardLabel = board.name;
-                                        }),
-                                      ),
-                                    );
-                                  },
-                                ),
-                              );
-                            },
-                          ),
-                        ),
+                        SizedBox(height: 46, child: _buildBoardPicker()),
                       ],
                       SizedBox(height: 2.h),
                       SizedBox(
@@ -646,12 +668,30 @@ class _BankValueScreenState extends State<BankValueScreen> {
   }
 }
 
+/// The three amounts on the setup screen are money: digits and at most one
+/// decimal point, two places after it. The keyboard alone only asks the
+/// platform for a number pad - a keyboard with a full key row, a paste or a
+/// desktop browser can still type letters into it, and a "1,500" that parses as
+/// null would reach the start button only to fail there.
+final List<TextInputFormatter> _amountFormatters = <TextInputFormatter>[
+  FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+  TextInputFormatter.withFunction(
+    (TextEditingValue oldValue, TextEditingValue newValue) {
+      if (newValue.text.isEmpty) return newValue;
+      return RegExp(r'^\d*\.?\d{0,2}$').hasMatch(newValue.text)
+          ? newValue
+          : oldValue;
+    },
+  ),
+];
+
 Widget _buildGreenTextField({
   required TextEditingController controller,
   required String label,
 }) {
   return TextField(
     controller: controller,
+    inputFormatters: _amountFormatters,
     decoration: InputDecoration(
       labelText: label,
       labelStyle: const TextStyle(color: Color(0xFF2E7D32)), // calm green
@@ -666,6 +706,6 @@ Widget _buildGreenTextField({
       filled: true,
       fillColor: const Color.fromARGB(255, 255, 255, 255), // light green fill
     ),
-    keyboardType: TextInputType.number,
+    keyboardType: const TextInputType.numberWithOptions(decimal: true),
   );
 }

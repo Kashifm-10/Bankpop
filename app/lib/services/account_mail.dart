@@ -64,7 +64,12 @@ class AccountMail {
         );
       }
 
-      final String link = '$appUrl/verify?token=${Uri.encodeComponent(token)}';
+      // A standalone page, not the app: the link has to work on a laptop that
+      // has never opened BankPop, and it is `web/verify.html` (copied into the
+      // build beside index.html) that marks the address verified.
+      final String base = appUrl.replaceAll(RegExp(r'/+$'), '');
+      final String link =
+          '$base/verify.html?token=${Uri.encodeComponent(token)}';
       final EmailResult sent = await EmailSender.send(
         to: email,
         subject: 'Verify your BankPop account',

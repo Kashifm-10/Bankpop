@@ -130,6 +130,42 @@ class SendMailTests(SimpleTestCase):
     def test_refuses_everything_when_token_unset(self):
         self.assertEqual(self.post(self.valid(), token='').status_code, 401)
 
+    @override_settings(DEBUG=True)
+    def test_a_local_build_sends_without_a_token_in_debug(self):
+        """A web build served from localhost carries no token; DEBUG accepts it.
+
+        The test client's peer is 127.0.0.1, which is the phone-side of the
+        same case: `flutter run` on this computer posting to the service on
+        this computer.
+        """
+        response = self.post(self.valid(), token=None, REMOTE_ADDR='127.0.0.1')
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(len(mail.outbox), 1)
+
+    @override_settings(DEBUG=True)
+    def test_a_local_build_with_an_empty_token_still_sends_in_debug(self):
+        # The app sends `Authorization: Bearer ` when the build had no token.
+        response = self.post(self.valid(), token='', REMOTE_ADDR='127.0.0.1')
+        self.assertEqual(response.status_code, 200, response.content)
+
+    @override_settings(DEBUG=True)
+    def test_another_machine_still_needs_the_token_in_debug(self):
+        response = self.post(self.valid(), token=None, REMOTE_ADDR='203.0.113.7')
+        self.assertEqual(response.status_code, 401)
+
+    @override_settings(DEBUG=True)
+    def test_a_forwarded_loopback_address_does_not_authorize(self):
+        response = self.post(
+            self.valid(), token=None, REMOTE_ADDR='203.0.113.7',
+            HTTP_X_FORWARDED_FOR='127.0.0.1',
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_a_local_build_still_needs_the_token_without_debug(self):
+        # DEBUG off is a deployed service, where the token is the only gate.
+        response = self.post(self.valid(), token=None, REMOTE_ADDR='127.0.0.1')
+        self.assertEqual(response.status_code, 401)
+
     def test_rejects_get(self):
         response = self.client.get(self.url, headers={'Authorization': f'Bearer {TOKEN}'})
         self.assertEqual(response.status_code, 405)

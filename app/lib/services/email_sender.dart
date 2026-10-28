@@ -51,7 +51,7 @@ class EmailSender {
       return const EmailResult.ok('Email sent.');
     } on MailApiException catch (error) {
       debugPrint('The mail service refused the message: $error');
-      return EmailResult.failure(_sentence(error));
+      return EmailResult.failure(_sentence(error, hasToken: service.token.isNotEmpty));
     } catch (error) {
       debugPrint('Could not send mail: $error');
       return const EmailResult.failure(
@@ -61,7 +61,7 @@ class EmailSender {
   }
 
   /// The refusal, in the words of the screen that asked.
-  static String _sentence(MailApiException error) {
+  static String _sentence(MailApiException error, {required bool hasToken}) {
     if (error.unreachable) {
       return 'Could not reach the mail service (${error.message}). Check '
           'MAIL_API_URL and that the service is running.';
@@ -76,8 +76,15 @@ class EmailSender {
             ? 'The mail service refused the message: ${error.message}.'
             : 'The mail service refused the message ($problems).';
       case 401:
-        return 'The mail service refused this build\'s token. Check '
-            'MAIL_API_TOKEN against the service\'s own value.';
+        // Two very different mistakes produce the same 401, and the screen
+        // used to name only the first: a build that carries no token at all,
+        // and one whose token the service does not recognise.
+        return hasToken
+            ? 'The mail service refused this build\'s token. Check '
+                'MAIL_API_TOKEN against the service\'s own value.'
+            : 'This build has no mail token, so the service turned the message '
+                'away. Run the app with ./dev.sh (it passes the token), or '
+                'build with --dart-define=MAIL_API_TOKEN=<the service value>.';
       case 429:
         return 'Too many emails were sent a moment ago. Try again later.';
       case 502:

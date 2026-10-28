@@ -75,10 +75,16 @@ in, a hosted build says it has no mail service instead of posting into nothing.
 `--dart-define=MAIL_API_URL=https://...` overrides both, which is how a staging
 build points at a staging service.
 
-The token is always a build setting - `MAIL_API_TOKEN` from
+For a hosted build the token is a build setting - `MAIL_API_TOKEN` from
 `django-mail-api/.env`, passed by `dev.sh` and by the compose file. A web build
 cannot keep a secret, so the token is a speed bump; what stops abuse is on the
 server (recipient allowlist, rate limit, fixed sender).
+
+On this computer it is not needed at all: a service running with
+`DJANGO_DEBUG=1` accepts requests from localhost, so a plain `flutter run` or a
+`flutter build web` served locally on any port can send mail without a
+`--dart-define`. A deployed service runs with `DEBUG` off, where the token is
+required again.
 
 ## The app
 

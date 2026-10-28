@@ -102,7 +102,7 @@ void main() {
               // over the screen instead of on top of the deed.
               Navigator.of(deedContext).pop();
             },
-            child: const Text('Show QR'),
+            child: const Text('Pay QR'),
           ),
         ),
       );
@@ -112,13 +112,13 @@ void main() {
 
     // The deed itself is unchanged, with the price still on it.
     expect(find.text('£60'), findsOneWidget);
-    expect(find.text('Show QR'), findsOneWidget);
+    expect(find.text('Pay QR'), findsOneWidget);
 
-    await tester.tap(find.text('Show QR'));
+    await tester.tap(find.text('Pay QR'));
     await tester.pumpAndSettle();
 
     expect(sold, isTrue);
-    expect(find.text('Show QR'), findsNothing);
+    expect(find.text('Pay QR'), findsNothing);
   });
 
   testWidgets('a deed without an action shows only Close',
@@ -130,8 +130,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Close'), findsOneWidget);
-    expect(find.text('Show QR'), findsNothing);
-    expect(find.text('Assign to player'), findsNothing);
+    expect(find.text('Pay QR'), findsNothing);
+    expect(find.text('Pay QR'), findsNothing);
   });
 
   testWidgets('an owned deed shows the owner instead of a sell action',

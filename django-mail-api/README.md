@@ -94,6 +94,13 @@ MAIL_API_TOKEN=paste-the-generated-value-here
 
 Until it is set, the API refuses every request with `401`.
 
+**The one exception is local development.** With `DJANGO_DEBUG=1` (the `.env.example` default) a
+request that arrives from this machine - a `flutter run` in Chrome, a `flutter build web` served on
+`localhost`, `curl` - is accepted without a token. Those builds carry no `MAIL_API_TOKEN`, so
+without this every signup on the developer's own machine would end in "the service refused this
+build's token". A deployed service runs with `DEBUG` off, where the token is required again, and
+`X-Forwarded-For` cannot be used to claim a loopback address.
+
 ## 2. Gmail configuration
 
 Gmail won't accept your normal password from an app. You need an **App Password**:
@@ -155,6 +162,24 @@ so a half-filled row is enough to see the flow end to end.
 
 ```sh
 uv run python manage.py runserver
+```
+
+Without `uv`, run it from the `.venv` this folder already has. The separator matters: a
+**cmd.exe** window reads `/` as the start of a switch, so the path has to use backslashes
+there.
+
+```bat
+:: Windows, cmd.exe
+.venv\Scripts\python.exe manage.py runserver 127.0.0.1:8000
+```
+
+```sh
+# PowerShell
+.\\.venv\\Scripts\\python.exe manage.py runserver 127.0.0.1:8000
+
+# Git Bash, or macOS / Linux: the unix venv layout
+.venv/Scripts/python.exe manage.py runserver 127.0.0.1:8000   # Windows
+.venv/bin/python manage.py runserver 127.0.0.1:8000           # macOS / Linux
 ```
 
 The API is now at `http://127.0.0.1:8000`. Check it:
@@ -422,7 +447,7 @@ ignored.
 | `200` | `{"sent": true, "recipients": 1}` | accepted by Gmail / the provider |
 | `400` | `{"error": "invalid request", "fields": {...}}` | see the example below |
 | `400` | `{"error": "body must be JSON"}` | body isn't valid JSON |
-| `401` | `{"error": "unauthorized"}` | missing or wrong token, or no `MAIL_API_TOKEN` on the server |
+| `401` | `{"error": "unauthorized"}` | missing or wrong token, or no `MAIL_API_TOKEN` on the server (local requests are accepted while `DJANGO_DEBUG=1`) |
 | `405` | (empty) | used GET instead of POST |
 | `404` | HTML page | wrong URL path |
 | `429` | `{"error": "too many requests, try again later"}` | rate limit for this IP |
