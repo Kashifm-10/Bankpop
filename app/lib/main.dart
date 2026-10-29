@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mon/router.dart';
+import 'package:mon/services/board_catalog.dart';
 import 'package:mon/services/url_strategy.dart';
 import 'package:mon/theme.dart';
 import 'package:mon/theme_provider.dart';
@@ -35,6 +36,11 @@ void main() async {
     anonKey: 'sb_publishable_4ynd9Wt_Hhi7bkD6O7IwsA_ns7MEK6b',
   );
   await _initPlayerID();
+
+  // The boards this device already knows, read from disk before the first
+  // screen opens: the bank form's flag row is then drawn from memory instead
+  // of starting a read when the cards switch is flipped.
+  unawaited(BoardCatalog.warmListings());
 
   // The edge-to-edge Android chrome has no meaning in a browser, and asking
   // for it there only risks a platform-channel exception at startup.

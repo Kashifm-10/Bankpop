@@ -132,24 +132,29 @@ abstract final class GameControls {
     color: Color(0xFF7B1FA2),
   );
 
-  /// The two packs the banker deals from, drawn as the cards themselves. A
-  /// cards game is the only one where a card can be dealt, so these two are
+  /// The two packs the banker deals from, drawn as the decks themselves.
+  ///
+  /// The art is landscape (623 x 382, the drawing cropped to its own bounds),
+  /// so these two are drawn by [DeckButton] rather than a square sticker - the
+  /// tile takes the picture's own ratio and nothing else. Chance is red and
+  /// the Chest blue, the two colours apart.
+  /// A cards game is the only one where a card can be dealt, so these two are
   /// only on the screen in one.
   static const GameControl chanceDeck = GameControl(
     icon: Icons.casino_outlined,
-    art: 'assets/images/Chance.png',
+    art: 'assets/Icons/chance_deck_l_trimmed.png',
     label: 'Chance deck',
     detail: 'Deals the next Chance card and shows the table what it asks for.',
-    color: Color(0xFF6A1B9A),
+    color: Color(0xFFC62828),
   );
 
   static const GameControl chestDeck = GameControl(
     icon: Icons.inventory_2_outlined,
-    art: 'assets/images/Community_Chest.png',
+    art: 'assets/Icons/chest_deck_l_trimmed.png',
     label: 'Community Chest deck',
     detail: 'Deals the next Community Chest card and shows the table what it '
         'asks for.',
-    color: Color(0xFF6A1B9A),
+    color: Color(0xFF1565C0),
   );
 
   /// One scanner for the whole hand: it reads a player's pay QR and the bank's

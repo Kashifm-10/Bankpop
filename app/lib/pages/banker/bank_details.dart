@@ -45,9 +45,10 @@ class _BankValueScreenState extends State<BankValueScreen> {
   ///
   /// Held here rather than read by a `FutureBuilder`: that starts in `waiting`
   /// even for a future which has already completed, so flipping the cards
-  /// switch flashed a spinner over a row that was about to be there. Null only
-  /// until the first read lands.
-  List<BoardListing>? _boards;
+  /// switch flashed a spinner over a row that was about to be there. It starts
+  /// from whatever the catalog already knows (warmed at startup from the copy
+  /// on the device), so the flags are on screen before the switch is touched.
+  List<BoardListing>? _boards = BoardCatalog.cachedListings;
 
   /// Read once when the screen opens, so the flags are already there by the
   /// time the cards switch is flipped.
@@ -602,20 +603,30 @@ class _BankValueScreenState extends State<BankValueScreen> {
                       // where players buy properties, and where the board and
                       // its Chance and Community Chest cards are drawn. The
                       // picker is a row of flags; the chosen one shows its name.
-                      if (_playWithCards) ...<Widget>[
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4, bottom: 6),
-                          child: Text(
-                            'Choose the board',
-                            style: TextStyle(
-                              fontSize: 14.sp,
-                              fontWeight: FontWeight.w500,
-                              color: const Color(0xFF33691E),
+                      //
+                      // It stays built while the switch is off, so the flags are
+                      // already laid out when it is flipped: turning cards on
+                      // reveals the row instead of starting to read one.
+                      Offstage(
+                        offstage: !_playWithCards,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4, bottom: 6),
+                              child: Text(
+                                'Choose the board',
+                                style: TextStyle(
+                                  fontSize: 14.sp,
+                                  fontWeight: FontWeight.w500,
+                                  color: const Color(0xFF33691E),
+                                ),
+                              ),
                             ),
-                          ),
+                            SizedBox(height: 46, child: _buildBoardPicker()),
+                          ],
                         ),
-                        SizedBox(height: 46, child: _buildBoardPicker()),
-                      ],
+                      ),
                       SizedBox(height: 2.h),
                       SizedBox(
                         width: 50.w,

@@ -72,6 +72,18 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.text('How to use'), findsOneWidget);
       expect(find.text('As a player'), findsOneWidget);
+
+      // The first step is below the quick-start strip on a phone, so the page
+      // is scrolled to it rather than expected to fit on one screen: the
+      // guide is longer than a phone now, on purpose.
+      // Dragged on the list itself: the tab view is scrollable sideways too,
+      // so "the first Scrollable" is not the one this page scrolls.
+      await tester.dragUntilVisible(
+        find.text('Getting in'),
+        find.byType(ListView).last,
+        const Offset(0, -220),
+      );
+      await tester.pumpAndSettle();
       expect(find.text('Getting in'), findsOneWidget);
       expect(find.textContaining('verification link'), findsWidgets);
 
@@ -79,6 +91,12 @@ void main() {
       await tester.tap(find.text('As the banker'));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
+      await tester.dragUntilVisible(
+        find.text('Start a game'),
+        find.byType(ListView).last,
+        const Offset(0, -220),
+      );
+      await tester.pumpAndSettle();
       expect(find.text('Start a game'), findsOneWidget);
     });
   });

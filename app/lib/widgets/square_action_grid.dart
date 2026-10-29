@@ -151,9 +151,11 @@ class RenderSquareActionGrid extends RenderBox
   /// The card never drops below this, however much the squares would like.
   static const double _minCardWidth = 300;
 
-  /// Below this a sticker is too small to tap; above it, silly on a big screen.
+  /// Below this a sticker is too small to tap; above it, bigger than any
+  /// control here needs. The cap only bites on a very tall window, where a
+  /// lone sticker would otherwise grow past the card beside it.
   static const double _minSide = 40;
-  static const double _maxSide = 120;
+  static const double _maxSide = 160;
 
   int get columns => _columns;
   int _columns;
