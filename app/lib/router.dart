@@ -6,6 +6,7 @@ import 'package:mon/pages/auth/set_password_screen.dart';
 import 'package:mon/pages/banker/bank_details.dart';
 import 'package:mon/pages/banker/banker_screen.dart';
 import 'package:mon/pages/board_preview_screen.dart';
+import 'package:mon/pages/board_from_image_screen.dart';
 import 'package:mon/pages/create_board_screen.dart';
 import 'package:mon/pages/game_access_denied_screen.dart';
 import 'package:mon/pages/game_history_screen.dart';
@@ -168,6 +169,13 @@ final GoRouter appRouter = GoRouter(
       builder: (BuildContext context, GoRouterState state) => CreateBoardScreen(
         draft: state.extra is BoardDraft ? state.extra as BoardDraft : null,
       ),
+    ),
+    // A board made from a photograph: the picture is read on the phone and its
+    // names are checked here before anything is saved.
+    GoRoute(
+      path: AppRoutes.boardFromImage,
+      builder: (BuildContext context, GoRouterState state) =>
+          const BoardFromImageScreen(),
     ),
     GoRoute(
       path: AppRoutes.profile,

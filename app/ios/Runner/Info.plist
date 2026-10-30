@@ -43,10 +43,15 @@
     </array>
     <key>CADisableMinimumFrameDurationOnPhone</key>
     <true/>
-    <!-- Required by mobile_scanner: without it, opening the join or pay scanner
-         on iOS terminates the app instead of asking for the camera. -->
+    <!-- Required by mobile_scanner and by image_picker: without it, opening the
+         join or pay scanner, or photographing a board, terminates the app
+         instead of asking for the camera. -->
     <key>NSCameraUsageDescription</key>
-    <string>Scan a game QR code to join a game or pay another player.</string>
+    <string>Scan a game QR code to join a game or pay another player, or photograph a board to make one in BankPop.</string>
+    <!-- Required by image_picker when a board is made from a picture the
+         player already has on the phone. -->
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Choose a picture of a board so BankPop can read its square names and make the board for you.</string>
     <key>UIApplicationSupportsIndirectInputEvents</key>
     <true/>
   </dict>

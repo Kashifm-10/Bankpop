@@ -106,6 +106,37 @@ class _BoardPreviewScreenState extends State<BoardPreviewScreen> {
     await _openEditor(draft);
   }
 
+  /// A board made from a photograph of a printed one.
+  ///
+  /// Signing in is checked first for the same reason the editor checks it: the
+  /// board is saved to the account, and a player who has just read twenty-eight
+  /// names off a picture should not have to do it twice.
+  Future<void> _boardFromImage() async {
+    if (!await Account.isSignedIn()) {
+      if (!mounted) return;
+      final bool signIn = await showAppConfirm(
+        context,
+        title: 'Log in to save a board',
+        icon: Icons.lock_outline,
+        confirmLabel: 'Sign in',
+        cancelLabel: 'Not now',
+        message: 'Your own boards are saved to your account, so they are '
+            'there on any device you sign in on and nobody else sees them.',
+      );
+      if (!signIn || !mounted) return;
+      final bool? signedIn = await context.push<bool>(AppRoutes.authReturning);
+      if (signedIn != true || !mounted) return;
+    }
+    if (!mounted) return;
+    final String? created =
+        await context.push<String>(AppRoutes.boardFromImage);
+    if (!mounted) return;
+    setState(() => _boards = BoardCatalog.available(refresh: true));
+    if (created != null && created.isNotEmpty) {
+      setState(() => _boardId = created);
+    }
+  }
+
   Future<void> _openEditor([BoardDraft? draft]) async {
     final String? created =
         await context.push<String>(AppRoutes.newBoard, extra: draft);
@@ -223,6 +254,16 @@ class _BoardPreviewScreenState extends State<BoardPreviewScreen> {
               ),
             ),
           IconButton(
+            tooltip: 'Make a board from a photo',
+            onPressed: _boardFromImage,
+            icon: Image.asset(
+              'assets/Icons/camera.png',
+              width: 26.sp,
+              height: 26.sp,
+              fit: BoxFit.contain,
+            ),
+          ),
+          IconButton(
             tooltip: 'Create your own board',
             onPressed: _createBoard,
             icon: Image.asset(
@@ -253,6 +294,7 @@ class _BoardPreviewScreenState extends State<BoardPreviewScreen> {
                 isError: snap.hasError,
                 onCreate: _createBoard,
                 onImport: _importBoard,
+                onPhoto: _boardFromImage,
               );
             }
             final BoardListing selected = boards.firstWhere(
@@ -414,11 +456,13 @@ class _NoBoards extends StatelessWidget {
     required this.isError,
     required this.onCreate,
     required this.onImport,
+    required this.onPhoto,
   });
 
   final bool isError;
   final Future<void> Function() onCreate;
   final Future<void> Function() onImport;
+  final Future<void> Function() onPhoto;
 
   @override
   Widget build(BuildContext context) {
@@ -460,7 +504,17 @@ class _NoBoards extends StatelessWidget {
             ),
             child: const Text('Create your own'),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
+          TextButton.icon(
+            onPressed: onPhoto,
+            icon: const Icon(Icons.photo_camera_outlined,
+                size: 18, color: Color(0xFF33691E)),
+            label: const Text(
+              'Make one from a photo',
+              style: TextStyle(color: Color(0xFF33691E)),
+            ),
+          ),
+          const SizedBox(height: 4),
           TextButton(
             onPressed: onImport,
             child: const Text(

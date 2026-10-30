@@ -71,6 +71,18 @@ dependencies:
   file_picker: ^11.0.3
   # Saving a board image to the browser's downloads folder.
   web: ^1.1.0
+  # A board can be made from a photograph of one: the camera or the gallery
+  # picks the picture and a reader on the device itself takes the names off it.
+  # A desktop has no camera, so the button is only shown where one exists
+  # (lib/pages/board_from_image_screen.dart).
+  image_picker: 1.1.2
+  # Three readers, one per family of platforms, because no single OCR package
+  # covers them all offline: ML Kit is the phone's (below), WinRT/Vision/
+  # Tesseract are the desktop's, and Tesseract.js is the browser's. The
+  # dispatch lives in lib/services/board_ocr.dart.
+  google_mlkit_text_recognition: ^0.16.0
+  flutter_ocr_native: ^0.3.8
+  ocr_flutter_web: ^1.0.2
 
 
 dev_dependencies:
