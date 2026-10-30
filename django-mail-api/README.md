@@ -585,24 +585,93 @@ restart and no release.
 
 ### Wasmer Edge (zip upload)
 
-```sh
-./build-zip.sh          # Linux / macOS
-build-zip.bat           # Windows
+Wasmer does not deploy the zip as-is: its **Anybuild** inspects the project, decides it is Django,
+and generates its own build for Python on WASIX. That build runs three of our commands, and the
+project has to survive all three before the app is ever started:
+
+| Step | Command Anybuild runs | What it needs from this project |
+|---|---|---|
+| build | `python manage.py collectstatic --noinput` | `django.contrib.staticfiles` in `INSTALLED_APPS`, and `STATIC_ROOT` |
+| start | `uvicorn config.wsgi:app --interface=wsgi --host 0.0.0.0 --port 8080` | a module-level `app` in `config/wsgi.py` |
+| after deploy | `python manage.py migrate` | a usable `DATABASES` entry |
+
+The first version of this project satisfied only the second one, so the build died with
+`Unknown command: 'collectstatic'` - Django only has that command when the staticfiles app is
+installed. `config/settings.py` now carries all three:
+
+```python
+INSTALLED_APPS = [..., 'django.contrib.staticfiles']   # contributes collectstatic
+STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'                   # collects nothing; the API serves no pages
+DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}}
 ```
 
-Both create `dist/django-mail-api.zip`.
+In-memory SQLite is deliberate: this service has no models, so `migrate` only has to answer "which
+migrations have run?", and Wasmer's filesystem is rebuilt on every deploy. Nothing is stored.
 
-1. Upload `dist/django-mail-api.zip` in the Wasmer dashboard.
-2. Set the environment variables there: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
-   `MAIL_API_TOKEN`, `DJANGO_SECRET_KEY`, `CORS_ALLOWED_ORIGINS`. `.env` isn't in the zip.
-   The mailbox is already in the app's Supabase row, so there is nothing else to configure - and
-   no app password to paste into a hosting dashboard.
-3. Test with `https://<your-app>.wasmer.app/api/health/`, then the Postman collection
-   with `baseUrl` set to that URL.
+**Steps**
 
-The WSGI entrypoint is `config.wsgi:app`, and `*.wasmer.app` hosts are allowed by default.
-Wasmer's free tier lists SMTP as a Pro feature. If Gmail sends fail there with a `502` and a
-connection error in the logs, switch to an HTTP provider ([section 8](#8-other-providers-zoho-brevo-resend-mailgun-postmark)).
+1. Build the zip from a clean tree:
+
+   ```sh
+   ./build-zip.sh          # Linux / macOS / Git Bash
+   build-zip.bat           # Windows cmd
+   ```
+
+   Both write `dist/django-mail-api.zip`. `.env`, `.venv` and `dist/` stay out of it.
+2. Upload `dist/django-mail-api.zip` in the Wasmer dashboard. The log should now show
+   `0 static files copied`, `No migrations to apply`, and then the app starting on 8080.
+3. Set the environment variables (**Settings -> Environment Vars**, or
+   `wasmer app secrets create --from-file=.env`):
+
+   | Variable | Value |
+   |---|---|
+   | `SUPABASE_URL` | `https://<project>.supabase.co` |
+   | `SUPABASE_SERVICE_ROLE_KEY` | the service-role key (server-side only) |
+   | `MAIL_API_TOKEN` | the same token the app was built with |
+   | `DJANGO_SECRET_KEY` | a long random string |
+   | `DJANGO_DEBUG` | `0` |
+   | `CORS_ALLOWED_ORIGINS` | `https://bankpop.netlify.app` (plus any other web origin) |
+
+   Leave `MAIL_PROVIDER` unset: the provider comes from the Supabase row, so the mailbox and the
+   provider can still be changed without a redeploy. `*.wasmer.app` is already in
+   `DJANGO_ALLOWED_HOSTS`; add a custom domain there if you attach one.
+4. **Expect SMTP not to work here.** Wasmer Edge's own email path is a `sendmail` shim backed by
+   their REST API; direct outbound SMTP to Gmail on 465/587 is not part of the documented
+   feature set, so a `smtp` row usually fails with a `502` and a connection error. Switch the row
+   to an HTTP provider instead - it is a single `update`, no rebuild and no redeploy:
+
+   ```sql
+   update public.email_settings set
+     provider  = 'brevo',            -- or 'resend' / 'mailgun' / 'postmark'
+     api_key   = '<that provider API key>',
+     from_email = 'noreply@your-domain.example'
+    where id = 1;
+   ```
+
+   Gmail cannot be the sender through an HTTP API; the from-address has to be one the provider
+   has verified (Brevo: a verified sender or an authenticated domain). See
+   [section 8](#8-other-providers-zoho-brevo-resend-mailgun-postmark).
+5. Point the app at the deployed service - the row, not the build:
+
+   ```sql
+   update public.email_settings
+      set mail_api_url = 'https://<your-app>.wasmer.app'
+    where id = 1;
+   ```
+
+   Then `select * from public.email_public_settings;` should show it, and the app's next
+   verification mail goes to Wasmer.
+6. Check `https://<your-app>.wasmer.app/api/health/` - it answers which provider and where the
+   mailbox came from (`supabase`). Then send one mail with the Postman collection.
+
+`config/wsgi.py` already ends with `app = application`, which is the name Anybuild's start command
+looks for; `WSGI_APPLICATION` is set to `config.wsgi.app` for the same reason.
+
+If a future build needs a step removed (for example you decide `collectstatic` is pointless
+because nothing is served), Wasmer lets the generated `Anybuild` file be edited, and every field
+can also be overridden from the environment (`ANYBUILD_*`) or with `anybuild build --config`.
+Removing the command is legitimate; leaving the settings above in place is simpler.
 
 ### Docker
 
@@ -617,6 +686,9 @@ docker run -p 8000:8000 --env-file .env -e DJANGO_DEBUG=0 django-mail-api
 |---|---|
 | `401 unauthorized` | Token missing or different from `MAIL_API_TOKEN` in `.env`. The header must be `Authorization: Bearer <token>`. Restart the server after editing `.env`. |
 | `502`, and the log shows `SMTPAuthenticationError: (535, ... Username and Password not accepted)` | You used your normal Gmail password, or the app password is wrong or revoked. Create a new app password ([section 2](#2-gmail-configuration)). |
+| Build fails with `Unknown command: 'collectstatic'` | `django.contrib.staticfiles` is missing from `INSTALLED_APPS` (or `STATIC_ROOT` is unset). Both are in `config/settings.py` now - rebuild the zip from the current tree. |
+| Build succeeds, then the deploy step fails on `migrate` | `DATABASES` is empty. It now points at in-memory SQLite, which is enough for a service with no models. |
+| Health answers `503` on Wasmer | The row's provider cannot send: `smtp` from Edge is the usual reason. Move the row to an HTTP provider ([section 8](#8-other-providers-zoho-brevo-resend-mailgun-postmark)). |
 | `502`, and the log shows `Connection refused` / `timed out` / `Network is unreachable` | The network or host blocks SMTP (common on free hosting and some office networks). Try port `465`, or switch to an HTTP provider. |
 | `400 Bad Request` HTML page, and the log shows `DisallowedHost` | The host name you're calling isn't in `DJANGO_ALLOWED_HOSTS` (e.g. your LAN IP). |
 | Flutter web: `XMLHttpRequest error` / `ClientException`, and the browser console mentions CORS | Add your web app's origin to `CORS_ALLOWED_ORIGINS` (exact scheme + host + port, no trailing slash). |

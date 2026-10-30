@@ -111,7 +111,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // The deed itself is unchanged, with the price still on it.
-    expect(find.text('£60'), findsOneWidget);
+    expect(find.text('${BoardCurrencies.mark}60'), findsOneWidget);
     expect(find.text('Pay QR'), findsOneWidget);
 
     await tester.tap(find.text('Pay QR'));
@@ -149,7 +149,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // The deed itself is unchanged, price and all.
-    expect(find.text('£60'), findsOneWidget);
+    expect(find.text('${BoardCurrencies.mark}60'), findsOneWidget);
     expect(find.text('Ameen'), findsOneWidget);
     expect(find.text('owns this card'), findsOneWidget);
     expect(find.text('Show QR'), findsNothing);
@@ -265,9 +265,10 @@ void main() {
 
     // Rents are 2, 10, 30... and one house is built: its row carries the tick,
     // the next row the plus. Every value has to end at the same right edge.
-    final double bare = tester.getTopRight(find.text('\u00a32')).dx;
-    final double ticked = tester.getTopRight(find.text('\u00a310')).dx;
-    final double offered = tester.getTopRight(find.text('\u00a330')).dx;
+    final String mark = BoardCurrencies.mark;
+    final double bare = tester.getTopRight(find.text('${mark}2')).dx;
+    final double ticked = tester.getTopRight(find.text('${mark}10')).dx;
+    final double offered = tester.getTopRight(find.text('${mark}30')).dx;
     expect(ticked, moreOrLessEquals(bare, epsilon: 0.5));
     expect(offered, moreOrLessEquals(bare, epsilon: 0.5));
 

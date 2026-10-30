@@ -1,8 +1,10 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:mon/models/bankpop_board.dart';
 import 'package:mon/services/bankruptcy.dart';
 import 'package:mon/widgets/app_dialog.dart';
+import 'package:mon/widgets/game_controls.dart';
 
 /// A player the bankrupt can owe money to.
 class BankruptcyCreditor {
@@ -85,9 +87,9 @@ class _BankruptcyDialogState extends State<_BankruptcyDialog> {
           BankruptcyDue(
             playerId: creditor.playerId,
             name: creditor.name,
-            amount:
-                double.tryParse(_amounts[creditor.playerId]?.text.trim() ?? '') ??
-                    0,
+            amount: double.tryParse(
+                    _amounts[creditor.playerId]?.text.trim() ?? '') ??
+                0,
           ),
     ];
   }
@@ -98,8 +100,7 @@ class _BankruptcyDialogState extends State<_BankruptcyDialog> {
       return;
     }
     for (final String id in _selected) {
-      final double? amount =
-          double.tryParse(_amounts[id]?.text.trim() ?? '');
+      final double? amount = double.tryParse(_amounts[id]?.text.trim() ?? '');
       if (amount == null || amount <= 0) {
         setState(() => _hint = 'Every player you owe needs an amount above 0.');
         return;
@@ -132,8 +133,14 @@ class _BankruptcyDialogState extends State<_BankruptcyDialog> {
                 color: const Color(0xFFC62828).withValues(alpha: 0.14),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.gavel,
-                  size: 20, color: Color(0xFFC62828)),
+              // The declare button's own drawing: the dialog is what that
+              // button opened, so it wears the same gavel.
+              child: Image.asset(
+                GameControls.bankrupt.art!,
+                width: 20,
+                height: 20,
+                fit: BoxFit.contain,
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -343,7 +350,7 @@ class _BankruptcyDialogState extends State<_BankruptcyDialog> {
               decoration: InputDecoration(
                 isDense: true,
                 hintText: '0.00',
-                prefixText: '₹',
+                prefixText: BoardCurrencies.mark,
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                 border: OutlineInputBorder(
@@ -358,5 +365,6 @@ class _BankruptcyDialogState extends State<_BankruptcyDialog> {
     );
   }
 
-  static String _money(double value) => '₹${value.toStringAsFixed(2)}';
+  static String _money(double value) =>
+      '${BoardCurrencies.mark}${value.toStringAsFixed(2)}';
 }

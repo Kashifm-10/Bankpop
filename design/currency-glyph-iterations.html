@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Heavy bar B - iterations</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 26px 26px;
+    background: #f6efe2;
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    color: #2c2c2c;
+  }
+  h1 { font-size: 19px; margin: 0 0 5px; color: #33691e; }
+  p.lead { margin: 0 0 16px; font-size: 12.5px; color: #6b7a5e; max-width: 1000px; line-height: 1.5; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .card {
+    background: #fff; border: 1px solid #e8ddbb; border-radius: 14px;
+    padding: 10px 14px; display: flex; align-items: center; gap: 14px;
+  }
+  .num {
+    width: 22px; flex: 0 0 22px; font-size: 10px; font-weight: 700;
+    color: #b3bdaa; letter-spacing: .5px;
+  }
+  .glyphbox {
+    width: 84px; height: 84px; flex: 0 0 84px; display: flex; align-items: center;
+    justify-content: center; background: #fffdf7;
+    border: 1px dashed #e6dcc0; border-radius: 10px;
+  }
+  .body { flex: 1 1 auto; min-width: 0; }
+  .name { font-size: 13px; font-weight: 700; color: #33691e; }
+  .note { font-size: 10.5px; color: #8a927f; line-height: 1.35; margin: 1px 0 6px; }
+  .samples { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .sample { display: flex; align-items: baseline; gap: 4px; font-weight: 700; color: #2c2c2c; }
+  .s26 { font-size: 26px; }
+  .s18 { font-size: 18px; }
+  .s12 { font-size: 12px; }
+  .onGold {
+    background: #ffd34d; border-radius: 7px; padding: 4px 8px; font-size: 13px;
+    font-weight: 700; color: #3a2210; display: flex; align-items: baseline; gap: 3px;
+  }
+  .strip {
+    margin-top: 14px; background: #fff; border: 1px solid #e8ddbb; border-radius: 14px;
+    padding: 12px 18px; display: flex; align-items: center; gap: 26px; flex-wrap: wrap;
+  }
+  .strip .label { font-size: 10px; letter-spacing: 1px; font-weight: 700; color: #9aa78c; }
+  .tiny { display: flex; align-items: baseline; gap: 3px; font-size: 10px; font-weight: 700; }
+  .ref { font-size: 30px; font-weight: 700; color: #2c2c2c; }
+  .ref span { margin-right: 12px; }
+  footer { margin-top: 12px; font-size: 10.5px; color: #97a189; line-height: 1.5; max-width: 1000px; }
+</style>
+</head>
+<body>
+
+<h1>Heavy bar B - iterations</h1>
+<p class="lead">
+  The same glyph, worked on: how far the bars reach, how thick they are, where they
+  sit on the letter, and whether the ends are round. Each card is the drawing at 84px,
+  then beside a figure at 26, 18 and 12px, then on the app's amber.
+</p>
+
+<div class="strip">
+  <span class="label">FOR SCALE</span>
+  <span class="ref"><span>$</span><span>€</span><span>£</span><span>¥</span><span>₹</span></span>
+  <span class="label">AT 30px</span>
+</div>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <g id="bHeavy" fill="none" stroke="currentColor" stroke-linecap="round"
+       stroke-linejoin="round">
+      <path d="M37 16 V84" />
+      <path d="M37 16 H57 C71 16 79 23 79 32 C79 41 71 48 57 48 H37" />
+      <path d="M37 48 H61 C77 48 86 57 86 67 C86 77 77 84 61 84 H37" />
+    </g>
+
+    <!-- A. base: bars 36 long, 12 thick, under the bowls -->
+    <symbol id="a" viewBox="0 0 100 100">
+      <use href="#bHeavy" stroke-width="20" />
+      <g fill="currentColor">
+        <rect x="4" y="35" width="36" height="12" rx="6" />
+        <rect x="4" y="59" width="36" height="12" rx="6" />
+      </g>
+    </symbol>
+
+    <!-- B. longer bars, more overhang -->
+    <symbol id="b" viewBox="0 0 100 100">
+      <use href="#bHeavy" stroke-width="20" />
+      <g fill="currentColor">
+        <rect x="-2" y="35" width="44" height="12" rx="6" />
+        <rect x="-2" y="59" width="44" height="12" rx="6" />
+      </g>
+    </symbol>
+
+    <!-- C. shorter bars, tucked in -->
+    <symbol id="c" viewBox="0 0 100 100">
+      <use href="#bHeavy" stroke-width="20" />
+      <g fill="currentColor">
+        <rect x="12" y="35" width="28" height="12" rx="6" />
+        <rect x="12" y="59" width="28" height="12" rx="6" />
+      </g>
+    </symbol>
+
+    <!-- D. thinner bars, wider gap: room for the letter at 12px -->
+    <symbol id="d" viewBox="0 0 100 100">
+      <use href="#bHeavy" stroke-width="20" />
+      <g fill="currentColor">
+        <rect x="2" y="30" width="38" height="9" rx="4.5" />
+        <rect x="2" y="61" width="38" height="9" rx="4.5" />
+      </g>
+    </symbol>
+
+    <!-- E. bars centred on each bowl, not on the gap -->
+    <symbol id="e" viewBox="0 0 100 100">
+      <use href="#bHeavy" stroke-width="20" />
+      <g fill="currentColor">
+        <rect x="2" y="27" width="36" height="11" rx="5.5" />
+        <rect x="2" y="62" width="36" height="11" rx="5.5" />
+      </g>
+    </symbol>
+
+    <!-- F. one heavy bar at the waist -->
+    <symbol id="f" viewBox="0 0 100 100">
+      <use href="#bHeavy" stroke-width="20" />
+      <rect x="0" y="43" width="40" height="14" rx="7" fill="currentColor" />
+    </symbol>
+
+    <!-- G. bars tilted a few degrees -->
+    <symbol id="g" viewBox="0 0 100 100">
+      <use href="#bHeavy" stroke-width="20" />
+      <g fill="currentColor" transform="rotate(-7 37 50)">
+        <rect x="2" y="35" width="38" height="11" rx="5.5" />
+        <rect x="2" y="59" width="38" height="11" rx="5.5" />
+      </g>
+    </symbol>
+
+    <!-- H. bars squared off -->
+    <symbol id="h" viewBox="0 0 100 100">
+      <use href="#bHeavy" stroke-width="20" />
+      <g fill="currentColor">
+        <rect x="6" y="34" width="34" height="11" />
+        <rect x="6" y="59" width="34" height="11" />
+      </g>
+    </symbol>
+
+    <!-- I. heavier still: 24 thick -->
+    <symbol id="i" viewBox="0 0 100 100">
+      <use href="#bHeavy" stroke-width="24" />
+      <g fill="currentColor">
+        <rect x="2" y="34" width="38" height="13" rx="6.5" />
+        <rect x="2" y="56" width="38" height="13" rx="6.5" />
+      </g>
+    </symbol>
+
+    <!-- J. bars that stop short of the stem -->
+    <symbol id="j" viewBox="0 0 100 100">
+      <use href="#bHeavy" stroke-width="20" />
+      <g fill="currentColor">
+        <rect x="0" y="35" width="25" height="12" rx="6" />
+        <rect x="0" y="59" width="25" height="12" rx="6" />
+      </g>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="grid">
+
+  <div class="card"><span class="num">A</span>
+    <div class="glyphbox"><svg width="72" height="72" style="color:#2c2c2c"><use href="#a" /></svg></div>
+    <div class="body"><div class="name">Base</div>
+      <div class="note">What you picked. Bars 36 long, 12 thick, sitting under each bowl.</div>
+      <div class="samples">
+        <span class="sample s26"><svg width="26" height="26"><use href="#a" /></svg>1,500</span>
+        <span class="sample s18"><svg width="18" height="18"><use href="#a" /></svg>1,500</span>
+        <span class="sample s12"><svg width="12" height="12"><use href="#a" /></svg>1,500</span>
+        <span class="onGold"><svg width="14" height="14"><use href="#a" /></svg>1,500</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card"><span class="num">B</span>
+    <div class="glyphbox"><svg width="72" height="72" style="color:#2c2c2c"><use href="#b" /></svg></div>
+    <div class="body"><div class="name">Longer bars</div>
+      <div class="note">More overhang to the left: louder, and it holds the eye at 12px.</div>
+      <div class="samples">
+        <span class="sample s26"><svg width="26" height="26"><use href="#b" /></svg>1,500</span>
+        <span class="sample s18"><svg width="18" height="18"><use href="#b" /></svg>1,500</span>
+        <span class="sample s12"><svg width="12" height="12"><use href="#b" /></svg>1,500</span>
+        <span class="onGold"><svg width="14" height="14"><use href="#b" /></svg>1,500</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card"><span class="num">C</span>
+    <div class="glyphbox"><svg width="72" height="72" style="color:#2c2c2c"><use href="#c" /></svg></div>
+    <div class="body"><div class="name">Shorter bars</div>
+      <div class="note">Bars tucked under the letter: neater in a table, less of a standalone sign.</div>
+      <div class="samples">
+        <span class="sample s26"><svg width="26" height="26"><use href="#c" /></svg>1,500</span>
+        <span class="sample s18"><svg width="18" height="18"><use href="#c" /></svg>1,500</span>
+        <span class="sample s12"><svg width="12" height="12"><use href="#c" /></svg>1,500</span>
+        <span class="onGold"><svg width="14" height="14"><use href="#c" /></svg>1,500</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card"><span class="num">D</span>
+    <div class="glyphbox"><svg width="72" height="72" style="color:#2c2c2c"><use href="#d" /></svg></div>
+    <div class="body"><div class="name">Thinner bars</div>
+      <div class="note">Bars 9 thick with a wider gap: the letter keeps air between them when small.</div>
+      <div class="samples">
+        <span class="sample s26"><svg width="26" height="26"><use href="#d" /></svg>1,500</span>
+        <span class="sample s18"><svg width="18" height="18"><use href="#d" /></svg>1,500</span>
+        <span class="sample s12"><svg width="12" height="12"><use href="#d" /></svg>1,500</span>
+        <span class="onGold"><svg width="14" height="14"><use href="#d" /></svg>1,500</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card"><span class="num">E</span>
+    <div class="glyphbox"><svg width="72" height="72" style="color:#2c2c2c"><use href="#e" /></svg></div>
+    <div class="body"><div class="name">Bowl-centred</div>
+      <div class="note">One bar through the middle of each bowl instead of the gap between them.</div>
+      <div class="samples">
+        <span class="sample s26"><svg width="26" height="26"><use href="#e" /></svg>1,500</span>
+        <span class="sample s18"><svg width="18" height="18"><use href="#e" /></svg>1,500</span>
+        <span class="sample s12"><svg width="12" height="12"><use href="#e" /></svg>1,500</span>
+        <span class="onGold"><svg width="14" height="14"><use href="#e" /></svg>1,500</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card"><span class="num">F</span>
+    <div class="glyphbox"><svg width="72" height="72" style="color:#2c2c2c"><use href="#f" /></svg></div>
+    <div class="body"><div class="name">One heavy bar</div>
+      <div class="note">A single 14-thick bar at the waist. Calmest of the heavy set, still reads as a sign.</div>
+      <div class="samples">
+        <span class="sample s26"><svg width="26" height="26"><use href="#f" /></svg>1,500</span>
+        <span class="sample s18"><svg width="18" height="18"><use href="#f" /></svg>1,500</span>
+        <span class="sample s12"><svg width="12" height="12"><use href="#f" /></svg>1,500</span>
+        <span class="onGold"><svg width="14" height="14"><use href="#f" /></svg>1,500</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card"><span class="num">G</span>
+    <div class="glyphbox"><svg width="72" height="72" style="color:#2c2c2c"><use href="#g" /></svg></div>
+    <div class="body"><div class="name">Tilted bars</div>
+      <div class="note">A 7&deg; lift, for a little motion. Slightly informal in a ledger.</div>
+      <div class="samples">
+        <span class="sample s26"><svg width="26" height="26"><use href="#g" /></svg>1,500</span>
+        <span class="sample s18"><svg width="18" height="18"><use href="#g" /></svg>1,500</span>
+        <span class="sample s12"><svg width="12" height="12"><use href="#g" /></svg>1,500</span>
+        <span class="onGold"><svg width="14" height="14"><use href="#g" /></svg>1,500</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card"><span class="num">H</span>
+    <div class="glyphbox"><svg width="72" height="72" style="color:#2c2c2c"><use href="#h" /></svg></div>
+    <div class="body"><div class="name">Squared ends</div>
+      <div class="note">Flat caps on the bars. Sharper, more engraved, less friendly than the rest.</div>
+      <div class="samples">
+        <span class="sample s26"><svg width="26" height="26"><use href="#h" /></svg>1,500</span>
+        <span class="sample s18"><svg width="18" height="18"><use href="#h" /></svg>1,500</span>
+        <span class="sample s12"><svg width="12" height="12"><use href="#h" /></svg>1,500</span>
+        <span class="onGold"><svg width="14" height="14"><use href="#h" /></svg>1,500</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card"><span class="num">I</span>
+    <div class="glyphbox"><svg width="72" height="72" style="color:#2c2c2c"><use href="#i" /></svg></div>
+    <div class="body"><div class="name">Heaviest</div>
+      <div class="note">Letter at 24, bars at 13. Maximum weight; the lightest of the set small.</div>
+      <div class="samples">
+        <span class="sample s26"><svg width="26" height="26"><use href="#i" /></svg>1,500</span>
+        <span class="sample s18"><svg width="18" height="18"><use href="#i" /></svg>1,500</span>
+        <span class="sample s12"><svg width="12" height="12"><use href="#i" /></svg>1,500</span>
+        <span class="onGold"><svg width="14" height="14"><use href="#i" /></svg>1,500</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card"><span class="num">J</span>
+    <div class="glyphbox"><svg width="72" height="72" style="color:#2c2c2c"><use href="#j" /></svg></div>
+    <div class="body"><div class="name">Floating bars</div>
+      <div class="note">The bars stop short of the stem, so they never merge into it. Lightest join.</div>
+      <div class="samples">
+        <span class="sample s26"><svg width="26" height="26"><use href="#j" /></svg>1,500</span>
+        <span class="sample s18"><svg width="18" height="18"><use href="#j" /></svg>1,500</span>
+        <span class="sample s12"><svg width="12" height="12"><use href="#j" /></svg>1,500</span>
+        <span class="onGold"><svg width="14" height="14"><use href="#j" /></svg>1,500</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="strip">
+  <span class="label">10px STRESS TEST</span>
+  <span class="tiny"><svg width="10" height="10"><use href="#a" /></svg>1,500</span>
+  <span class="tiny"><svg width="10" height="10"><use href="#b" /></svg>1,500</span>
+  <span class="tiny"><svg width="10" height="10"><use href="#c" /></svg>1,500</span>
+  <span class="tiny"><svg width="10" height="10"><use href="#d" /></svg>1,500</span>
+  <span class="tiny"><svg width="10" height="10"><use href="#f" /></svg>1,500</span>
+  <span class="tiny"><svg width="10" height="10"><use href="#i" /></svg>1,500</span>
+  <span class="label">the sign has to survive this row</span>
+</div>
+
+<footer>
+  Bars are drawn as filled capsules over the stroked letter, so the sign is one shape at
+  any size. Weight and bar length are the only decisions that change how it reads at
+  12px; the gap between the bars is what keeps the two strokes apart.
+</footer>
+
+</body>
+</html>

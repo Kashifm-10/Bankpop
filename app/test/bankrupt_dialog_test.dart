@@ -4,6 +4,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mon/models/bankpop_board.dart';
 import 'package:mon/services/bankruptcy.dart';
 import 'package:mon/widgets/app_frame.dart';
 import 'package:mon/widgets/bankrupt_dialog.dart';
@@ -59,7 +60,7 @@ void main() {
     await _open(tester);
 
     expect(find.text('Declare bankrupt?'), findsOneWidget);
-    expect(find.text('₹175.00'), findsOneWidget); // 40 + 75 + 60
+    expect(find.text('${BoardCurrencies.mark}175.00'), findsOneWidget); // 40 + 75 + 60
 
     await tester.tap(find.text('No dues'));
     await tester.pumpAndSettle();
@@ -92,7 +93,8 @@ void main() {
     await tester.enterText(find.byType(TextField).last, '80');
     await tester.pump();
 
-    expect(find.text('₹200.00'), findsOneWidget); // what is owed
+    expect(
+        find.text('${BoardCurrencies.mark}200.00'), findsOneWidget); // owed
     expect(find.textContaining('written off'), findsOneWidget);
 
     await tester.tap(find.text('Declare bankrupt'));

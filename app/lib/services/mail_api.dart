@@ -50,10 +50,22 @@ class MailApiException implements Exception {
 class MailApi {
   MailApi({
     String? baseUrl,
+    String? hostedUrl,
     String? token,
     http.Client? client,
     String? origin,
-  })  : baseUrl = _normalise(baseUrl ?? resolveBaseUrl(origin: origin)),
+  })  : baseUrl = _normalise(
+          baseUrl ??
+              resolveBaseUrl(
+                origin: origin,
+                // The address the app read from `email_settings.mail_api_url`
+                // (see [EmailSender.send]); a build setting still wins, and a
+                // loopback page still uses the local service.
+                hostedUrl: (hostedUrl ?? '').trim().isEmpty
+                    ? _configuredHostedUrl
+                    : hostedUrl!,
+              ),
+        ),
         token = (token ?? _configuredToken).trim(),
         _client = client ?? http.Client();
 
@@ -65,13 +77,14 @@ class MailApi {
   /// Where `./dev.sh` and `docker compose up` put the mail service.
   static const String localService = 'http://127.0.0.1:8000';
 
-  /// Where the deployed service will live once it is hosted.
+  /// Where the deployed service lives, when the build carries it.
   ///
   /// The deployed app is https://bankpop.netlify.app, so any page that is not
-  /// on loopback posts here. Fill this in (or build with
-  /// `--dart-define=MAIL_API_HOSTED_URL=...`) and the deployed app finds its
-  /// service without any other setting; empty until then, which makes a hosted
-  /// build say it has no mail service instead of posting into nothing.
+  /// on loopback posts to the address it was given: `mail_api_url` from
+  /// `email_settings` (passed by [EmailSender.send]), then this constant, then
+  /// the `MAIL_API_HOSTED_URL` build setting. Empty means a hosted build says
+  /// it has no mail service instead of posting into nothing - which is why the
+  /// row, not the binary, is the usual place to put the address.
   static const String hostedService = '';
 
   /// `--dart-define=MAIL_API_HOSTED_URL=...`, or [hostedService].
@@ -92,7 +105,9 @@ class MailApi {
   ///     the phone, not the computer the service runs on.
   ///
   /// A `--dart-define=MAIL_API_URL` wins over all of that, which is how a
-  /// staging build points at a staging service.
+  /// staging build points at a staging service. [hostedUrl] is the address the
+  /// app read from the database, and is what a deployed page uses when the row
+  /// has been filled in.
   static String resolveBaseUrl({
     String? origin,
     String buildUrl = _configuredUrl,

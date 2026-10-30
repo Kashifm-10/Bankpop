@@ -106,7 +106,6 @@ class _CreateBoardScreenState extends State<CreateBoardScreen> {
 
   /// The money symbol this board's prices are written in. Empty until the
   /// first load, which fills it with the currency of the country being copied.
-  String _currency = '';
 
   /// The built-in board the names are relative to: the one the imported board
   /// was copied from, or the default country when starting from scratch.
@@ -160,7 +159,6 @@ class _CreateBoardScreenState extends State<CreateBoardScreen> {
       }
       // A new board starts on the country's own currency; a board the player
       // already picked a symbol for keeps it.
-      if (_currency.isEmpty) _currency = base.currency;
       final BoardDraft? draft = _draft;
       if (draft != null && _nameController.text.trim().isEmpty) {
         _nameController.text = draft.name;
@@ -206,7 +204,6 @@ class _CreateBoardScreenState extends State<CreateBoardScreen> {
       _flag = draft.flag;
       // The shared file carries names only, so the symbol comes back to the
       // country the board was copied from.
-      _currency = '';
       if (_nameController.text.trim().isEmpty) {
         _nameController.text = draft.name;
       }
@@ -273,7 +270,6 @@ class _CreateBoardScreenState extends State<CreateBoardScreen> {
       renames: renames,
       flag: _flag,
       baseId: _baseId,
-      currency: _currency,
     );
     if (!mounted) return;
     setState(() => _saving = false);
@@ -450,54 +446,45 @@ class _CreateBoardScreenState extends State<CreateBoardScreen> {
             ],
           ),
           SizedBox(height: 12),
-          Text(
-            'Pick the money symbol',
-            style: TextStyle(
-              fontSize: 13.sp,
-              fontWeight: FontWeight.bold,
-              color: const Color(0xFF558B2F),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
+          // One sign for the whole app: every board is quoted in BankPop's own
+          // mark, so there is nothing to pick here - the row just shows it.
+          Row(
             children: <Widget>[
-              for (final String symbol in BoardCurrencies.choices)
-                GestureDetector(
-                  onTap: () => setState(() => _currency = symbol),
-                  child: Container(
-                    constraints: const BoxConstraints(minWidth: 44),
-                    height: 38,
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: _currency == symbol
-                          ? const Color(0xFFC5E1A5)
-                          : Colors.white,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: _currency == symbol
-                            ? const Color(0xFF689F38)
-                            : Colors.black12,
-                        width: _currency == symbol ? 2 : 1,
-                      ),
-                    ),
-                    child: Text(
-                      symbol,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+              Container(
+                height: 38,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFC5E1A5),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFF689F38), width: 2),
+                ),
+                child: Text(
+                  BoardCurrencies.mark,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text(
+                  'BankPop writes every price in its own money sign.',
+                  style: TextStyle(fontSize: 12, color: Colors.black54),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 12),
           OutlinedButton.icon(
             onPressed: _saving ? null : _importFromFriend,
-            icon: const Icon(Icons.file_download_outlined, size: 18),
+            icon: Image.asset(
+              'assets/Icons/import_board.png',
+              width: 20,
+              height: 20,
+              fit: BoxFit.contain,
+            ),
             label: const Text('Import a board a friend sent'),
             style: OutlinedButton.styleFrom(
               foregroundColor: const Color(0xFF33691E),

@@ -11,6 +11,10 @@ Thumbs.db
 .env
 .env.local
 
+# design/icons/ holds the rendered masters of assets/Icons for inspection;
+# the app copies are the ones that ship.
+design/icons/
+
 # dev.sh leaves its pid file and the mail service's log here
 .dev/
 

@@ -1,50 +1,42 @@
 import 'dart:convert';
 
-/// The money symbol a board's prices are written in.
+/// The money sign the whole app is quoted in.
 ///
-/// Every board plays by the same numbers, but a board of India reads ₹200 where
-/// the American one reads $200 - the symbol is part of the board's identity,
-/// not a rule. A player's own board picks its own symbol when it is made.
+/// BankPop has one mark of its own - a heavy-bar B, drawn as the glyph at
+/// U+E000 in `assets/fonts/BankpopMark.ttf` (see
+/// `tool/make_currency_font.py` for how it is built). It is a character rather
+/// than a picture so it sits inline in every price, ledger column, deed and
+/// board print without any widget wrapping, and it follows the colour and size
+/// of the text around it.
+///
+/// Boards used to be quoted in their country's currency (₹, $, €, ...). Every
+/// price is now written in the same sign, so a stored symbol from an older
+/// board row is ignored rather than printed.
 abstract final class BoardCurrencies {
-  static const String fallback = '£';
+  /// BankPop's own money sign: the heavy-bar B.
+  static const String mark = '\uE000';
 
-  /// The symbol each built-in country board is listed under.
-  static const Map<String, String> byBoard = <String, String>{
-    'india': '₹',
-    'usa': r'$',
-    'uk': '£',
-    'france': '€',
-    'germany': '€',
-    'italy': '€',
-    'spain': '€',
-    'japan': '¥',
-    'china': '¥',
-    'brazil': r'R$',
-    'australia': r'A$',
-    'canada': r'C$',
-    'egypt': r'E£',
-    'uae': 'AED',
-  };
+  /// The sign used when nothing else is given - which is always [mark] now.
+  static const String fallback = mark;
 
-  /// The symbols a board's maker can choose from. Any other single character
-  /// still works, so a currency that is not in this row is never refused.
-  static const List<String> choices = <String>[
-    '£',
-    r'$',
-    '€',
-    '₹',
-    '¥',
-    r'R$',
-    r'A$',
-    r'C$',
-    r'E£',
-    'AED',
-  ];
+  /// Every board is quoted in the same sign, whichever country it is set in.
+  static String forBoard(String boardId) => mark;
 
-  static String forBoard(String boardId) =>
-      byBoard[boardId] ?? fallback;
+  /// The signs a board's maker can choose from: the one BankPop sign.
+  static const List<String> choices = <String>[mark];
 
-  /// A price with its symbol: `₹200`, `$200`, `AED 200`.
+  /// Any money sign a stored row was written with: a board's own currency, or
+  /// the rupee and pound that older copies of the cards and spaces still carry.
+  static final RegExp _anySign = RegExp('[\u20B9\u20AC\u00A3\u00A5\$]');
+
+  /// Board copy with one money sign.
+  ///
+  /// Cards and space names are text written when the board was made, so a card
+  /// still reads "Collect £50". This swaps that sign for BankPop's mark, so the
+  /// words on the card and the amount beside them use the same money.
+  static String write(String text) => text.replaceAll(_anySign, mark);
+
+  /// A price with its sign: `B 200` (the mark, then the number).
   static String format(String symbol, num value) {
     // A wallet stores 200 as 200.0; print it the way the board does.
     final num shown = value is double && value == value.roundToDouble()
@@ -141,7 +133,7 @@ class BankpopBoard {
   final String boardName;
   final String flag;
 
-  /// The money symbol its prices are written in (`₹`, `$`, `AED`, ...).
+  /// The money sign its prices are written in - always [BoardCurrencies.mark].
   final String currency;
 
   const BankpopBoard({
@@ -159,7 +151,6 @@ class BankpopBoard {
   factory BankpopBoard.fromMap(Map<String, dynamic> map) {
     final String boardId =
         map['board_id']?.toString() ?? map['id']?.toString() ?? '';
-    final String storedCurrency = (map['currency'] as String?)?.trim() ?? '';
     final Object? rawSpaces = map['spaces'];
     final List<dynamic> spaceList = rawSpaces is String
         ? (jsonDecode(rawSpaces) as List<dynamic>)
@@ -180,10 +171,9 @@ class BankpopBoard {
       boardId: boardId,
       boardName: map['country']?.toString() ?? map['name']?.toString() ?? '',
       flag: map['flag']?.toString() ?? '',
-      // A board written before the symbol was stored falls back to the
-      // country's own currency; a custom board without one reads £.
-      currency:
-          storedCurrency.isEmpty ? BoardCurrencies.forBoard(boardId) : storedCurrency,
+      // One sign for every board, new or stored: an old row may still carry
+      // its country's symbol, and printing that is what this replaces.
+      currency: BoardCurrencies.forBoard(boardId),
     );
   }
 
@@ -213,7 +203,6 @@ class BankpopBoard {
     required Map<String, String> renames,
     required String name,
     String? boardId,
-    String? currency,
   }) {
     final List<String> keys = renames.keys.toList()
       ..sort((String a, String b) => b.length.compareTo(a.length));
@@ -241,7 +230,7 @@ class BankpopBoard {
       boardId: boardId ?? this.boardId,
       boardName: name,
       flag: flag,
-      currency: currency ?? this.currency,
+      currency: BoardCurrencies.mark,
     );
   }
 

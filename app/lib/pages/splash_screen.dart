@@ -45,6 +45,7 @@ class _SplashScreenState extends State<SplashScreen> {
       // games are right there too.
       final bool signedIn = await Account.isSignedIn();
       final SharedPreferences prefs = await SharedPreferences.getInstance();
+      final bool welcomed = prefs.getBool(Account.welcomeDoneKey) ?? false;
       final bool onboarded = prefs.getBool(Account.onboardingDoneKey) ?? false;
       // A temporary password only buys a session: choose a real one first,
       // even if the app was closed in between.
@@ -56,6 +57,13 @@ class _SplashScreenState extends State<SplashScreen> {
       // the story again.
       if (mustChangePassword) {
         context.pushReplacement(AppRoutes.setPassword);
+      } else if (!welcomed) {
+        // A brand new install gets the cover first, and the story only after
+        // that has been tapped: opening on the slides skipped the name of the
+        // game entirely. Once the cover is out of the way this branch is never
+        // taken again, so a launch with no account still lands on the story and
+        // one with an account lands on its games.
+        context.pushReplacement(AppRoutes.welcome);
       } else {
         context.pushReplacement(
           signedIn || onboarded ? AppRoutes.home : AppRoutes.onboarding,

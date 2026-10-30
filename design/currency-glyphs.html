@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>BankPop currency glyphs</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 26px 30px 30px;
+    background: #f6efe2;
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    color: #2c2c2c;
+  }
+  h1 { font-size: 20px; margin: 0 0 6px; color: #33691e; }
+  p.lead { margin: 0 0 18px; font-size: 13px; color: #6b7a5e; max-width: 900px; line-height: 1.5; }
+  .strip {
+    background: #fff; border: 1px solid #e8ddbb; border-radius: 14px;
+    padding: 14px 18px; margin-bottom: 16px;
+    display: flex; align-items: center; gap: 22px; flex-wrap: wrap;
+  }
+  .strip .label { font-size: 11px; letter-spacing: 1px; font-weight: 700; color: #9aa78c; }
+  .ref { font-size: 34px; font-weight: 700; letter-spacing: 1px; color: #2c2c2c; }
+  .ref span { margin-right: 14px; }
+  table { border-collapse: separate; border-spacing: 0 10px; width: 100%; }
+  td { vertical-align: middle; }
+  .card {
+    background: #fff; border: 1px solid #e8ddbb; border-radius: 14px;
+    padding: 12px 14px; display: flex; align-items: center; gap: 18px;
+  }
+  .num { font-size: 10.5px; font-weight: 700; color: #b3bdaa; letter-spacing: 1px; width: 16px; }
+  .glyphbox {
+    width: 76px; height: 76px; flex: 0 0 76px; display: flex;
+    align-items: center; justify-content: center;
+    background: #fffdf7; border: 1px dashed #e6dcc0; border-radius: 10px;
+  }
+  .names { width: 150px; flex: 0 0 150px; }
+  .names .name { font-size: 13.5px; font-weight: 700; color: #33691e; }
+  .names .note { font-size: 10.5px; color: #8a927f; line-height: 1.35; margin-top: 2px; }
+  .samples { display: flex; align-items: baseline; gap: 26px; flex-wrap: wrap; }
+  .sample { display: flex; align-items: baseline; gap: 5px; font-weight: 700; color: #2c2c2c; }
+  .s34 { font-size: 34px; }
+  .s20 { font-size: 20px; }
+  .s13 { font-size: 13px; }
+  .cap { font-size: 9.5px; color: #b3bdaa; font-weight: 600; letter-spacing: .4px; }
+  .onGold {
+    background: #ffd34d; border-radius: 8px; padding: 6px 10px;
+    font-size: 15px; font-weight: 700; color: #3a2210;
+    display: flex; align-items: baseline; gap: 4px;
+  }
+  footer { margin-top: 14px; font-size: 11px; color: #97a189; line-height: 1.5; max-width: 900px; }
+</style>
+</head>
+<body>
+
+<h1>One money sign for BankPop</h1>
+<p class="lead">
+  A single character, in the same class as the signs below: it has to sit beside a
+  figure at 13px in a ledger and still read at 34px in a balance. The eight below
+  are built from the reference's bar-across-the-B idea, drawn as geometry rather
+  than a font, so they render identically on every device.
+</p>
+
+<div class="strip">
+  <span class="label">EXISTING SIGNS</span>
+  <span class="ref"><span>$</span><span>€</span><span>£</span><span>¥</span><span>₹</span></span>
+  <span class="cap">shown at 34px for weight and height comparison</span>
+</div>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <g id="bBase" fill="none" stroke="currentColor" stroke-width="13"
+       stroke-linecap="round" stroke-linejoin="round">
+      <path d="M35 14 V86" />
+      <path d="M35 14 H56 C72 14 81 22 81 32 C81 42 72 50 56 50 H35" />
+      <path d="M35 50 H60 C78 50 88 58 88 68 C88 78 78 86 60 86 H35" />
+    </g>
+
+    <!-- 1. two bars overhanging the stem, left -->
+    <symbol id="g1" viewBox="0 0 100 100">
+      <use href="#bBase" />
+      <g fill="currentColor">
+        <rect x="6" y="38" width="38" height="10" rx="5" />
+        <rect x="6" y="60" width="38" height="10" rx="5" />
+      </g>
+    </symbol>
+
+    <!-- 2. two bars across the whole letter -->
+    <symbol id="g2" viewBox="0 0 100 100">
+      <use href="#bBase" />
+      <g fill="currentColor">
+        <rect x="4" y="38" width="74" height="9" rx="4.5" />
+        <rect x="4" y="61" width="80" height="9" rx="4.5" />
+      </g>
+    </symbol>
+
+    <!-- 3. one bar through the middle, left overhang -->
+    <symbol id="g3" viewBox="0 0 100 100">
+      <use href="#bBase" />
+      <rect x="4" y="46" width="44" height="11" rx="5.5" fill="currentColor" />
+    </symbol>
+
+    <!-- 4. one bar through the lower bowl only -->
+    <symbol id="g4" viewBox="0 0 100 100">
+      <use href="#bBase" />
+      <rect x="8" y="64" width="42" height="11" rx="5.5" fill="currentColor" />
+    </symbol>
+
+    <!-- 5. diagonal slash -->
+    <symbol id="g5" viewBox="0 0 100 100">
+      <use href="#bBase" />
+      <path d="M10 84 L74 12" stroke="currentColor" stroke-width="11"
+            stroke-linecap="round" fill="none" />
+    </symbol>
+
+    <!-- 6. plain B with the spark in the counter -->
+    <symbol id="g6" viewBox="0 0 100 100">
+      <use href="#bBase" />
+      <path d="M52 24l3.4 7.6 7.6 3.4-7.6 3.4L52 46l-3.4-7.6-7.6-3.4 7.6-3.4z"
+            fill="currentColor" />
+    </symbol>
+
+    <!-- 7. the same bar B, but at the weight of a bold sign -->
+    <symbol id="g7" viewBox="0 0 100 100">
+      <g fill="none" stroke="currentColor" stroke-width="20"
+         stroke-linecap="round" stroke-linejoin="round">
+        <path d="M37 16 V84" />
+        <path d="M37 16 H57 C71 16 79 23 79 32 C79 41 71 48 57 48 H37" />
+        <path d="M37 48 H61 C77 48 86 57 86 67 C86 77 77 84 61 84 H37" />
+      </g>
+      <g fill="currentColor">
+        <rect x="4" y="35" width="36" height="12" rx="6" />
+        <rect x="4" y="59" width="36" height="12" rx="6" />
+      </g>
+    </symbol>
+
+    <!-- 8. one bar over the top, like the rupee's roof -->
+    <symbol id="g8" viewBox="0 0 100 100">
+      <use href="#bBase" />
+      <rect x="10" y="4" width="78" height="10" rx="5" fill="currentColor" />
+    </symbol>
+  </defs>
+</svg>
+
+<table>
+  <tr><td>
+    <div class="card">
+      <span class="num">01</span>
+      <div class="glyphbox"><svg width="58" height="58" style="color:#2c2c2c"><use href="#g1" /></svg></div>
+      <div class="names"><div class="name">Bar B</div>
+        <div class="note">The reference made literal: two bars under the bowls, overhanging left.</div></div>
+      <div class="samples">
+        <span class="sample s34"><svg width="34" height="34"><use href="#g1" /></svg>1,500</span>
+        <span class="sample s20"><svg width="20" height="20"><use href="#g1" /></svg>1,500</span>
+        <span class="sample s13"><svg width="13" height="13"><use href="#g1" /></svg>1,500</span>
+        <span class="onGold"><svg width="16" height="16"><use href="#g1" /></svg>1,500</span>
+      </div>
+    </div>
+  </td></tr>
+
+  <tr><td>
+    <div class="card">
+      <span class="num">02</span>
+      <div class="glyphbox"><svg width="58" height="58" style="color:#2c2c2c"><use href="#g2" /></svg></div>
+      <div class="names"><div class="name">Cross B</div>
+        <div class="note">The bars run all the way through. Closest to the naira; busiest at small sizes.</div></div>
+      <div class="samples">
+        <span class="sample s34"><svg width="34" height="34"><use href="#g2" /></svg>1,500</span>
+        <span class="sample s20"><svg width="20" height="20"><use href="#g2" /></svg>1,500</span>
+        <span class="sample s13"><svg width="13" height="13"><use href="#g2" /></svg>1,500</span>
+        <span class="onGold"><svg width="16" height="16"><use href="#g2" /></svg>1,500</span>
+      </div>
+    </div>
+  </td></tr>
+
+  <tr><td>
+    <div class="card">
+      <span class="num">03</span>
+      <div class="glyphbox"><svg width="58" height="58" style="color:#2c2c2c"><use href="#g3" /></svg></div>
+      <div class="names"><div class="name">One Bar</div>
+        <div class="note">A single stroke where the bowls meet. Cleanest of the set, reads at 13px.</div></div>
+      <div class="samples">
+        <span class="sample s34"><svg width="34" height="34"><use href="#g3" /></svg>1,500</span>
+        <span class="sample s20"><svg width="20" height="20"><use href="#g3" /></svg>1,500</span>
+        <span class="sample s13"><svg width="13" height="13"><use href="#g3" /></svg>1,500</span>
+        <span class="onGold"><svg width="16" height="16"><use href="#g3" /></svg>1,500</span>
+      </div>
+    </div>
+  </td></tr>
+
+  <tr><td>
+    <div class="card">
+      <span class="num">04</span>
+      <div class="glyphbox"><svg width="58" height="58" style="color:#2c2c2c"><use href="#g4" /></svg></div>
+      <div class="names"><div class="name">Low Bar</div>
+        <div class="note">One stroke across the lower bowl only. Closest to how ₹ and ₽ carry a bar.</div></div>
+      <div class="samples">
+        <span class="sample s34"><svg width="34" height="34"><use href="#g4" /></svg>1,500</span>
+        <span class="sample s20"><svg width="20" height="20"><use href="#g4" /></svg>1,500</span>
+        <span class="sample s13"><svg width="13" height="13"><use href="#g4" /></svg>1,500</span>
+        <span class="onGold"><svg width="16" height="16"><use href="#g4" /></svg>1,500</span>
+      </div>
+    </div>
+  </td></tr>
+
+  <tr><td>
+    <div class="card">
+      <span class="num">05</span>
+      <div class="glyphbox"><svg width="58" height="58" style="color:#2c2c2c"><use href="#g5" /></svg></div>
+      <div class="names"><div class="name">Slash B</div>
+        <div class="note">A diagonal through the letter. Unmistakable, but slashes already mean "not".</div></div>
+      <div class="samples">
+        <span class="sample s34"><svg width="34" height="34"><use href="#g5" /></svg>1,500</span>
+        <span class="sample s20"><svg width="20" height="20"><use href="#g5" /></svg>1,500</span>
+        <span class="sample s13"><svg width="13" height="13"><use href="#g5" /></svg>1,500</span>
+        <span class="onGold"><svg width="16" height="16"><use href="#g5" /></svg>1,500</span>
+      </div>
+    </div>
+  </td></tr>
+
+  <tr><td>
+    <div class="card">
+      <span class="num">06</span>
+      <div class="glyphbox"><svg width="58" height="58" style="color:#2c2c2c"><use href="#g7" /></svg></div>
+      <div class="names"><div class="name">Heavy Bar B</div>
+        <div class="note">01 at the weight of a bold sign: how a real currency mark is drawn.</div></div>
+      <div class="samples">
+        <span class="sample s34"><svg width="34" height="34"><use href="#g7" /></svg>1,500</span>
+        <span class="sample s20"><svg width="20" height="20"><use href="#g7" /></svg>1,500</span>
+        <span class="sample s13"><svg width="13" height="13"><use href="#g7" /></svg>1,500</span>
+        <span class="onGold"><svg width="16" height="16"><use href="#g7" /></svg>1,500</span>
+      </div>
+    </div>
+  </td></tr>
+
+  <tr><td>
+    <div class="card">
+      <span class="num">07</span>
+      <div class="glyphbox"><svg width="58" height="58" style="color:#2c2c2c"><use href="#g8" /></svg></div>
+      <div class="names"><div class="name">Roof B</div>
+        <div class="note">One bar over the top, the way ₹ opens. Quiet and unmistakeably a sign.</div></div>
+      <div class="samples">
+        <span class="sample s34"><svg width="34" height="34"><use href="#g8" /></svg>1,500</span>
+        <span class="sample s20"><svg width="20" height="20"><use href="#g8" /></svg>1,500</span>
+        <span class="sample s13"><svg width="13" height="13"><use href="#g8" /></svg>1,500</span>
+        <span class="onGold"><svg width="16" height="16"><use href="#g8" /></svg>1,500</span>
+      </div>
+    </div>
+  </td></tr>
+
+  <tr><td>
+    <div class="card">
+      <span class="num">08</span>
+      <div class="glyphbox"><svg width="58" height="58" style="color:#2c2c2c"><use href="#g6" /></svg></div>
+      <div class="names"><div class="name">Spark B</div>
+        <div class="note">No bar at all: the star from the reference sits in the top counter. Brand, not money.</div></div>
+      <div class="samples">
+        <span class="sample s34"><svg width="34" height="34"><use href="#g6" /></svg>1,500</span>
+        <span class="sample s20"><svg width="20" height="20"><use href="#g6" /></svg>1,500</span>
+        <span class="sample s13"><svg width="13" height="13"><use href="#g6" /></svg>1,500</span>
+        <span class="onGold"><svg width="16" height="16"><use href="#g6" /></svg>1,500</span>
+      </div>
+    </div>
+  </td></tr>
+</table>
+
+<footer>
+  Black on cream is the ledger and the table. The gold chip is a balance or a payment
+  button, where the sign sits on the app's own amber. Each sample is the same drawing
+  at 34px, 20px and 13px - the 13px row is the real test.
+</footer>
+
+</body>
+</html>

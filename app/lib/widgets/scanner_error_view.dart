@@ -58,7 +58,12 @@ class ScannerStartView extends StatelessWidget {
             SizedBox(height: 3.h),
             ElevatedButton.icon(
               onPressed: onStart,
-              icon: const Icon(Icons.photo_camera_outlined, size: 18),
+              icon: Image.asset(
+                'assets/Icons/camera.png',
+                width: 20,
+                height: 20,
+                fit: BoxFit.contain,
+              ),
               label: const Text('Turn on camera'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF689F38),

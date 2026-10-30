@@ -11,6 +11,9 @@ class AppRoutes {
   const AppRoutes._();
 
   static const String splash = '/';
+
+  /// The cover a brand new install sees once, before the introduction.
+  static const String welcome = '/welcome';
   static const String onboarding = '/onboarding';
   static const String home = '/home';
   static const String auth = '/auth';

@@ -25,6 +25,12 @@ void main() {
       expect(AppRoutes.verify('abc.def'), '/verify?token=abc.def');
     });
 
+    test('the cover has its own address, ahead of the story', () {
+      expect(AppRoutes.welcome, '/welcome');
+      expect(AppRoutes.welcome, isNot(AppRoutes.onboarding));
+      expect(AppRoutes.welcome, isNot(AppRoutes.splash));
+    });
+
     test('a refused game URL carries the reason and the original location', () {
       final String location = AppRoutes.denied(
         gameId: 'LBNSA',

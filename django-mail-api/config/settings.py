@@ -35,6 +35,13 @@ INSTALLED_APPS = [
     'corsheaders',
     'anymail',
     'mailer',
+    # Nothing here serves a page, so the app itself never needs static files -
+    # but a host's build pipeline may run `collectstatic` anyway. Wasmer Edge's
+    # Anybuild does exactly that for every Django project it detects and the
+    # build fails with "Unknown command: 'collectstatic'" without this app, which
+    # contributes the command. It collects into an empty folder and costs
+    # nothing.
+    'django.contrib.staticfiles',
 ]
 
 MIDDLEWARE = [
@@ -48,8 +55,22 @@ ROOT_URLCONF = 'config.urls'
 APPEND_SLASH = False
 WSGI_APPLICATION = 'config.wsgi.app'
 
-# No models, so no database.
-DATABASES = {}
+STATIC_URL = '/static/'
+# The build step above writes here; the service serves no templates, so nothing
+# ends up in it.
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# No models, so no database - but a host may still run `manage.py migrate` at
+# deploy time (Wasmer Edge does, as its after-deploy step), and migrate needs a
+# connection to check which migrations have run. In-memory SQLite gives it one
+# that always works, on a read-only filesystem, without pretending this service
+# has data to keep.
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': ':memory:',
+    }
+}
 
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'

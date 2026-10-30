@@ -18,6 +18,7 @@ import 'package:mon/pages/splash_screen.dart';
 import 'package:mon/pages/transactions/pay.dart';
 import 'package:mon/pages/transactions/transactions.dart';
 import 'package:mon/pages/verify_email_screen.dart';
+import 'package:mon/pages/welcome_screen.dart';
 import 'package:mon/services/board_share.dart';
 import 'package:mon/pages/role.dart';
 import 'package:mon/profile.dart';
@@ -46,6 +47,11 @@ final GoRouter appRouter = GoRouter(
       path: AppRoutes.splash,
       builder: (BuildContext context, GoRouterState state) =>
           const SplashScreen(),
+    ),
+    GoRoute(
+      path: AppRoutes.welcome,
+      builder: (BuildContext context, GoRouterState state) =>
+          const WelcomeScreen(),
     ),
     GoRoute(
       path: AppRoutes.onboarding,

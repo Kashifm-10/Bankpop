@@ -319,9 +319,6 @@ class BoardCatalog {
     /// it sits in the picker beside the countries' flags.
     String flag = '',
     String baseId = fallbackId,
-    /// The money symbol this board's prices are written in. Empty keeps the
-    /// built-in country's own currency.
-    String currency = '',
   }) async {
     if (ownerId.isEmpty) return const BoardCreateResult.failed();
     try {
@@ -330,11 +327,11 @@ class BoardCatalog {
       // prices and the same order, so the choice only ever changes names.
       final BankpopBoard base = await board(baseId);
       final String boardId = 'custom_${const Uuid().v4()}';
+      // One money sign for every board, so there is nothing to pass in here.
       final BankpopBoard custom = base.renamed(
         renames: renames,
         name: name,
         boardId: boardId,
-        currency: currency.trim().isEmpty ? base.currency : currency.trim(),
       );
       final Map<String, dynamic> row = <String, dynamic>{
         'board_id': boardId,
