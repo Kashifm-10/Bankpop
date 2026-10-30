@@ -24,11 +24,19 @@ abstract final class BoardOcr {
   /// Whether this build can read a picture at all.
   static bool get isSupported => engine.ocrSupported;
 
-  /// The lines in the picture at [path] (or in [bytes], when the platform's
-  /// picker hands back bytes rather than a file), top to bottom.
+  /// The picture at [path] (or [bytes], when the platform's picker hands back
+  /// bytes rather than a file), as text blocks, top to bottom.
+  ///
+  /// Blocks, not lines: a square's name is drawn in its own block, and a long
+  /// name wraps inside it. Keeping the block together is what lets a name of two
+  /// lines stay one square - a line at a time, "NORTH CAROLINA" and "AVENUE"
+  /// would take two squares and push every card after them onto the wrong one.
   ///
   /// The browser has no file to open, so it takes [bytes]; every other platform
   /// prefers the file at [path] and falls back to [bytes].
-  static Future<List<String>> readLines(String path, {Uint8List? bytes}) =>
-      engine.readBoardLines(path, bytes: bytes);
+  static Future<List<List<String>>> readBlocks(
+    String path, {
+    Uint8List? bytes,
+  }) =>
+      engine.readBoardBlocks(path, bytes: bytes);
 }

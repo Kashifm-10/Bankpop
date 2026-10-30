@@ -8,9 +8,18 @@ import 'package:ocr_flutter_web/ocr_flutter_web.dart';
 /// Tesseract.js, compiled to WebAssembly, fetched from a CDN the first time a
 /// board is read. It runs in the tab, so the picture still never leaves the
 /// device - the download is the engine, not the board.
+///
+/// Tesseract.js hands back its text with the blocks it read kept apart: a block's
+/// lines are separated by a newline, and one block from the next by a blank line.
+/// Splitting on that blank line is what keeps a name printed over two lines in
+/// one square - the same block the phone's reader reports, recovered from the
+/// text instead of guessed at from the words.
 const bool ocrSupported = true;
 
-Future<List<String>> readBoardLines(String path, {Uint8List? bytes}) async {
+Future<List<List<String>>> readBoardBlocks(
+  String path, {
+  Uint8List? bytes,
+}) async {
   if (bytes == null || bytes.isEmpty) {
     // There is no file to open in the browser: the picker hands back bytes, and
     // its object URLs are not paths the engine can read.
@@ -23,8 +32,18 @@ Future<List<String>> readBoardLines(String path, {Uint8List? bytes}) async {
     // board this app prints in English.
     language: 'eng',
   );
-  return <String>[
-    for (final String line in text.split('\n'))
-      if (line.trim().isNotEmpty) line.trim(),
-  ];
+  final List<List<String>> blocks = <List<String>>[];
+  List<String> block = <String>[];
+  for (final String line in text.split('\n')) {
+    if (line.trim().isEmpty) {
+      if (block.isNotEmpty) {
+        blocks.add(block);
+        block = <String>[];
+      }
+      continue;
+    }
+    block.add(line.trim());
+  }
+  if (block.isNotEmpty) blocks.add(block);
+  return blocks;
 }

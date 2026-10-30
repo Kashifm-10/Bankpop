@@ -10,6 +10,7 @@ import 'package:mon/services/board_ocr.dart';
 import 'package:mon/services/board_scan.dart';
 import 'package:mon/widgets/app_dialog.dart';
 import 'package:mon/widgets/app_message.dart';
+import 'package:mon/widgets/board_photo_guide.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -67,6 +68,20 @@ class _BoardFromImageScreenState extends State<BoardFromImageScreen> {
 
   bool get _supported => BoardOcr.isSupported;
 
+  @override
+  void initState() {
+    super.initState();
+    // The picture has to be taken the way the board is printed - GO in the
+    // bottom-right corner and Free Parking in the top-left - or every name is
+    // read backwards. So the guide comes before the camera, not after a bad
+    // read. A build with no reader shows its own notice instead.
+    if (!_supported) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      showBoardPhotoGuide(context);
+    });
+  }
+
   /// A desktop has a file picker but no camera, so the shutter is only offered
   /// where one exists; the gallery button covers the rest.
   bool get _cameraAvailable =>
@@ -112,10 +127,17 @@ class _BoardFromImageScreenState extends State<BoardFromImageScreen> {
   /// Reads the names off the picture and fills the review list.
   Future<void> _read({required String path, required Uint8List bytes}) async {
     try {
-      final List<String> lines = await BoardOcr.readLines(path, bytes: bytes);
+      final List<List<String>> blocks =
+          await BoardOcr.readBlocks(path, bytes: bytes);
       final BankpopBoard base = _base ??= await BoardCatalog.board();
       final List<BankpopSpace> slots = BoardScan.renamable(base);
-      final BoardRead read = BoardScan.apply(lines, slots);
+      // A board's own name is printed in the middle of the picture; read as a
+      // square it would shift every card after it onto the wrong one.
+      final BoardRead read = BoardScan.apply(
+        blocks,
+        slots,
+        noise: <String>{base.boardName},
+      );
       if (!mounted) return;
       setState(() {
         _reading = false;
@@ -307,9 +329,12 @@ class _BoardFromImageScreenState extends State<BoardFromImageScreen> {
           style: TextStyle(fontSize: 13.sp, color: Colors.black54, height: 1.4),
         ),
         const SizedBox(height: 14),
-        _tip('The whole board in frame, flat and evenly lit.'),
-        _tip('Names read best straight on; a steep angle cuts them short.'),
-        _tip('Prices are ignored: only the names come from the picture.'),
+        _tip('GO bottom-right, FREE PARKING top-left - the way the board is '
+            'printed, so the squares read in play order.'),
+        _tip('The whole board in frame, flat and evenly lit; a steep angle cuts '
+            'names short.'),
+        _tip('Prices are ignored, and so are the squares that are the game\'s '
+            'own: corners, Chance, Community Chest, taxes, Electric and Water.'),
         const SizedBox(height: 8),
         Container(
           padding: const EdgeInsets.all(12),

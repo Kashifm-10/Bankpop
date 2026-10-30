@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:mon/models/bankpop_board.dart';
 import 'package:mon/services/player_cards.dart';
 import 'package:mon/services/deals.dart';
+import 'package:mon/widgets/app_message.dart';
 import 'package:mon/widgets/app_metrics.dart';
 
 /// What the builder hands back once an offer has been written: the row id the
@@ -143,8 +144,11 @@ class _TradeBuilderDialogState extends State<TradeBuilderDialog> {
       }
     } else {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not send trade offer')),
+        await showMessage(
+          context,
+          'The offer could not be sent. Check the connection and try again.',
+          title: 'Could not send',
+          kind: MessageKind.failure,
         );
       }
     }

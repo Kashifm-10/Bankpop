@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:mon/pages/how_to_use_screen.dart';
 import 'package:mon/pages/profile_edit.dart';
 import 'package:mon/routes.dart';
 import 'package:mon/services/account.dart';
@@ -516,7 +517,7 @@ class _ProfilePageState extends State<ProfilePage> {
             // so the two entry points cannot disagree about how the game
             // works now (cards, houses, badges, removing a player).
             GestureDetector(
-              onTap: () => context.push(AppRoutes.howToUse),
+              onTap: () => showHowToUseGuide(context),
               child: Card(
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(20)),

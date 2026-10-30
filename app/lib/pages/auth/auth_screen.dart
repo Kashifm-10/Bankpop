@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:mon/pages/how_to_use_screen.dart';
 import 'package:mon/routes.dart';
 import 'package:mon/services/account.dart';
 import 'package:mon/services/account_mail.dart';
@@ -556,7 +557,7 @@ class _AuthScreenState extends State<AuthScreen> {
                               children: <Widget>[
                                 TextButton(
                                   onPressed: () =>
-                                      context.push(AppRoutes.howToUse),
+                                      showHowToUseGuide(context),
                                   child: const Text('How to use'),
                                 ),
                                 const Text('·',

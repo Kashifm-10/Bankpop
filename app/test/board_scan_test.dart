@@ -7,6 +7,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mon/models/bankpop_board.dart';
 import 'package:mon/services/board_scan.dart';
 
+/// Lines as a reader that grouped nothing: one block per line.
+List<List<String>> _lines(List<String> lines) => <List<String>>[
+      for (final String line in lines) <String>[line],
+    ];
+
 BankpopSpace _space(int index, String name, {String color = 'Brown'}) {
   return BankpopSpace(
     index: index,
@@ -29,7 +34,7 @@ void main() {
   });
 
   test('the board keeps its own words for the squares it names itself', () {
-    final List<String> names = BoardScan.names(<String>[
+    final List<String> names = BoardScan.names(_lines(<String>[
       'GO',
       'Community Chest',
       'CHANCE',
@@ -40,16 +45,16 @@ void main() {
       'Jail',
       'Electric',
       'Beggar\'s Alley',
-    ]);
+    ]));
     expect(names, <String>['Beggar\'s Alley']);
   });
 
   test('a repeated line is used once', () {
-    final List<String> names = BoardScan.names(<String>[
+    final List<String> names = BoardScan.names(_lines(<String>[
       'Peasant Lane',
       'PEASANT LANE',
       'peasant lane',
-    ]);
+    ]));
     expect(names, <String>['Peasant Lane']);
   });
 
@@ -59,12 +64,12 @@ void main() {
       _space(3, 'Peasant Lane'),
       _space(5, 'North Star Station', color: 'Station'),
     ];
-    final BoardRead read = BoardScan.apply(<String>[
+    final BoardRead read = BoardScan.apply(_lines(<String>[
       'HARBOUR ROAD',
       '200',
       'Harbour Road',
       'FISHERMAN\'S QUAY',
-    ], slots);
+    ]), slots);
 
     expect(read.names, <String>['Harbour Road', 'Fisherman\'s Quay', 'North Star Station']);
     expect(read.fromPhoto, <bool>[true, true, false]);
@@ -76,11 +81,59 @@ void main() {
       _space(1, 'Beggar\'s Alley'),
       _space(3, 'Peasant Lane'),
     ];
-    final BoardRead read = BoardScan.apply(<String>['12', '₹'], slots);
+    final BoardRead read = BoardScan.apply(_lines(<String>['12', '₹']), slots);
 
     expect(read.names, <String>['Beggar\'s Alley', 'Peasant Lane']);
     expect(read.captured, 0);
     expect(read.isEmpty, isTrue);
+  });
+
+  test('a name printed over two lines is one square, not two', () {
+    // The card after GO: the printed board wraps it, and the reader reports the
+    // two lines inside one block. Counting lines would make this card take the
+    // next square as well and shift the whole board by one.
+    final List<BankpopSpace> slots = <BankpopSpace>[
+      _space(1, 'Beggar\'s Alley'),
+      _space(3, 'Peasant Lane'),
+    ];
+    final BoardRead read = BoardScan.apply(
+      <List<String>>[
+        <String>['NORTH CAROLINA', 'AVENUE'],
+        <String>['PARK PLACE'],
+      ],
+      slots,
+    );
+
+    expect(read.names, <String>['North Carolina Avenue', 'Park Place']);
+    expect(read.fromPhoto, <bool>[true, true]);
+    expect(read.captured, 2);
+  });
+
+  test('the board\'s own title is not the square after GO', () {
+    final List<BankpopSpace> slots = <BankpopSpace>[
+      _space(1, 'Beggar\'s Alley'),
+    ];
+    final BoardRead read = BoardScan.apply(
+      <List<String>>[
+        <String>['MONOPOLY'],
+        <String>['SEASIDE AVENUE'],
+      ],
+      slots,
+      noise: <String>{'Monopoly'},
+    );
+
+    expect(read.names, <String>['Seaside Avenue']);
+  });
+
+  test('blocks are joined before they are judged, with no word list', () {
+    // Names that end in nothing this app could recognise - no Avenue, no
+    // Street, no Station: the block is the square, which is what makes this
+    // work on a board printed for any country.
+    final List<String> names = BoardScan.names(<List<String>>[
+      <String>['Chhatrapati', 'Shivaji Chowk'],
+      <String>['Bandra Fort'],
+    ]);
+    expect(names, <String>['Chhatrapati Shivaji Chowk', 'Bandra Fort']);
   });
 
   test('the utilities are not renamable, and the rest are in order', () {

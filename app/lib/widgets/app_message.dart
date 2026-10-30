@@ -27,6 +27,22 @@ enum MessageKind {
 ///
 /// Anything that *asks* something or needs a decision is still a dialog: a
 /// snackbar can be missed, and a question cannot be (see `showAppConfirm`).
+///
+/// One event is one card. Several flows announce their own outcome and then
+/// return to a screen that announces the same outcome again - the sale flow and
+/// the board behind it, a payment and the wallet that reads it back - which used
+/// to put the same sentence on the screen twice, stacked. The words of the card
+/// on screen are remembered for a moment, so the second, identical message is
+/// dropped instead of shown again; a genuine repeat (pressing the same button
+/// twice, a minute apart) is not affected.
+String? _lastMessage;
+DateTime? _lastAt;
+
+/// How long an identical message is swallowed: long enough for the second half
+/// of one event to arrive, short enough that the next deliberate tap still
+/// answers.
+const Duration _repeatWindow = Duration(milliseconds: 1200);
+
 Future<void> showMessage(
   BuildContext context,
   String message, {
@@ -35,6 +51,14 @@ Future<void> showMessage(
 }) async {
   final ScaffoldMessengerState? messenger = ScaffoldMessenger.maybeOf(context);
   if (messenger == null) return;
+
+  final DateTime now = DateTime.now();
+  final bool repeated = message == _lastMessage &&
+      _lastAt != null &&
+      now.difference(_lastAt!) < _repeatWindow;
+  _lastMessage = message;
+  _lastAt = now;
+  if (repeated) return;
 
   final ContentType type = switch (kind) {
     MessageKind.success => ContentType.success,

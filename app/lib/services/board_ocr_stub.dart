@@ -7,6 +7,9 @@ import 'dart:typed_data';
 /// this file is only what a new, unhandled platform compiles against.
 const bool ocrSupported = false;
 
-Future<List<String>> readBoardLines(String path, {Uint8List? bytes}) async {
+Future<List<List<String>>> readBoardBlocks(
+  String path, {
+  Uint8List? bytes,
+}) async {
   throw UnsupportedError('Reading a board photograph is not available here.');
 }

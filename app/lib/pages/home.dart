@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lottie/lottie.dart';
 import 'package:mon/routes.dart';
 import 'package:mon/services/account.dart';
+import 'package:mon/pages/how_to_use_screen.dart';
 import 'package:mon/pages/profile_edit.dart';
 import 'package:mon/services/board_catalog.dart';
 import 'package:mon/services/game_session.dart';
@@ -448,7 +449,7 @@ class _WelcomePageState extends State<WelcomePage> {
                 ],
                 textColor: const Color(0xFFFFF9C4),
                 lottieAssetPath: "assets/lottie/help.json",
-                onTap: () => context.push(AppRoutes.howToUse),
+                onTap: () => showHowToUseGuide(context),
               ),
             ),
             const SizedBox(width: 12),

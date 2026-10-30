@@ -2,49 +2,123 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mon/routes.dart';
 import 'package:mon/widgets/app_content.dart';
+import 'package:mon/widgets/app_dialog.dart';
 import 'package:mon/widgets/game_controls.dart';
 import 'package:mon/widgets/guide_kit.dart';
 
-/// The guide the home screen's "How to use" card opens.
+/// Asks which half of the guide to open, then opens it.
 ///
-/// This used to be a dialog; it is a screen because a dialog had a fixed height,
-/// two tabs squeezed into a small box, and no address in the browser. It is no
-/// longer a wall of paragraphs either: each tab opens with the four moves a new
-/// player needs (the strip at the top), then numbers the rest so a reader can
-/// come back to "card 4", and draws the game's own buttons beside the words that
-/// describe them.
-class HowToUseScreen extends StatelessWidget {
-  const HowToUseScreen({super.key});
+/// The guide used to be one screen with two tabs, which put the player's half
+/// and the banker's half in the same address and the same app bar. They are two
+/// pages now, because they are read by two different people: a player joining a
+/// table, and the person running the bank. "How to use" therefore asks first -
+/// in a dialog, where the choice is one tap - and opens the page that was
+/// picked, which has its own address and its own back button.
+Future<void> showHowToUseGuide(BuildContext context) async {
+  final String? role = await showAppDialog<String>(
+    context,
+    title: 'How to use BankPop',
+    icon: Icons.menu_book_outlined,
+    content: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Text(
+          'The guide has two halves. Which one are you reading?',
+          style: TextStyle(
+            fontSize: 13.5,
+            height: 1.35,
+            color: AppDialogPalette.of(context).body,
+          ),
+        ),
+        const SizedBox(height: 12),
+        _GuideChoice(
+          icon: Icons.person_outline,
+          title: 'As a player',
+          subtitle: 'Join a table, pay and receive, buy, build, trade, the two '
+              'packs, and leaving.',
+          value: AppRoutes.howToUsePlayer,
+        ),
+        _GuideChoice(
+          icon: Icons.account_balance_outlined,
+          title: 'As the banker',
+          subtitle: 'Open a table, seat players, sell cards, pay rewards and '
+              'advances, suspend or end the game.',
+          value: AppRoutes.howToUseBanker,
+        ),
+      ],
+    ),
+    actions: <Widget>[
+      AppDialogButton(
+        label: 'Not now',
+        onPressed: () => Navigator.of(context).pop(),
+      ),
+    ],
+  );
+  if (role == null || !context.mounted) return;
+  context.push(role);
+}
+
+/// One half of the guide, as a row in the chooser dialog.
+class _GuideChoice extends StatelessWidget {
+  const _GuideChoice({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  /// The route the row opens.
+  final String value;
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
-        backgroundColor: GuideStyle.paper,
-        appBar: AppBar(
-          backgroundColor: GuideStyle.green,
-          foregroundColor: Colors.white,
-          title: const Text(
-            'How to use',
-            style: TextStyle(fontWeight: FontWeight.bold),
+    final AppDialogPalette palette = AppDialogPalette.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => Navigator.of(context).pop(value),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 11, 10, 11),
+          decoration: BoxDecoration(
+            color: palette.accent.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: palette.accent.withValues(alpha: 0.45)),
           ),
-          bottom: const TabBar(
-            indicatorColor: Color(0xFFFFF9C4),
-            labelColor: Colors.white,
-            unselectedLabelColor: Color(0xFFDCEDC8),
-            tabs: <Widget>[
-              Tab(text: 'As a player'),
-              Tab(text: 'As the banker'),
-            ],
-          ),
-        ),
-        body: const AppContent(
-          maxWidth: 900,
-          child: TabBarView(
+          child: Row(
             children: <Widget>[
-              _PlayerGuide(),
-              _BankerGuide(),
+              Icon(icon, size: 22, color: palette.accent),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w700,
+                        color: palette.title,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.3,
+                        color: palette.body,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, size: 20, color: palette.accent),
             ],
           ),
         ),
@@ -53,7 +127,64 @@ class HowToUseScreen extends StatelessWidget {
   }
 }
 
-/// What the two tabs share: the page they sit in, and the way out to the rules.
+/// The guide the dialog opens for a player.
+///
+/// It opens with the four moves a new player needs (the strip at the top), then
+/// numbers the rest so a reader can come back to "card 4", and draws the game's
+/// own buttons beside the words that describe them.
+class HowToUsePlayerScreen extends StatelessWidget {
+  const HowToUsePlayerScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const _GuideScaffold(
+      title: 'As a player',
+      child: _PlayerGuide(),
+    );
+  }
+}
+
+/// The guide the dialog opens for the banker.
+class HowToUseBankerScreen extends StatelessWidget {
+  const HowToUseBankerScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const _GuideScaffold(
+      title: 'As the banker',
+      child: _BankerGuide(),
+    );
+  }
+}
+
+/// The page both halves sit in: the same green bar, the same readable width.
+class _GuideScaffold extends StatelessWidget {
+  const _GuideScaffold({required this.title, required this.child});
+
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: GuideStyle.paper,
+      appBar: AppBar(
+        backgroundColor: GuideStyle.green,
+        foregroundColor: Colors.white,
+        title: Text(
+          title,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+      ),
+      body: AppContent(
+        maxWidth: 900,
+        child: child,
+      ),
+    );
+  }
+}
+
+/// What both guide pages share: the scroll view, and the way out to the rules.
 class _GuideBody extends StatelessWidget {
   const _GuideBody({required this.children});
 

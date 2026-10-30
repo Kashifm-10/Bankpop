@@ -24,7 +24,13 @@ class AppRoutes {
   static const String profile = '/profile';
   static const String changePassword = '/profile/password';
   static const String setPassword = '/set-password';
+  /// The guide, in two halves: the player's page and the banker's page. There is
+  /// no single "how to use" page any more - the app asks which half to open
+  /// (`showHowToUseGuide`) - so this path only forwards the address the guide
+  /// used to have.
   static const String howToUse = '/how-to-use';
+  static const String howToUsePlayer = '/how-to-use/player';
+  static const String howToUseBanker = '/how-to-use/banker';
   static const String gameRules = '/rules';
   static const String verifyEmail = '/verify';
   static const String gameDenied = '/game-denied';

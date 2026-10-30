@@ -20,18 +20,34 @@ class BoardRead {
   bool get isEmpty => captured == 0;
 }
 
-/// Turns the lines read off a board photograph into square names.
+/// Turns the text read off a board photograph into square names.
 ///
 /// The work here is the noise: a photographed board gives the square names, but
-/// also their prices, the corner words, the ring's numbers and whatever the
-/// camera caught around the board. What is left is applied to the squares in
-/// board order, which is how a board is printed - GO, then the first square,
-/// round to the last - and anything the picture did not supply keeps the name
-/// it has on the built-in board. Nothing is guessed at beyond that: the review
+/// also their prices, the corner words, the board's title and whatever the
+/// camera caught around it. What is left is applied to the squares in board
+/// order, which is how a board is printed - GO, then the first square round the
+/// bottom, clockwise - and anything the picture did not supply keeps the name it
+/// has on the built-in board. Nothing is guessed at beyond that: the review
 /// screen shows every name for a player to correct before the board is saved.
+///
+/// One square is one *text block*, never one line.
+///
+/// A printed name often wraps over two lines ("NORTH CAROLINA" over "AVENUE"),
+/// and the recogniser reports each line separately. Counting lines as squares
+/// would make that one card take two squares and push every card after it onto
+/// the wrong one - the whole board shifted by one. The block is the unit that
+/// fixes this: every reader groups the lines it sees into the block they were
+/// printed as, and the block belongs to one square. That works for any board,
+/// in any language, without a list of street words to recognise - which would
+/// only ever be right for the country it was written for.
 abstract final class BoardScan {
   /// The words a board prints for itself. A square named one of these is not a
   /// property name, and the app keeps its own wording for those squares.
+  ///
+  /// These are not shapes of names to look for: they are the one-word squares
+  /// every board in this family prints the same way, and the app cannot rename
+  /// them anyway (the corners are not renamable, and the utilities draw their
+  /// own artwork).
   static const Set<String> _reserved = <String>{
     'GO',
     'JAIL',
@@ -46,6 +62,9 @@ abstract final class BoardScan {
     'CITY WATER',
     'ELECTRICITY',
     'WATER WORKS',
+    // The printed board's own title, which sits in the middle of the picture
+    // and would otherwise be read as the first square after GO.
+    'MONOPOLY',
   };
 
   /// A letter: what makes a line a name rather than a number.
@@ -61,27 +80,40 @@ abstract final class BoardScan {
   static List<BankpopSpace> renamable(BankpopBoard board) {
     final List<BankpopSpace> spaces = board.spaces
         .where((BankpopSpace space) =>
-            space.isProperty && space.name != 'Electric' && space.name != 'City Water')
+            space.isProperty &&
+            space.name != 'Electric' &&
+            space.name != 'City Water')
         .toList()
       ..sort((BankpopSpace a, BankpopSpace b) => a.index.compareTo(b.index));
     return spaces;
   }
 
-  /// The lines that could be a square's name, cleaned and de-duplicated.
-  static List<String> names(List<String> lines) {
-    final List<String> out = <String>[];
+  /// The square names, in board order, out of the text blocks of a picture.
+  ///
+  /// [noise] is anything else the picture's own board would have said - the
+  /// board's name in the middle, say - which is dropped like the corners are.
+  static List<String> names(
+    List<List<String>> blocks, {
+    Set<String> noise = const <String>{},
+  }) {
     final Set<String> seen = <String>{};
-    for (final String raw in lines) {
-      final String name = clean(raw);
-      if (name.isEmpty) continue;
-      if (_reserved.contains(name.toUpperCase())) continue;
-      if (!seen.add(name.toLowerCase())) continue;
-      out.add(name);
+    final List<String> out = <String>[];
+    for (final List<String> block in blocks) {
+      // The block's lines are one name: a name printed over two lines is one
+      // square, not two.
+      final String value = clean(block.join(' '));
+      if (value.isEmpty) continue;
+      if (_reserved.contains(value.toUpperCase())) continue;
+      if (noise.any((String word) => word.toUpperCase() == value.toUpperCase())) {
+        continue;
+      }
+      if (!seen.add(value.toLowerCase())) continue;
+      out.add(value);
     }
     return out;
   }
 
-  /// One line, as a name - or an empty string when it is not one.
+  /// One block's text, as a name - or an empty string when it is not one.
   static String clean(String line) {
     String value = line.replaceAll(RegExp(r'\s+'), ' ').trim();
     // The ring's numbers, bullets and stray punctuation at the ends.
@@ -100,8 +132,12 @@ abstract final class BoardScan {
   }
 
   /// Applies the names read from a picture to [slots], in board order.
-  static BoardRead apply(List<String> lines, List<BankpopSpace> slots) {
-    final List<String> found = names(lines);
+  static BoardRead apply(
+    List<List<String>> blocks,
+    List<BankpopSpace> slots, {
+    Set<String> noise = const <String>{},
+  }) {
+    final List<String> found = names(blocks, noise: noise);
     final List<String> applied = <String>[];
     final List<bool> fromPhoto = <bool>[];
     for (int i = 0; i < slots.length; i++) {

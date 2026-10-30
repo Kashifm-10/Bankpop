@@ -63,37 +63,67 @@ void main() {
   });
 
   group('How to use', () {
-    testWidgets('the page opens with both roles and no overflow on a phone',
+    testWidgets('the chooser offers both halves of the guide',
         (WidgetTester tester) async {
       await _setSize(tester, const Size(320, 568));
-      await tester.pumpWidget(_host(const HowToUseScreen()));
+      await tester.pumpWidget(_host(
+        Builder(
+          builder: (BuildContext context) => TextButton(
+            onPressed: () => showHowToUseGuide(context),
+            child: const Text('opening'),
+          ),
+        ),
+      ));
+
+      await tester.tap(find.text('opening'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('How to use BankPop'), findsOneWidget);
+      expect(find.text('As a player'), findsOneWidget);
+      expect(find.text('As the banker'), findsOneWidget);
+
+      await tester.tap(find.text('Not now'));
+      await tester.pumpAndSettle();
+      expect(find.text('How to use BankPop'), findsNothing);
+    });
+
+    testWidgets('the player page is its own page, with no overflow on a phone',
+        (WidgetTester tester) async {
+      await _setSize(tester, const Size(320, 568));
+      await tester.pumpWidget(_host(const HowToUsePlayerScreen()));
       await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);
-      expect(find.text('How to use'), findsOneWidget);
       expect(find.text('As a player'), findsOneWidget);
+      // The banker's half is a different page, so none of it is here.
+      expect(find.text('As the banker'), findsNothing);
 
       // The first step is below the quick-start strip on a phone, so the page
       // is scrolled to it rather than expected to fit on one screen: the
       // guide is longer than a phone now, on purpose.
-      // Dragged on the list itself: the tab view is scrollable sideways too,
-      // so "the first Scrollable" is not the one this page scrolls.
       await tester.dragUntilVisible(
         find.text('Getting in'),
-        find.byType(ListView).last,
+        find.byType(ListView),
         const Offset(0, -220),
       );
       await tester.pumpAndSettle();
       expect(find.text('Getting in'), findsOneWidget);
       expect(find.textContaining('verification link'), findsWidgets);
+    });
 
-      // The banker tab describes the things this update added.
-      await tester.tap(find.text('As the banker'));
+    testWidgets('the banker page describes running the bank',
+        (WidgetTester tester) async {
+      await _setSize(tester, const Size(320, 568));
+      await tester.pumpWidget(_host(const HowToUseBankerScreen()));
       await tester.pumpAndSettle();
+
       expect(tester.takeException(), isNull);
+      expect(find.text('As the banker'), findsOneWidget);
+      expect(find.text('As a player'), findsNothing);
+
       await tester.dragUntilVisible(
         find.text('Start a game'),
-        find.byType(ListView).last,
+        find.byType(ListView),
         const Offset(0, -220),
       );
       await tester.pumpAndSettle();

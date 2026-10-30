@@ -192,10 +192,23 @@ final GoRouter appRouter = GoRouter(
       builder: (BuildContext context, GoRouterState state) =>
           const SetPasswordScreen(forced: true),
     ),
+    // The guide is two pages now. The old single address forwards to the
+    // player's half, so a bookmark made before the split still lands on a
+    // guide instead of a blank screen.
     GoRoute(
       path: AppRoutes.howToUse,
+      redirect: (BuildContext context, GoRouterState state) =>
+          AppRoutes.howToUsePlayer,
+    ),
+    GoRoute(
+      path: AppRoutes.howToUsePlayer,
       builder: (BuildContext context, GoRouterState state) =>
-          const HowToUseScreen(),
+          const HowToUsePlayerScreen(),
+    ),
+    GoRoute(
+      path: AppRoutes.howToUseBanker,
+      builder: (BuildContext context, GoRouterState state) =>
+          const HowToUseBankerScreen(),
     ),
     GoRoute(
       path: AppRoutes.gameRules,

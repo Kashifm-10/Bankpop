@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mon/services/board_download.dart';
 import 'package:mon/services/board_share.dart';
+import 'package:mon/widgets/app_message.dart';
 import 'package:mon/widgets/app_metrics.dart';
 
 /// Bringing a board in: paste the JSON a friend sent, or pick the file they
@@ -339,7 +340,12 @@ Future<void> showBoardShareSheet(
                 await Clipboard.setData(ClipboardData(text: json));
                 if (!sheetContext.mounted) return;
                 Navigator.of(sheetContext).pop();
-                _tell(context, 'Board JSON copied');
+                await showMessage(
+                  context,
+                  'Board JSON copied. Paste it into any chat.',
+                  title: 'Copied',
+                  kind: MessageKind.success,
+                );
               },
             ),
             const SizedBox(height: 10),
@@ -356,27 +362,26 @@ Future<void> showBoardShareSheet(
                   );
                   if (!sheetContext.mounted) return;
                   Navigator.of(sheetContext).pop();
-                  _tell(context, 'Board file saved');
+                  await showMessage(
+                    context,
+                    'The board file is in your downloads.',
+                    title: 'Saved',
+                    kind: MessageKind.success,
+                  );
                 } catch (error) {
                   if (!sheetContext.mounted) return;
-                  _tell(context, 'Could not save the file');
+                  await showMessage(
+                    context,
+                    'The file could not be written. Try the copy instead.',
+                    title: 'Could not save',
+                    kind: MessageKind.failure,
+                  );
                 }
               },
             ),
           ],
         ),
       ),
-    ),
-  );
-}
-
-void _tell(BuildContext context, String message) {
-  final ScaffoldMessengerState? messenger = ScaffoldMessenger.maybeOf(context);
-  messenger?.showSnackBar(
-    SnackBar(
-      content: Text(message),
-      behavior: SnackBarBehavior.floating,
-      backgroundColor: const Color(0xFF33691E),
     ),
   );
 }
