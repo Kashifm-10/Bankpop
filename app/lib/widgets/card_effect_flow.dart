@@ -40,12 +40,52 @@ Future<void> showCardEffectFlow(
 }) async {
   await showDialog<void>(
     context: context,
+    // A drawn card is not a popup to wave away: it carries the money the table
+    // has to settle, so a tap on the paper beside it must not throw it away.
+    // The card's own Close button is the way out.
+    barrierDismissible: false,
     builder: (_) => _CardEffectDialog(
       gameId: gameId,
       bankerId: bankerId,
       cardText: cardText,
       kind: kind,
       currency: currency,
+    ),
+  );
+}
+
+/// Shows one pack's card face as a picture: no reading area, no buttons.
+///
+/// This is what tapping the Chance or Community Chest square on the board
+/// opens - a look at the pack that square is dealt from. Nothing is drawn and
+/// nothing is settled, so unlike a drawn card it closes on an outside tap.
+Future<void> showCardFacePreview(
+  BuildContext context,
+  CardDeckKind kind,
+) async {
+  final _CardFace face = _CardFace.of(kind);
+  final Size screen = MediaQuery.sizeOf(context);
+  // The same card, at the same ratio, a little smaller than a drawn one: there
+  // is nothing on it to read, so it only has to show the picture.
+  final double width = math.min(
+    math.min(screen.width - 40, 420),
+    (screen.height - 90) * face.aspect,
+  );
+  await showDialog<void>(
+    context: context,
+    builder: (_) => Dialog(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 32),
+      child: SizedBox(
+        width: width,
+        height: width / face.aspect,
+        child: Image.asset(
+          face.art,
+          fit: BoxFit.fill,
+          semanticLabel: '${kind.label} card',
+        ),
+      ),
     ),
   );
 }

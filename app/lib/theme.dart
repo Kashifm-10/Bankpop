@@ -47,6 +47,16 @@ class CustomTheme {
   /// The family declared in pubspec.yaml for assets/fonts/BankpopMark.ttf.
   static const String markFamily = 'BankpopMark';
 
+  /// Where the money sign's ink sits in its own line box.
+  ///
+  /// The font is built on the cap height: the ascent is the cap height and
+  /// everything below the baseline is empty descent. A line of text therefore
+  /// has the drawn sign in its top 70%, and the middle of the drawing is 35%
+  /// down the line - not 50%, which is where the box's middle would put it.
+  /// Anything that centres the sign by what it draws (the coin does) measures
+  /// from here.
+  static const double markInkCentre = 0.35;
+
   static ThemeData lightThemeData() {
     return ThemeData(
       fontFamily: family,

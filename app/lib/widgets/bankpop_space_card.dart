@@ -225,10 +225,13 @@ Widget _buildColorPropertyDeed(
                   color: Colors.black)), // Solid black
         ),
         const SizedBox(height: 12),
+        // The rent table is small print, so its amounts take the light cut of
+        // the sign - the heavy one fills in at this size. The price above stays
+        // heavy: it is the number a player reads first.
         for (var i = 0; i < space.rent!.length; i++)
           _rentRow(
             _rentLabel(space, i),
-            BoardCurrencies.format(currency, space.rent![i]),
+            BoardCurrencies.formatLight(space.rent![i]),
             built: (i >= 1 && i <= 4 && houses >= i) || (i == 5 && hotels > 0),
             // One plus only: the very next level this card could take.
             buy: onBuy != null && _isNextStep(i, houses, hotels)
@@ -242,9 +245,15 @@ Widget _buildColorPropertyDeed(
               thickness: 1,
               color: Color(0xFFC2C2C2)), // Darkened divider
           if (space.houseCost != null)
-            _row('House cost', BoardCurrencies.format(currency, space.houseCost!)),
+            _row(
+              'House cost',
+              BoardCurrencies.formatLight(space.houseCost!),
+            ),
           if (space.hotelCost != null)
-            _row('Hotel cost', BoardCurrencies.format(currency, space.hotelCost!)),
+            _row(
+              'Hotel cost',
+              BoardCurrencies.formatLight(space.hotelCost!),
+            ),
         ],
       ],
     ],

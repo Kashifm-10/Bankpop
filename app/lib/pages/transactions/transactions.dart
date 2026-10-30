@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:mon/models/bankpop_board.dart';
-import 'package:mon/services/board_catalog.dart';
 import 'package:mon/services/card_requests.dart';
 import 'package:mon/services/deals.dart';
 import 'package:mon/services/player_cards.dart';
@@ -705,10 +704,9 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    BoardCurrencies.format(
-                      BoardCatalog.activeCurrency,
-                      request.amount,
-                    ),
+                    // Ledger rows are set small, so their amounts use the
+                    // light cut of the money sign.
+                    BoardCurrencies.formatLight(request.amount),
                     style: TextStyle(
                       fontSize: 12.sp,
                       fontWeight: FontWeight.w600,

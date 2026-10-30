@@ -11,6 +11,7 @@ import 'package:mon/services/board_catalog.dart';
 import 'package:mon/services/board_image.dart';
 import 'package:mon/services/board_share.dart';
 import 'package:mon/widgets/app_content.dart';
+import 'package:mon/widgets/app_message.dart';
 import 'package:mon/widgets/app_dialog.dart';
 import 'package:mon/widgets/bankpop_board_view.dart';
 import 'package:mon/widgets/board_transfer.dart';
@@ -126,20 +127,22 @@ class _BoardPreviewScreenState extends State<BoardPreviewScreen> {
       final Uint8List bytes = await BoardImage.render(context, board);
       final String? path = await BoardImage.save(bytes, listing.name);
       if (!mounted) return;
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        SnackBar(
-          content: Text(
-            path == null
-                ? 'Board saved to your downloads'
-                : 'Board saved to $path',
-          ),
-        ),
+      await showMessage(
+        context,
+        path == null
+            ? 'Board saved to your downloads'
+            : 'Board saved to $path',
+        title: 'Board saved',
+        kind: MessageKind.success,
       );
     } catch (error) {
       debugPrint('Could not prepare the board for printing: $error');
       if (!mounted) return;
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        const SnackBar(content: Text('That board could not be prepared.')),
+      await showMessage(
+        context,
+        'That board could not be prepared.',
+        title: 'Could not save',
+        kind: MessageKind.failure,
       );
     } finally {
       if (mounted) setState(() => _downloading = false);
@@ -160,8 +163,11 @@ class _BoardPreviewScreenState extends State<BoardPreviewScreen> {
     } catch (error) {
       debugPrint('Could not share the board: $error');
       if (!mounted) return;
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        const SnackBar(content: Text('That board could not be prepared.')),
+      await showMessage(
+        context,
+        'That board could not be prepared.',
+        title: 'Could not share',
+        kind: MessageKind.failure,
       );
     }
   }

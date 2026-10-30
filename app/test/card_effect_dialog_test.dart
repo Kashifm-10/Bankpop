@@ -121,4 +121,57 @@ void main() {
     final Size card = tester.getSize(find.byType(Image).first);
     expect(card.width, lessThanOrEqualTo(560));
   });
+
+  testWidgets('a drawn card is not thrown away by a tap beside it',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(_host());
+    await _open(tester);
+
+    // The card carries money the table has to settle, so the paper around it is
+    // not a dismiss handle: only the card's own Close button closes it.
+    await tester.tapAt(const Offset(4, 4));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('Close'), findsOneWidget);
+    expect(
+      find.image(const AssetImage('assets/Icons/chance_inside_trimmed.png')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('a pack\'s square shows the card face as a picture only',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (BuildContext context) => Center(
+              child: ElevatedButton(
+                onPressed: () =>
+                    showCardFacePreview(context, CardDeckKind.chest),
+                child: const Text('Look'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Look'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // The picture, and nothing to read or press on it.
+    expect(
+      find.image(const AssetImage('assets/Icons/chest_inside_trimmed.png')),
+      findsOneWidget,
+    );
+    expect(find.text('Close'), findsNothing);
+    expect(find.text('Reward'), findsNothing);
+
+    // Nothing is drawn by looking, so this one does close on an outside tap.
+    await tester.tapAt(const Offset(4, 4));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(Image), findsNothing);
+  });
 }

@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:animated_flip_counter/animated_flip_counter.dart';
-import 'package:awesome_snackbar_content/awesome_snackbar_content.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -2172,41 +2171,25 @@ class _PlayersScreenState extends State<PlayersScreen> {
     return false;
   }
 
+  /// A payment or an offer, announced the way every other message is.
+  ///
+  /// This used to raise a MaterialBanner of its own, with `inMaterialBanner:
+  /// true`, which drew a second, differently shaped notification over the game.
+  /// It goes through [showMessage] now, so a payment and a "card not found"
+  /// arrive as the same card.
   void notification(String message, String value) {
-    final contentType = {
-          'paid': ContentType.success,
-          'received': ContentType.success,
-          'failed': ContentType.failure,
-          'warning': ContentType.warning,
-          'help': ContentType.help,
-        }[message.toLowerCase()] ??
-        ContentType.help;
-
-    final materialBanner = MaterialBanner(
-      shadowColor: Colors.transparent,
-      forceActionsBelow: true,
-      backgroundColor: Colors.transparent,
-      elevation: 1,
-      content: AwesomeSnackbarContent(
-        title: _getSnackbarTitle(message),
-        message: "${message[0].toUpperCase()}${message.substring(1)} $value",
-        contentType: contentType,
-        inMaterialBanner: true,
-      ),
-      actions: const [SizedBox.shrink()],
+    final MessageKind kind = switch (message.toLowerCase()) {
+      'paid' || 'received' => MessageKind.success,
+      'failed' => MessageKind.failure,
+      'warning' => MessageKind.warning,
+      _ => MessageKind.info,
+    };
+    showMessage(
+      context,
+      '${message[0].toUpperCase()}${message.substring(1)} $value',
+      title: _getSnackbarTitle(message),
+      kind: kind,
     );
-
-    // Show the MaterialBanner
-    ScaffoldMessenger.of(context)
-      ..hideCurrentMaterialBanner()
-      ..showMaterialBanner(materialBanner);
-
-    // Auto-dismiss after 2 seconds
-    Future.delayed(const Duration(seconds: 5), () {
-      if (ScaffoldMessenger.of(context).mounted) {
-        ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
-      }
-    });
   }
 
   String _getSnackbarTitle(String message) {

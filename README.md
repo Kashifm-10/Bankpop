@@ -109,12 +109,25 @@ Android, iOS, desktop and web all build from `app/`. The release APK workflow in
 `.github/` builds from there too.
 
 Money is written in one sign everywhere - BankPop's own heavy-bar B, not a
-national currency. It is a glyph in `app/assets/fonts/BankpopMark.ttf` at
-U+E000, listed as `fontFamilyFallback` on every text style, so a price is still
-one plain string (`BoardCurrencies.format`) and the app, the deeds and the
-printed board all draw the same character. `app/tool/make_currency_font.py`
-rebuilds the font from the drawing; the drawing itself lives in
-`design/currency-glyphs.html`.
+national currency. It is a glyph in `app/assets/fonts/BankpopMark.ttf`, listed
+as `fontFamilyFallback` on every text style, so a price is still one plain
+string (`BoardCurrencies.format`) and the app, the deeds and the printed board
+all draw the same character.
+
+The font carries the sign twice:
+
+| Codepoint | Cut | Used for |
+|-----------|-----|----------|
+| `U+E000` (`BoardCurrencies.mark`) | heavy | balances, prices, totals, the coin |
+| `U+E001` (`BoardCurrencies.markLight`) | light | small print: rent tables, house costs, ledger rows |
+
+`app/tool/make_currency_font.py` rebuilds the font from the drawing in
+`design/currency-glyphs.html`, centring each cut in its own advance width so the
+sign sits in the middle of a coin and of its own space in a line.
+
+The action icons are SVG in `design/app-icons.html`; `app/tool/make_icons.py`
+renders them to `app/assets/Icons/` (trimmed and squared), so a change to a
+drawing is one command rather than a hand export.
 
 ## The mail service
 
