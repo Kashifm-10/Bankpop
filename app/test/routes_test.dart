@@ -61,11 +61,20 @@ void main() {
 
       expect(tester.takeException(), isNull);
       expect(find.text('Game rules'), findsOneWidget);
-      expect(find.text('Setting up'), findsOneWidget);
       expect(
         find.textContaining('These are the rules this app follows'),
         findsOneWidget,
       );
+
+      // The first rule card is under the header on a phone, so the page is
+      // scrolled to it: the header is worth the room it takes.
+      await tester.dragUntilVisible(
+        find.text('Setting up'),
+        find.byType(ListView).last,
+        const Offset(0, -220),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Setting up'), findsOneWidget);
     });
   });
 }

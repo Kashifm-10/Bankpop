@@ -2431,6 +2431,9 @@ class _PlayersScreenState extends State<PlayersScreen> {
       context,
       title: 'Leave game?',
       icon: Icons.logout,
+      // The leave button's own drawing, so the dialog wears the icon the
+      // player just tapped.
+      art: GameControls.leave.art,
       confirmLabel: 'Leave game',
       cancelLabel: 'Stay',
       destructive: true,

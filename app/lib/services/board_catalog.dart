@@ -41,6 +41,16 @@ class BoardListing {
       isCustom: row['is_custom'] == true,
     );
   }
+
+  /// The same shape [fromRow] reads, so the list saved on the device can be
+  /// read back without a database round trip.
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'board_id': boardId,
+        'name': name,
+        'flag': flag,
+        'owner_id': ownerId,
+        'is_custom': isCustom,
+      };
 }
 
 /// What came of trying to save a player's board.
@@ -140,13 +150,73 @@ class BoardCatalog {
 
   static List<BoardListing>? _listings;
 
+  /// Where the last read is kept between runs. The flags are a row of names
+  /// and emoji, so they cost almost nothing on disk - and with them there the
+  /// picker has something to draw before the network answers.
+  static const String _savedKey = 'board_listings';
+
+  /// The boards already known on this device, or null before the first read.
+  ///
+  /// Screens use it to draw the flags they already have while a fresh read is
+  /// still in flight, instead of opening with a "reading..." line.
+  static List<BoardListing>? get cachedListings => _listings;
+
+  /// Puts the saved boards back in memory. Called at startup, so a screen that
+  /// needs the flag row (the bank form's board picker) has it without waiting
+  /// on a query.
+  static Future<void> warmListings() async {
+    if (_listings != null) return;
+    final List<BoardListing>? saved = await _savedListings();
+    if (saved != null) _listings = saved;
+  }
+
+  static Future<List<BoardListing>?> _savedListings() async {
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      final String? raw = prefs.getString(_savedKey);
+      if (raw == null || raw.isEmpty) return null;
+      final List<dynamic> rows = jsonDecode(raw) as List<dynamic>;
+      return <BoardListing>[
+        for (final dynamic row in rows)
+          BoardListing.fromRow(row as Map<String, dynamic>),
+      ];
+    } catch (error) {
+      debugPrint('Could not read the saved boards: $error');
+      return null;
+    }
+  }
+
+  /// Only a real answer is saved: an empty list is what a failed read leaves
+  /// behind, and keeping it would hide every board until the next refresh.
+  static Future<void> _saveListings(List<BoardListing> boards) async {
+    if (boards.isEmpty) return;
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        _savedKey,
+        jsonEncode(<Map<String, dynamic>>[
+          for (final BoardListing board in boards) board.toJson(),
+        ]),
+      );
+    } catch (error) {
+      debugPrint('Could not save the boards: $error');
+    }
+  }
+
   /// The built-in boards plus this player's own, alphabetically by name.
   ///
   /// [refresh] re-reads the table, which is what the banker's picker does after
   /// a board has just been created.
   static Future<List<BoardListing>> available({bool refresh = false}) async {
-    final List<BoardListing>? cached = _listings;
-    if (cached != null && !refresh) return cached;
+    if (!refresh) {
+      // In memory first, then the copy on the device, so a cold start draws
+      // the flags it already knows while the table is read.
+      final List<BoardListing>? cached = _listings ?? await _savedListings();
+      if (cached != null) {
+        _listings = cached;
+        return cached;
+      }
+    }
     try {
       final String? owner = await _signedInPlayerId();
       final PostgrestFilterBuilder<dynamic> query = Supabase.instance.client
@@ -165,6 +235,7 @@ class BoardCatalog {
           return a.name.toLowerCase().compareTo(b.name.toLowerCase());
         });
       _listings = boards;
+      await _saveListings(boards);
       return boards;
     } catch (error) {
       debugPrint('Could not read the boards (run supabase/boards.sql): $error');

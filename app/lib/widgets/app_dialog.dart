@@ -57,6 +57,12 @@ Future<T?> showAppDialog<T>(
   BuildContext context, {
   required String title,
   IconData icon = Icons.info_outline,
+  /// An illustrated icon (`assets/Icons/`) drawn in place of [icon].
+  ///
+  /// A dialog that is about the same thing as a game button should wear the
+  /// same picture, so "Leave game?" shows the leave button's own artwork
+  /// rather than a look-alike glyph.
+  String? art,
   String? message,
   Widget? content,
   List<Widget> actions = const <Widget>[],
@@ -87,14 +93,26 @@ Future<T?> showAppDialog<T>(
           title: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: tint.withValues(alpha: 0.14),
-                  shape: BoxShape.circle,
+              // Same 36 px footprint either way, so the title sits at the
+              // same place whether the badge is a glyph or a drawing.
+              if (art != null)
+                SizedBox(
+                  width: 36,
+                  height: 36,
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: Image.asset(art, fit: BoxFit.contain),
+                  ),
+                )
+              else
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: tint.withValues(alpha: 0.14),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, size: 20, color: tint),
                 ),
-                child: Icon(icon, size: 20, color: tint),
-              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Padding(
@@ -144,6 +162,7 @@ Future<bool> showAppConfirm(
   String confirmLabel = 'Continue',
   String cancelLabel = 'Cancel',
   IconData icon = Icons.help_outline,
+  String? art,
   Widget? extra,
   bool destructive = false,
 }) async {
@@ -152,6 +171,7 @@ Future<bool> showAppConfirm(
     context,
     title: title,
     icon: icon,
+    art: art,
     accent: destructive ? const Color(0xFFC62828) : null,
     barrierDismissible: false,
     content: Column(

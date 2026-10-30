@@ -133,6 +133,21 @@ flutter:
     - assets/Icons/my_cards.png
     - assets/Icons/give_card.png
     - assets/Icons/leave.png
+    - assets/Icons/chance_deck.png
+    - assets/Icons/chance_deck_l.png
+    # The deck tiles: the same landscape art cropped to its own bounds, so the
+    # button is exactly the drawing and none of the transparent margin around
+    # it ends up inside the button.
+    - assets/Icons/chance_deck_l_trimmed.png
+    - assets/Icons/chest_deck.png
+    - assets/Icons/chest_deck_l.png
+    - assets/Icons/chest_deck_l_trimmed.png
+    - assets/Icons/chance_inside.png
+    - assets/Icons/chest_inside.png
+    # The same two cards cropped to their own edges: a drawn card's dialog is
+    # exactly this picture, with its text and buttons set on the bands it leaves.
+    - assets/Icons/chance_inside_trimmed.png
+    - assets/Icons/chest_inside_trimmed.png
     - assets/Icons/reward.png
     - assets/images/app_icon_rounded_logo.png
     - assets/images/play_icon.jpg

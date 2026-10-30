@@ -29,6 +29,7 @@ import 'package:mon/widgets/card_effect_flow.dart';
 import 'package:mon/widgets/player_badge.dart';
 import 'package:mon/widgets/game_controls.dart';
 import 'package:mon/widgets/app_content.dart';
+import 'package:mon/widgets/deck_button.dart';
 import 'package:mon/widgets/player_palette.dart';
 import 'package:mon/widgets/square_action_grid.dart';
 import 'package:mon/widgets/game_status_banner.dart';
@@ -1231,6 +1232,77 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
     );
   }
 
+  /// The players half of the screen before anyone has joined.
+  ///
+  /// An empty list used to leave the panel blank, which read as "the roster
+  /// failed to load" rather than "the table is still filling up". The card says
+  /// which one it is, and carries the one thing the banker needs at that
+  /// moment: a way back to the join QR.
+  Widget _emptyPlayerList(BuildContext context) {
+    final AppDialogPalette palette = AppDialogPalette.of(context);
+    // At the top of the panel, not its middle: the players fill this area from
+    // the top down, so the card that stands in for them starts on the same
+    // line rather than floating under an empty half-screen.
+    return Align(
+      alignment: Alignment.topCenter,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
+          decoration: BoxDecoration(
+            color: palette.surface,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: palette.accent.withValues(alpha: 0.45),
+              width: 1.2,
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(Icons.groups_outlined, size: 30, color: palette.accent),
+              const SizedBox(height: 8),
+              Text(
+                'Players have not joined yet',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: palette.title,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Share the game code, or let them scan the QR to sit down.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  height: 1.35,
+                  color: palette.body,
+                ),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: () => _showQRDialog(context),
+                icon: const Icon(Icons.qr_code_2, size: 18),
+                label: const Text('Show join QR'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: palette.actions,
+                  side: BorderSide(color: palette.accent),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   /// True while the advance overlay is on screen, so it is only ever closed
   /// once - by the payment that opened it, or by the caller giving up.
   bool _advancingShown = false;
@@ -1337,7 +1409,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                 ),
               ],
             ),
-          ),          // scaleDown lets a long balance shrink into its third of the row
+          ), // scaleDown lets a long balance shrink into its third of the row
           // instead of pushing the action buttons past the right edge on a
           // narrow phone.
           Expanded(
@@ -1441,7 +1513,8 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                                     .format(DateTime.now()),
                               });
                             } catch (error) {
-                              debugPrint('Could not record the payment: $error');
+                              debugPrint(
+                                  'Could not record the payment: $error');
                             }
                             return null;
                           },
@@ -1502,7 +1575,8 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                           icon: Icons.trending_up,
                           confirmLabel: 'Pay '
                               '${BoardCurrencies.format(BoardCatalog.activeCurrency, advanceAmount)}',
-                          message: 'Pays ${player.name} the round advance out of '
+                          message:
+                              'Pays ${player.name} the round advance out of '
                               'the bank. The bank pays it, not the other players, '
                               'and it is the same amount for every seat.',
                         );
@@ -1513,8 +1587,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                         // a failure used to leave it up, animation finished and
                         // frozen, over a screen that would not move.
                         try {
-                          final prefs =
-                              await SharedPreferences.getInstance();
+                          final prefs = await SharedPreferences.getInstance();
                           final payerPlayerID =
                               prefs.getString('playerID') ?? 'UnknownPlayer';
 
@@ -1580,10 +1653,10 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                             'from': "Bank (Advance)",
                             'to': player.name,
                             'code': "${payerPlayerID}_${player.playerID}",
-                            'date': DateFormat('yyyy-MM-dd')
-                                .format(DateTime.now()),
-                            'time': DateFormat('HH:mm:ss')
-                                .format(DateTime.now()),
+                            'date':
+                                DateFormat('yyyy-MM-dd').format(DateTime.now()),
+                            'time':
+                                DateFormat('HH:mm:ss').format(DateTime.now()),
                           });
                           _finishAdvance(
                               'Advanced ₹$advanceAmount to ${player.name}');
@@ -1851,6 +1924,9 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
       context,
       title: 'Leave game?',
       icon: Icons.logout,
+      // The leave button's own drawing, so the dialog wears the icon the
+      // banker just tapped.
+      art: GameControls.leave.art,
       confirmLabel: 'Leave',
       cancelLabel: 'Stay',
       destructive: true,
@@ -2072,9 +2148,11 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                     );
 
                     // The stickers the banker needs while looking at the
-                    // table: the history, and the two packs. Each keeps its
-                    // name in a tooltip and in the info sheet, like every other
-                    // button here.
+                    // table: the bank's own code, and the history. Each keeps
+                    // its name in a tooltip and in the info sheet, like every
+                    // other button here. The two packs are not among them: they
+                    // are drawn on the board itself, over the piles its art
+                    // prints - the Chance one and the Chest beside it.
                     List<Widget> buttons(
                             bool fill, double width, double height) =>
                         <Widget>[
@@ -2097,29 +2175,10 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                               ),
                             ),
                           ),
-                          // The two packs the table draws from, drawn as the
-                          // cards themselves: one tap deals the next card of
-                          // that pack. Only a cards game ever deals one.
-                          if (_playWithCards && !_viewOnly) ...<Widget>[
-                            GameIconButton(
-                              control: GameControls.chanceDeck,
-                              fill: fill,
-                              width: width,
-                              height: height,
-                              artScale: 0.9,
-                              onPressed: () => _drawCard(CardDeckKind.chance),
-                            ),
-                            GameIconButton(
-                              control: GameControls.chestDeck,
-                              fill: fill,
-                              width: width,
-                              height: height,
-                              artScale: 0.9,
-                              onPressed: () => _drawCard(CardDeckKind.chest),
-                            ),
-                          ],
                         ];
 
+                    // The packs are not in this row at all: they are drawn on
+                    // the board itself, over the piles its art prints.
                     final int count = buttons(false, 48, 48).length;
                     if (row.maxWidth < 640 || count == 0) {
                       return Column(
@@ -2184,6 +2243,21 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                         payOption: payOption,
                         bankerId: ID,
                         canGiveCards: _playWithCards && !_viewOnly,
+                        // A cards game deals from the board: the two packs are
+                        // laid over the Chance and Chest piles the board art
+                        // prints, and a tap on one draws its next card.
+                        deckBuilder: _playWithCards && !_viewOnly
+                            ? (CardDeckKind kind, double width,
+                                    DeckStatus status) =>
+                                DeckButton(
+                                  control: kind == CardDeckKind.chance
+                                      ? GameControls.chanceDeck
+                                      : GameControls.chestDeck,
+                                  width: width,
+                                  status: status,
+                                )
+                            : null,
+                        onDrawCard: _drawCard,
                         // In a row with the players the board starts where they
                         // start - at the top - instead of hanging below a band
                         // of empty paper.
@@ -2200,14 +2274,17 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                               child: CircularProgressIndicator(
                                   color: Color(0xFF689F38)),
                             )
-                          : ListView.builder(
-                              itemCount: players.length,
-                              itemBuilder: (context, index) => Padding(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 16.0, vertical: 5),
-                                child: _buildPlayerRow(context, players[index]),
-                              ),
-                            ),
+                          : players.isEmpty
+                              ? _emptyPlayerList(context)
+                              : ListView.builder(
+                                  itemCount: players.length,
+                                  itemBuilder: (context, index) => Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 16.0, vertical: 5),
+                                    child: _buildPlayerRow(
+                                        context, players[index]),
+                                  ),
+                                ),
                     );
 
                     if (area.maxWidth < 720) {

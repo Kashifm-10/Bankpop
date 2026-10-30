@@ -2,9 +2,46 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class CustomTheme {
+  /// The one typeface the whole app is set in.
+  ///
+  /// Quicksand was already the light theme's family, while the dark theme asked
+  /// for Montserrat Subrayada - an all-caps display face - so the type changed
+  /// whenever the room got dark. One family now, in both, and in the dialog
+  /// styles that used to spell their own out.
+  static String get family => GoogleFonts.quicksand().fontFamily ?? 'Quicksand';
+
+  /// Quicksand, weighted so the scale reads as one system: display and titles
+  /// carry the emphasis, body copy stays legible rather than hairline, and
+  /// labels sit a step under titles. Quicksand's strokes are thin at 400, which
+  /// is why body text is 500 and small labels are not lighter than that.
+  static TextTheme textThemeFor(Brightness brightness) {
+    final TextTheme base = GoogleFonts.quicksandTextTheme(
+      ThemeData(brightness: brightness).textTheme,
+    );
+    return base.copyWith(
+      displayLarge: base.displayLarge?.copyWith(fontWeight: FontWeight.w800),
+      displayMedium: base.displayMedium?.copyWith(fontWeight: FontWeight.w800),
+      displaySmall: base.displaySmall?.copyWith(fontWeight: FontWeight.w700),
+      headlineLarge: base.headlineLarge?.copyWith(fontWeight: FontWeight.w800),
+      headlineMedium:
+          base.headlineMedium?.copyWith(fontWeight: FontWeight.w700),
+      headlineSmall: base.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+      titleLarge: base.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+      titleMedium: base.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+      titleSmall: base.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+      bodyLarge: base.bodyLarge?.copyWith(fontWeight: FontWeight.w500),
+      bodyMedium: base.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
+      bodySmall: base.bodySmall?.copyWith(fontWeight: FontWeight.w500),
+      labelLarge: base.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+      labelMedium: base.labelMedium?.copyWith(fontWeight: FontWeight.w600),
+      labelSmall: base.labelSmall?.copyWith(fontWeight: FontWeight.w600),
+    );
+  }
+
   static ThemeData lightThemeData() {
     return ThemeData(
-      fontFamily: GoogleFonts.quicksand().fontFamily,
+      fontFamily: family,
+      textTheme: textThemeFor(Brightness.light),
       colorScheme: MaterialTheme.lightScheme().toColorScheme(),
       scaffoldBackgroundColor: MaterialTheme.lightScheme().background,
       useMaterial3: true,
@@ -16,17 +53,18 @@ class CustomTheme {
         backgroundColor: const Color(0xFFFFF8E1),
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        titleTextStyle: const TextStyle(
+        titleTextStyle: TextStyle(
           fontSize: 18,
           fontWeight: FontWeight.w800,
-          color: Color(0xFF33691E),
-          fontFamily: 'Quicksand',
+          color: const Color(0xFF33691E),
+          fontFamily: family,
         ),
-        contentTextStyle: const TextStyle(
+        contentTextStyle: TextStyle(
           fontSize: 14.5,
           height: 1.4,
-          color: Color(0xFF33691E),
-          fontFamily: 'Quicksand',
+          fontWeight: FontWeight.w500,
+          color: const Color(0xFF33691E),
+          fontFamily: family,
         ),
       ),
       // Dialog actions (Cancel / Continue) used to come out in the scheme's
@@ -43,7 +81,8 @@ class CustomTheme {
 
   static ThemeData darkThemeData() {
     return ThemeData(
-      fontFamily: GoogleFonts.montserratSubrayada().fontFamily,
+      fontFamily: family,
+      textTheme: textThemeFor(Brightness.dark),
       colorScheme: MaterialTheme.darkScheme().toColorScheme(),
       scaffoldBackgroundColor: MaterialTheme.darkScheme().background,
       useMaterial3: true,
@@ -53,15 +92,18 @@ class CustomTheme {
         backgroundColor: const Color(0xFF26291F),
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        titleTextStyle: const TextStyle(
+        titleTextStyle: TextStyle(
           fontSize: 18,
           fontWeight: FontWeight.w800,
-          color: Color(0xFFC5E1A5),
+          color: const Color(0xFFC5E1A5),
+          fontFamily: family,
         ),
-        contentTextStyle: const TextStyle(
+        contentTextStyle: TextStyle(
           fontSize: 14.5,
           height: 1.4,
-          color: Color(0xFFE0E0E0),
+          fontWeight: FontWeight.w500,
+          color: const Color(0xFFE0E0E0),
+          fontFamily: family,
         ),
       ),
       textButtonTheme: TextButtonThemeData(

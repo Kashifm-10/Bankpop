@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -79,101 +80,126 @@ class _CardEffectDialogState extends State<_CardEffectDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: const Color(0xFFFFF8E1),
-      title: Text(widget.kind.label),
-      content: SizedBox(
-        width: 80.w,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+    // The card is the dialog: the picture is shown whole, with the reading
+    // area and the two buttons laid on the bands the artwork leaves for them.
+    final _CardFace face = _CardFace.of(widget.kind);
+    final Size screen = MediaQuery.sizeOf(context);
+    // Wide enough to read the card, never wider than the window, and never
+    // taller than it either - a landscape phone has little height to give.
+    final double width = math.min(
+      math.min(screen.width - 24, 560),
+      (screen.height - 48) * face.aspect,
+    );
+    final double height = width / face.aspect;
+    // The type follows the card, so it keeps the same proportion to the
+    // drawing on a phone as on a desktop - but never shrinks to a speck.
+    final double scale = width / 560;
+    final double cardFont = (15 * scale).clamp(10.5, 15.0);
+    final double noteFont = (11.5 * scale).clamp(8.5, 11.5);
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
+      child: SizedBox(
+        width: width,
+        height: height,
+        child: Stack(
           children: <Widget>[
-            Text(
-              widget.cardText,
-              style: TextStyle(fontSize: 17.sp, height: 1.35),
-            ),
-            if (_action.kind != CardActionKind.none) ...<Widget>[
-              const SizedBox(height: 12),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFFBCAAA4)),
-                ),
-                child: Row(
-                  children: <Widget>[
-                    // A reward is the one effect with an illustrated icon;
-                    // the rest keep their glyph.
-                    _action.kind == CardActionKind.reward
-                        ? Image.asset(
-                            'assets/Icons/reward.png',
-                            width: 22,
-                            height: 22,
-                            fit: BoxFit.contain,
-                          )
-                        : Icon(_icon, size: 18, color: const Color(0xFF6A1B9A)),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        _summary,
-                        style:
-                            TextStyle(fontSize: 13.sp, color: Colors.black87),
+            Positioned.fill(child: Image.asset(face.art, fit: BoxFit.fill)),
+            // The middle of the card: what it says, and what settling it will
+            // do with the money.
+            // The words keep a margin of their own inside the band, so a long
+            // card never runs up against the painted edge.
+            _band(
+              _CardFace.textArea,
+              width,
+              height,
+              Center(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: width * 0.035),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Text(
+                        widget.cardText,
+                        textAlign: TextAlign.center,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: cardFont,
+                          height: 1.22,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFFFFF3D6),
+                        ),
                       ),
-                    ),
-                  ],
+                      if (_action.kind != CardActionKind.none) ...<Widget>[
+                        SizedBox(height: 6 * scale),
+                        Text(
+                          _summary,
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: noteFont,
+                            height: 1.2,
+                            color: const Color(0xFFFFD08A),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
-            ],
+            ),
+            // Bottom left: the way out, without touching the cards.
+            _band(
+              _CardFace.closeArea,
+              width,
+              height,
+              _FaceButton(
+                label: 'Close',
+                background: const Color(0xFFFFF3D6),
+                foreground: const Color(0xFF6D3B12),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ),
+            // Bottom right: the money. Green only when there is an effect to
+            // settle, so a card that is only read keeps a single button.
+            if (_action.kind != CardActionKind.none)
+              _band(
+                _CardFace.actionArea,
+                width,
+                height,
+                _settled
+                    ? const _FaceButton(
+                        label: 'Settled',
+                        background: Color(0xFF1B5E20),
+                        foreground: Color(0xFFFFF3D6),
+                      )
+                    : _FaceButton(
+                        label: _busy ? 'Working...' : _actionLabel,
+                        background: const Color(0xFF2E7D32),
+                        foreground: const Color(0xFFFFF3D6),
+                        onPressed: _busy ? null : _settle,
+                      ),
+              ),
           ],
         ),
       ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Close'),
-        ),
-        if (_action.kind != CardActionKind.none && !_settled)
-          FilledButton(
-            onPressed: _busy ? null : _settle,
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF689F38),
-            ),
-            child: Text(_buttonLabel),
-          ),
-        if (_settled)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                const Icon(Icons.check_circle,
-                    color: Color(0xFF689F38), size: 18),
-                const SizedBox(width: 6),
-                Text('Settled', style: TextStyle(fontSize: 13.sp)),
-              ],
-            ),
-          ),
-      ],
     );
   }
 
-  IconData get _icon {
-    switch (_action.kind) {
-      case CardActionKind.reward:
-        return Icons.card_giftcard;
-      case CardActionKind.pay:
-        return Icons.payments_outlined;
-      case CardActionKind.repairs:
-        return Icons.home_repair_service_outlined;
-      case CardActionKind.collectFromEach:
-        return Icons.groups_outlined;
-      case CardActionKind.jailFree:
-        return Icons.key_outlined;
-      case CardActionKind.none:
-        return Icons.info_outline;
-    }
+  /// Puts [child] on one band of the card, measured as a fraction of the
+  /// picture so it stays on its spot at every size.
+  Widget _band(Rect area, double width, double height, Widget child) {
+    return Positioned(
+      left: area.left * width,
+      top: area.top * height,
+      width: area.width * width,
+      height: area.height * height,
+      child: child,
+    );
   }
 
   String get _summary {
@@ -197,18 +223,18 @@ class _CardEffectDialogState extends State<_CardEffectDialog> {
     }
   }
 
-  String get _buttonLabel {
+  /// The green button: what pressing it does, in one word. The sentence it
+  /// would need is already written above it, on the card.
+  String get _actionLabel {
     switch (_action.kind) {
       case CardActionKind.reward:
-        return 'Reward a player';
+        return 'Reward';
       case CardActionKind.pay:
-        return 'Take payment';
       case CardActionKind.repairs:
-        return 'Bill repairs';
       case CardActionKind.collectFromEach:
-        return 'Collect from each';
+        return 'Collect';
       case CardActionKind.jailFree:
-        return 'Give the card';
+        return 'Give';
       case CardActionKind.none:
         return '';
     }
@@ -648,6 +674,96 @@ class _CardEffectDialogState extends State<_CardEffectDialog> {
             child: const Text('Cancel'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// A drawn card's face, and where its words go on it.
+///
+/// Both packs are the same card drawn twice - a title across the top and an
+/// empty middle - so one set of bands serves both: the reading area in the
+/// middle, and two buttons along the bottom, Close on the left and the money
+/// on the right. The bands are fractions of the picture, so the card can be
+/// drawn at any size and everything stays in its place; they sit a little
+/// inside the areas the artwork leaves, which is the padding that keeps the
+/// words and buttons off the card's painted edge.
+class _CardFace {
+  const _CardFace({required this.art, required this.aspect});
+
+  /// The drawing, already cropped to the card itself - its own transparent
+  /// margin and the drop shadow under it are gone, so the picture is the card.
+  final String art;
+
+  /// Width over height of [art], so the picture is never stretched.
+  final double aspect;
+
+  /// The empty middle: what the card says, and what settling it will do.
+  static const Rect textArea = Rect.fromLTRB(0.10, 0.470, 0.90, 0.760);
+
+  /// The bottom left and bottom right, level with each other and the same
+  /// distance in from the card's edge.
+  static const Rect closeArea = Rect.fromLTRB(0.105, 0.795, 0.282, 0.872);
+  static const Rect actionArea = Rect.fromLTRB(0.718, 0.795, 0.895, 0.872);
+
+  static const _CardFace chance = _CardFace(
+    art: 'assets/Icons/chance_inside_trimmed.png',
+    aspect: 849 / 589,
+  );
+
+  static const _CardFace chest = _CardFace(
+    art: 'assets/Icons/chest_inside_trimmed.png',
+    aspect: 847 / 590,
+  );
+
+  static _CardFace of(CardDeckKind kind) =>
+      kind == CardDeckKind.chance ? chance : chest;
+}
+
+/// One of the two buttons on the card's face.
+///
+/// The band it is given is small, so the label is shrunk to fit rather than
+/// allowed to spill over the drawing: a long word still reads whole.
+class _FaceButton extends StatelessWidget {
+  const _FaceButton({
+    required this.label,
+    required this.background,
+    required this.foreground,
+    this.onPressed,
+  });
+
+  final String label;
+  final Color background;
+  final Color foreground;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: background,
+      elevation: onPressed == null ? 0 : 2,
+      shadowColor: Colors.black54,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onPressed,
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                maxLines: 1,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: foreground,
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
