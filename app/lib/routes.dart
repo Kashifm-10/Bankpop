@@ -35,6 +35,9 @@ class AppRoutes {
   /// The editor for a signed-in player's own board.
   static const String newBoard = '/boards/new';
 
+  /// Making a board out of a photograph of a printed one.
+  static const String boardFromImage = '/boards/photo';
+
   /// `/auth?return=1` - opened from a screen that stays put, so a successful
   /// sign-in pops back to it instead of replacing the whole stack.
   static const String authReturning = '/auth?return=1';
