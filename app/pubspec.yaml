@@ -1,0 +1,217 @@
+name: mon
+description: "A new Flutter project."
+# The following line prevents the package from being accidentally published to
+# pub.dev using `flutter pub publish`. This is preferred for private packages.
+publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+
+# The following defines the version and build number for your application.
+# A version number is three numbers separated by dots, like 1.2.43
+# followed by an optional build number separated by a +.
+# Both the version and the builder number may be overridden in flutter
+# build by specifying --build-name and --build-number, respectively.
+# In Android, build-name is used as versionName while build-number used as versionCode.
+# Read more about Android versioning at https://developer.android.com/studio/publish/versioning
+# In iOS, build-name is used as CFBundleShortVersionString while build-number is used as CFBundleVersion.
+# Read more about iOS versioning at
+# https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
+# In Windows, build-name is used as the major, minor, and patch parts
+# of the product and file versions while build-number is used as the build suffix.
+version: 1.2.0+2
+
+environment:
+  sdk: ^3.5.1
+
+# Dependencies specify other packages that your package needs in order to work.
+# To automatically upgrade your package dependencies to the latest versions
+# consider running `flutter pub upgrade --major-versions`. Alternatively,
+# dependencies can be manually updated by changing the version numbers below to
+# the latest version available on pub.dev. To see which dependencies have newer
+# versions available, run `flutter pub outdated`.
+dependencies:
+  flutter:
+    sdk: flutter
+
+
+  # The following adds the Cupertino Icons font to your application.
+  # Use with the CupertinoIcons class for iOS style icons.
+  cupertino_icons: ^1.0.8
+  mobile_scanner: ^6.0.10
+  qr_flutter: ^4.1.0
+  vibration: ^3.1.3
+  responsive_sizer: ^3.3.1
+  supabase_flutter: ^2.9.0
+  uuid: ^4.5.1
+  shared_preferences: ^2.5.3
+  font_awesome_flutter: ^10.8.0
+  flutter_launcher_icons: ^0.14.3
+  lottie: ^3.2.0
+  rename_app: ^1.6.3
+  animated_flip_counter: ^0.3.4
+  # Password hashing for players_profile (PBKDF2-HMAC-SHA256).
+  crypto: ^3.0.6
+  intl: ^0.20.2
+  timeago: ^3.7.1
+  package_info_plus: ^8.3.0
+  google_fonts: ^6.3.0
+  provider: ^6.1.5
+  url_launcher: ^6.3.2
+  path_provider: ^2.1.5
+  mailto: ^2.0.0
+  permission_handler: ^12.0.1
+  awesome_snackbar_content: ^0.1.1
+  go_router: 15.1.2
+  # Posts the verification and reset-password mails to the Bankpop mail
+  # service (django-mail-api/), which holds the mailbox and sends them. Nothing
+  # in the app opens an SMTP connection, on any platform.
+  http: ^1.2.0
+  # Only used by the web URL strategy (lib/services/url_strategy_web.dart).
+  flutter_web_plugins:
+    sdk: flutter
+  share_plus: ^12.0.2
+  file_picker: ^11.0.3
+  # Saving a board image to the browser's downloads folder.
+  web: ^1.1.0
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+
+  # The "flutter_lints" package below contains a set of recommended lints to
+  # encourage good coding practices. The lint set provided by the package is
+  # activated in the `analysis_options.yaml` file located at the root of your
+  # package. See that file for information about deactivating specific lint
+  # rules and activating additional ones.
+  flutter_lints: ^5.0.0
+# The launcher icon on every platform, generated from one source image with:
+#
+#   cd app && dart run flutter_launcher_icons
+#
+# Re-run it after replacing the image. Android, iOS, web, Windows and macOS are
+# covered; Linux desktop takes its icon from the bundle and has no setting here.
+flutter_launcher_icons:
+  image_path: "assets/images/app_icon_rounded_logo.png"
+  android: true
+  ios: true
+  # An iOS app icon must not carry transparency.
+  remove_alpha_ios: true
+  # Android 8 and later mask the icon, so the logo sits on the app's own cream
+  # rather than on a white square.
+  adaptive_icon_background: "#fff8f1"
+  adaptive_icon_foreground: "assets/images/app_icon_rounded_logo.png"
+  web:
+    generate: true
+    image_path: "assets/images/app_icon_rounded_logo.png"
+    background_color: "#fff8f1"
+    theme_color: "#689F38"
+  windows:
+    generate: true
+    image_path: "assets/images/app_icon_rounded_logo.png"
+    icon_size: 256
+  macos:
+    generate: true
+    image_path: "assets/images/app_icon_rounded_logo.png"
+# For information on the generic Dart part of this file, see the
+# following page: https://dart.dev/tools/pub/pubspec
+
+# The following section is specific to Flutter packages.
+flutter:
+
+  # The following line ensures that the Material Icons font is
+  # included with your application, so that you can use the icons in
+  # the material Icons class.
+  uses-material-design: true
+
+  # To add assets to your application, add an assets section, like this:
+  assets:
+    # The illustrated icons the game screens use in place of plain glyphs.
+    - assets/Icons/history.png
+    - assets/Icons/bank.png
+    - assets/Icons/trade.png
+    - assets/Icons/my_cards.png
+    - assets/Icons/give_card.png
+    - assets/Icons/leave.png
+    - assets/Icons/reward.png
+    - assets/images/app_icon_rounded_logo.png
+    - assets/images/play_icon.jpg
+    - assets/images/advance.png
+    - assets/images/pay.png
+    - assets/images/c_logo.png
+    - assets/images/Go.png
+    - assets/images/Jail.png
+    - assets/images/Free_Parking.png
+    - assets/images/Go_To_Jail.png
+    - assets/images/Chance.png
+    - assets/images/Community_Chest.png
+    - assets/images/Station.png
+    - assets/images/Station_nbg.png
+    - assets/images/Electric.png
+    - assets/images/Electric_nbg.png
+    - assets/images/Water.png
+    - assets/images/Water_nbg.png
+    - assets/images/Tax.png
+    - assets/lottie/splash.json
+    - assets/lottie/first.json
+    - assets/lottie/second.json
+    - assets/lottie/almost_last.json
+    - assets/lottie/last.json
+    - assets/lottie/neutral.json
+    - assets/lottie/paid.json
+    - assets/lottie/failed.json
+    - assets/lottie/received.json
+    - assets/lottie/bank_role.json
+    - assets/lottie/player_role.json
+    - assets/lottie/player_role1.json
+    - assets/lottie/thinking.json
+    - assets/lottie/dice.json
+    - assets/lottie/close.json
+    - assets/lottie/how_to.json
+    - assets/lottie/help.json
+    - assets/lottie/money_bag.json
+    - assets/lottie/instant.json
+    - assets/lottie/scan.json
+    - assets/lottie/coin.json
+    - assets/lottie/advancing.json
+    - assets/avatars/girl1.jpg
+    - assets/avatars/girl2.jpg
+    - assets/avatars/girl3.jpg
+    - assets/avatars/girl4.jpg
+    - assets/avatars/girl5.jpg
+    - assets/avatars/girl6.jpg
+    - assets/avatars/girl7.jpg
+    - assets/avatars/boy1.jpg
+    - assets/avatars/boy2.jpg
+    - assets/avatars/boy3.jpg
+    - assets/avatars/boy4.jpg
+    - assets/avatars/boy5.jpg
+    - assets/avatars/boy6.jpg
+    - assets/avatars/boy7.jpg
+  #   - images/a_dot_ham.jpeg
+
+  # An image asset can refer to one or more resolution-specific "variants", see
+  # https://flutter.dev/to/resolution-aware-images
+
+  # For details regarding adding assets from package dependencies, see
+  # https://flutter.dev/to/asset-from-package
+
+  # To add custom fonts to your application, add a fonts section here,
+  # in this "flutter" section. Each entry in this list should have a
+  # "family" key with the font family name, and a "fonts" key with a
+  # list giving the asset and other descriptors for the font. For
+  # example:
+  # fonts:
+  #   - family: Schyler
+  #     fonts:
+  #       - asset: fonts/Schyler-Regular.ttf
+  #       - asset: fonts/Schyler-Italic.ttf
+  #         style: italic
+  #   - family: Trajan Pro
+  #     fonts:
+  #       - asset: fonts/TrajanPro.ttf
+  #       - asset: fonts/TrajanPro_Bold.ttf
+  #         weight: 700
+  #
+  # For details regarding fonts from package dependencies,
+  # see https://flutter.dev/to/font-from-package

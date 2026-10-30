@@ -1,43 +1,22 @@
-# Miscellaneous
-*.class
-*.log
-*.pyc
-*.swp
+# Repo-level ignores. Each project keeps its own rules:
+# app/.gitignore (Flutter) and django-mail-api/.gitignore (Django/Python).
+
+# OS and editor leftovers
 .DS_Store
-.atom/
-.buildlog/
-.history
-.svn/
-migrate_working_dir/
+Thumbs.db
+*.swp
+*.log
 
-# IntelliJ related
-*.iml
-*.ipr
-*.iws
-.idea/
+# Local settings, never committed
+.env
+.env.local
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
+# dev.sh leaves its pid file and the mail service's log here
+.dev/
 
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
+# Build output left at the root before the app moved into app/. The live copies
+# are app/build, app/.dart_tool and app/.flutter-plugins-dependencies now; these
+# two lines only keep the old directories out of `git status`.
+build/
 .dart_tool/
-.flutter-plugins
 .flutter-plugins-dependencies
-.pub-cache/
-.pub/
-/build/
-
-# Symbolication related
-app.*.symbols
-
-# Obfuscation related
-app.*.map.json
-
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release

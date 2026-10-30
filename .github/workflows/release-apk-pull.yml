@@ -22,9 +22,11 @@ jobs:
           cache: true
 
       - name: Install dependencies
+        working-directory: app
         run: flutter pub get
 
       - name: Build Flutter APK
+        working-directory: app
         run: flutter build apk --release --target-platform=android-arm64
 
       - name: Upload APK to Supabase
@@ -32,7 +34,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           BUCKET: apk_releases
-          FILE_PATH: build/app/outputs/flutter-apk/app-release.apk
+          FILE_PATH: app/build/app/outputs/flutter-apk/app-release.apk
           REMOTE_NAME: release-apk.apk
 
         run: |
