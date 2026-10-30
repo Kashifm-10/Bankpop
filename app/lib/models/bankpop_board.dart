@@ -13,8 +13,17 @@ import 'dart:convert';
 /// price is now written in the same sign, so a stored symbol from an older
 /// board row is ignored rather than printed.
 abstract final class BoardCurrencies {
-  /// BankPop's own money sign: the heavy-bar B.
+  /// BankPop's own money sign: the heavy-bar B, for anything that has to hold
+  /// its own against a number - balances, prices, totals, the coin.
   static const String mark = '\uE000';
+
+  /// The same sign in a lighter cut, for small print.
+  ///
+  /// At 10-13 px the heavy sign's bars fill in and the letter reads as a blot,
+  /// so rent tables, ledger rows and the tiny prices printed on the board's
+  /// tiles take this one instead. Both are single characters, so an amount is
+  /// still just a string and every `Text` in the app can show it.
+  static const String markLight = '\uE001';
 
   /// The sign used when nothing else is given - which is always [mark] now.
   static const String fallback = mark;
@@ -35,6 +44,12 @@ abstract final class BoardCurrencies {
   /// still reads "Collect £50". This swaps that sign for BankPop's mark, so the
   /// words on the card and the amount beside them use the same money.
   static String write(String text) => text.replaceAll(_anySign, mark);
+
+  /// A price in small print, in the light cut of the sign.
+  ///
+  /// Same number, same order - only the weight of the sign changes, so a rent
+  /// table set in this still lines up with a price set in [mark].
+  static String formatLight(num value) => format(markLight, value);
 
   /// A price with its sign: `B 200` (the mark, then the number).
   static String format(String symbol, num value) {

@@ -1,19 +1,32 @@
-"""Builds the BankPop money sign as a one-glyph font.
+"""Builds the BankPop money signs as a one-glyph-each font.
 
 The app prints amounts as text everywhere - wallets, ledgers, deeds, dialogs and
 the board picture that is painted with a `TextPainter` rather than widgets. A
-font glyph is the only thing that reaches all of those with one change: the sign
-lives at U+E000, the app writes that character, and every `Text` in the app
-draws it with no widget wrapper and no layout change.
+font glyph is the only thing that reaches all of those with one change: the signs
+live at U+E000 and U+E001, the app writes those characters, and every `Text` in
+the app draws them with no widget wrapper and no layout change.
 
-Geometry is the heavy-bar B from `design/currency-glyphs.html` (the "Heavy Bar
-B" iteration): a bold B with two bars hanging off its stem. The strokes of that
-drawing are turned into filled outlines here, because a font stores filled
-contours, not strokes.
+Two weights, because the sign is used at two very different sizes:
+
+* **heavy** (U+E000) - the bold bar B, for balances, prices and the coin, where
+  the sign has to hold its own against the numbers beside it.
+* **light** (U+E001) - the same letter drawn with thinner strokes, for small
+  print: rent tables, ledger rows, the fine print on a card. At 10-13 px the
+  heavy sign fills in and reads as a blot; the light one stays a letter.
+
+The geometry is the heavy-bar B from `design/currency-glyphs.html`. The strokes
+of that drawing are turned into filled outlines here, because a font stores
+filled contours, not strokes.
+
+Both weights are laid out on the same mapping, so they line up on the baseline
+with the same cap height, and each glyph is centred inside its advance width.
+That second part matters: the drawing's lower bowl ends further right than its
+stem, so a sign placed by its left edge sits left of centre - visibly so on the
+coin, where the sign is the only thing on the disc.
 
 Run it from the `app` directory:
 
-    python3 tool/make_currency_font.py
+    python tool/make_currency_font.py
 
 Requires `fonttools` (a build-time tool only - the app itself needs nothing).
 """
@@ -28,24 +41,22 @@ from fontTools.pens.ttGlyphPen import TTGlyphPen
 
 # --- The drawing, in the 100-unit box the icon set uses ---------------------
 
-STROKE = 20.0          # half-width 10, the weight of the sign
-DESIGN_TOP = 6.0       # top of the stem's round cap
-DESIGN_BOTTOM = 94.0   # bottom of the stem's round cap
-DESIGN_LEFT = 4.0      # left end of the bars
-DESIGN_RIGHT = 86.0    # right of the lower bowl
+DESIGN_TOP = 6.0       # top of the heavy stem's round cap: the cap height
+DESIGN_BOTTOM = 94.0   # bottom of the heavy stem's round cap: the baseline
+
+# Breathing room either side of the ink, in drawing units. Both weights get the
+# same, so the two signs sit the same distance from the number next to them.
+BEARING = 6.0
 
 UPM = 1000
 CAP_HEIGHT = 700.0     # the sign is as tall as a capital
-LEFT_BEARING = 60.0
-RIGHT_BEARING = 60.0
 
-CODEPOINT = 0xE000
+# The two cuts of the same letter. The bar heights are the stroke's own weight:
+# a light sign has thin bars, or it reads as a glyph with two smudges on it.
+HEAVY = 0xE000
+LIGHT = 0xE001
 
 SCALE = CAP_HEIGHT / (DESIGN_BOTTOM - DESIGN_TOP)
-
-
-def _x(value: float) -> float:
-    return (value - DESIGN_LEFT) * SCALE + LEFT_BEARING
 
 
 def _y(value: float) -> float:
@@ -92,7 +103,6 @@ def _sample(segments, steps: int = 24):
 def _offset(pts, distance: float):
     """The centreline pushed out by `distance` along its normal."""
     out = []
-    half = STROKE / 2
     for i, (x, y) in enumerate(pts):
         if i == 0:
             tx, ty = pts[1][0] - x, pts[1][1] - y
@@ -103,16 +113,16 @@ def _offset(pts, distance: float):
         length = math.hypot(tx, ty) or 1.0
         # Normal pointing right of travel: (+ty, -tx) / length.
         nx, ny = ty / length, -tx / length
-        out.append((x + nx * half * (distance / half), y + ny * half * (distance / half)))
+        out.append((x + nx * distance, y + ny * distance))
     return out
 
 
-def _stroke_contour(segments):
+def _stroke_contour(segments, stroke: float):
     """One closed contour for a stroked centreline (its outer edge, then its
     inner edge reversed)."""
     pts = _sample(segments)
-    outer = _offset(pts, STROKE / 2)
-    inner = _offset(pts, -STROKE / 2)
+    outer = _offset(pts, stroke / 2)
+    inner = _offset(pts, -stroke / 2)
     return outer + list(reversed(inner))
 
 
@@ -138,42 +148,86 @@ def _rounded_rect(x0: float, y0: float, x1: float, y1: float, radius: float):
     return pts
 
 
-def build(path: str) -> None:
-    contours = [
+def _sign(stroke: float, bar_height: float, bar_radius: float):
+    """The contours of one weight of the sign, in drawing units.
+
+    Only the stroke and the bars change between weights: the letter's skeleton -
+    where the stem, the two bowls and the bars sit - is identical, which is what
+    makes the light sign the same letter rather than a different one.
+    """
+    bar_middle_top = 35.0 + bar_height / 2
+    bar_middle_bottom = 59.0 + bar_height / 2
+    return [
         # The stem of the B, with round ends.
-        _rounded_rect(37 - 10, 84 + 10, 37 + 10, 16 - 10, 10),
+        _rounded_rect(37 - stroke / 2, 84 + stroke / 2,
+                      37 + stroke / 2, 16 - stroke / 2, stroke / 2),
         # The two bars, hanging off the left of the stem.
-        _rounded_rect(4, 47, 40, 35, 6),
-        _rounded_rect(4, 71, 40, 59, 6),
+        _rounded_rect(4, bar_middle_top + bar_height / 2,
+                      40, bar_middle_top - bar_height / 2, bar_radius),
+        _rounded_rect(4, bar_middle_bottom + bar_height / 2,
+                      40, bar_middle_bottom - bar_height / 2, bar_radius),
         # The bowls.
-        _stroke_contour(UPPER_BOWL),
-        _stroke_contour(LOWER_BOWL),
+        _stroke_contour(UPPER_BOWL, stroke),
+        _stroke_contour(LOWER_BOWL, stroke),
     ]
 
-    pen = TTGlyphPen(None)
-    for contour in contours:
-        first = contour[0]
-        pen.moveTo((round(_x(first[0])), round(_y(first[1]))))
-        for point in contour[1:]:
-            pen.lineTo((round(_x(point[0])), round(_y(point[1]))))
-        pen.closePath()
-    glyph = pen.glyph()
 
-    advance = DESIGN_RIGHT - DESIGN_LEFT
-    units = advance * SCALE + LEFT_BEARING + RIGHT_BEARING
+def _ink(contours):
+    """The box the ink actually covers: strokes included, not just centrelines."""
+    xs = [p[0] for c in contours for p in c]
+    ys = [p[1] for c in contours for p in c]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _glyph(contours, advance: float, ink_centre_x: float):
+    pen = TTGlyphPen(None)
+
+    def to_font(point):
+        return (
+            round((point[0] - ink_centre_x) * SCALE + advance / 2),
+            round(_y(point[1])),
+        )
+
+    for contour in contours:
+        pen.moveTo(to_font(contour[0]))
+        for point in contour[1:]:
+            pen.lineTo(to_font(point))
+        pen.closePath()
+    return pen.glyph()
+
+
+def build(path: str) -> None:
+    heavy = _sign(stroke=20.0, bar_height=12.0, bar_radius=6.0)
+    light = _sign(stroke=13.0, bar_height=10.0, bar_radius=5.0)
+
+    heavy_ink = _ink(heavy)
+    # One advance for both, wide enough for the heavier sign, so switching a
+    # price from heavy to light does not move the number beside it.
+    advance_design = (heavy_ink[2] - heavy_ink[0]) + 2 * BEARING
+    advance = advance_design * SCALE
+
+    glyphs = {
+        "bankpopHeavy": (heavy, heavy_ink),
+        "bankpopLight": (light, _ink(light)),
+    }
+    glyf = {".notdef": TTGlyphPen(None).glyph()}
+    metrics = {".notdef": (round(advance), 0)}
+    for name, (contours, ink) in glyphs.items():
+        glyf[name] = _glyph(contours, advance, (ink[0] + ink[2]) / 2)
+        metrics[name] = (round(advance), 0)
 
     fb = FontBuilder(UPM, isTTF=True)
-    fb.setupGlyphOrder([".notdef", "bankpop"])
-    fb.setupCharacterMap({CODEPOINT: "bankpop"})
-    fb.setupGlyf({".notdef": TTGlyphPen(None).glyph(), "bankpop": glyph})
-    fb.setupHorizontalMetrics({".notdef": (units, 0), "bankpop": (units, round(LEFT_BEARING))})
+    fb.setupGlyphOrder([".notdef", "bankpopHeavy", "bankpopLight"])
+    fb.setupCharacterMap({HEAVY: "bankpopHeavy", LIGHT: "bankpopLight"})
+    fb.setupGlyf(glyf)
+    fb.setupHorizontalMetrics(metrics)
     fb.setupHorizontalHeader(ascent=round(CAP_HEIGHT), descent=-round(UPM - CAP_HEIGHT))
     fb.setupNameTable({
         "familyName": "Bankpop Mark",
         "styleName": "Regular",
         "psName": "BankpopMark-Regular",
-        "version": "Version 1.000",
-        "uniqueFontIdentifier": "BankpopMark-Regular;1.000",
+        "version": "Version 2.000",
+        "uniqueFontIdentifier": "BankpopMark-Regular;2.000",
     })
     fb.setupOS2(
         sTypoAscender=round(CAP_HEIGHT),
@@ -187,7 +241,7 @@ def build(path: str) -> None:
     fb.setupPost()
     fb.setupMaxp()
     fb.save(path)
-    print(f"wrote {path} ({len(contours)} contours, advance {units:.0f})")
+    print(f"wrote {path} (heavy + light, advance {advance:.0f})")
 
 
 if __name__ == "__main__":

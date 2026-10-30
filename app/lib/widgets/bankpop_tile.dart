@@ -342,6 +342,8 @@ class BankpopTile extends StatelessWidget {
     final Widget label = RotatedBox(
       quarterTurns: _quarterTurns(side),
       child: Text(
+        // The tile honours the currency it is given (a preview board can be
+        // drawn in any sign), so this stays on [BoardCurrencies.format].
         BoardCurrencies.format(currency, space.price!),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,

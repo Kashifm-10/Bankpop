@@ -265,7 +265,8 @@ void main() {
 
     // Rents are 2, 10, 30... and one house is built: its row carries the tick,
     // the next row the plus. Every value has to end at the same right edge.
-    final String mark = BoardCurrencies.mark;
+    // The rent table is small print, so it carries the light cut of the sign.
+    final String mark = BoardCurrencies.markLight;
     final double bare = tester.getTopRight(find.text('${mark}2')).dx;
     final double ticked = tester.getTopRight(find.text('${mark}10')).dx;
     final double offered = tester.getTopRight(find.text('${mark}30')).dx;

@@ -2,8 +2,10 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:mon/models/bankpop_board.dart';
+import 'package:mon/services/card_deck.dart';
 import 'package:mon/services/player_cards.dart';
 import 'package:mon/widgets/bankpop_space_card.dart';
+import 'package:mon/widgets/card_effect_flow.dart';
 import 'package:mon/widgets/bankpop_tile.dart';
 import 'package:mon/widgets/card_owner_badge.dart';
 import 'package:mon/widgets/player_palette.dart';
@@ -280,8 +282,14 @@ class BankpopBoardView extends StatelessWidget {
 
   void _onTap(BuildContext context, BankpopSpace space) {
     if (!space.isProperty) {
-      // The packs are dealt by the banker, from the banker's screen: the board
-      // shows what a square is, not what is in the deck.
+      // A pack's square shows the pack: its card face, as a picture and nothing
+      // else. Dealing still belongs to the banker, so this settles nothing and
+      // closes on an outside tap like any other picture.
+      final CardDeckKind? pack = _packOf(space.name);
+      if (pack != null) {
+        showCardFacePreview(context, pack);
+        return;
+      }
       showBankpopSpecialInfo(context, space.name);
       return;
     }
@@ -308,6 +316,16 @@ class BankpopBoardView extends StatelessWidget {
       return;
     }
     showBankpopSpaceCard(context, space, currency: board.currency);
+  }
+
+  /// The pack a special square belongs to, or null for GO, Jail and the taxes.
+  ///
+  /// The squares are named on the board itself (and a custom board keeps the
+  /// names), so the name is what decides which of the two packs a square opens.
+  static CardDeckKind? _packOf(String name) {
+    if (name.contains('Community Chest')) return CardDeckKind.chest;
+    if (name.contains('Chance')) return CardDeckKind.chance;
+    return null;
   }
 
   Widget _interior() {

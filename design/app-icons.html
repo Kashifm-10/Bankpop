@@ -55,19 +55,40 @@
 </svg>
 
 <svg class="icon" data-name="show_qr" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-  <rect x="14" y="16" width="62" height="62" rx="9" fill="#FFF6E3" stroke="#22304A" stroke-width="5" />
-  <g fill="#22304A">
-    <rect x="23" y="25" width="12" height="12" rx="2" />
-    <rect x="55" y="25" width="12" height="12" rx="2" />
-    <rect x="23" y="57" width="12" height="12" rx="2" />
-    <rect x="44" y="28" width="5" height="5" rx="1" />
-    <rect x="52" y="37" width="5" height="5" rx="1" />
-    <rect x="42" y="45" width="5" height="5" rx="1" />
-    <rect x="60" y="45" width="5" height="5" rx="1" />
-    <rect x="49" y="55" width="5" height="5" rx="1" />
-    <rect x="60" y="60" width="5" height="5" rx="1" />
+  <!-- The code itself: three finder patterns with their eye, then the data
+       modules between them. No scan line: the yellow stripe under the code
+       read as a second, unrelated mark. -->
+  <rect x="16" y="14" width="68" height="68" rx="11" fill="#FFF6E3" stroke="#22304A" stroke-width="5" />
+  <g fill="none" stroke="#22304A" stroke-width="4.6">
+    <rect x="22" y="20" width="16" height="16" rx="3.5" />
+    <rect x="62" y="20" width="16" height="16" rx="3.5" />
+    <rect x="22" y="60" width="16" height="16" rx="3.5" />
   </g>
-  <path d="M12 84h24M52 84h36" fill="none" stroke="#FFD34D" stroke-width="7" stroke-linecap="round" />
+  <g fill="#22304A">
+    <rect x="27.5" y="25.5" width="5" height="5" rx="1.4" />
+    <rect x="67.5" y="25.5" width="5" height="5" rx="1.4" />
+    <rect x="27.5" y="65.5" width="5" height="5" rx="1.4" />
+    <rect x="44" y="22" width="4.4" height="4.4" rx="1.2" />
+    <rect x="52.5" y="22" width="4.4" height="4.4" rx="1.2" />
+    <rect x="44" y="30.5" width="4.4" height="4.4" rx="1.2" />
+    <rect x="52.5" y="30.5" width="4.4" height="4.4" rx="1.2" />
+    <rect x="44" y="39" width="4.4" height="4.4" rx="1.2" />
+    <rect x="52.5" y="39" width="4.4" height="4.4" rx="1.2" />
+    <rect x="35.5" y="44" width="4.4" height="4.4" rx="1.2" />
+    <rect x="44" y="47.5" width="4.4" height="4.4" rx="1.2" />
+    <rect x="52.5" y="47.5" width="4.4" height="4.4" rx="1.2" />
+    <rect x="62" y="47.5" width="4.4" height="4.4" rx="1.2" />
+    <rect x="70.5" y="47.5" width="4.4" height="4.4" rx="1.2" />
+    <rect x="44" y="56" width="4.4" height="4.4" rx="1.2" />
+    <rect x="62" y="56" width="4.4" height="4.4" rx="1.2" />
+    <rect x="70.5" y="56" width="4.4" height="4.4" rx="1.2" />
+    <rect x="44" y="64.5" width="4.4" height="4.4" rx="1.2" />
+    <rect x="52.5" y="64.5" width="4.4" height="4.4" rx="1.2" />
+    <rect x="62" y="64.5" width="4.4" height="4.4" rx="1.2" />
+    <rect x="70.5" y="64.5" width="4.4" height="4.4" rx="1.2" />
+    <rect x="52.5" y="72" width="4.4" height="4.4" rx="1.2" />
+    <rect x="62" y="72" width="4.4" height="4.4" rx="1.2" />
+  </g>
 </svg>
 
 <svg class="icon" data-name="pay_bank" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
@@ -80,7 +101,10 @@
   </g>
   <rect x="40" y="68" width="60" height="10" rx="4" fill="#2F5D7C" stroke="#22304A" stroke-width="4" />
   <circle cx="24" cy="44" r="18" fill="#FFD34D" stroke="#22304A" stroke-width="5" />
-  <use href="#bMark" transform="translate(13.5 30.5) scale(0.246)" color="#22304A" />
+  <!-- The sign is placed by its ink, not by its drawing box: 50,50 is the
+       middle of everything the mark paints, so it lands dead centre with an
+       even margin inside the coin. -->
+  <use href="#bMark" transform="translate(12 32) scale(0.24)" color="#22304A" />
   <path d="M8 86h28" fill="none" stroke="#22304A" stroke-width="7" stroke-linecap="round" />
   <path d="M32 76l12 10-12 10" fill="none" stroke="#22304A" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" />
   <path d="M32 76l12 10-12 10" fill="none" stroke="#FFD34D" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" />
@@ -99,7 +123,9 @@
 
 <svg class="icon" data-name="advance" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
   <rect x="8" y="20" width="64" height="40" rx="8" fill="#FFF6E3" stroke="#22304A" stroke-width="5" />
-  <use href="#bMark" transform="translate(26.5 27) scale(0.30)" color="#22304A" />
+  <!-- Centred in the note: the mark's ink is 100 units wide, so 50,50 maps to
+       the note's own middle at 40,40. -->
+  <use href="#bMark" transform="translate(25 25) scale(0.30)" color="#22304A" />
   <path d="M16 84h44" fill="none" stroke="#22304A" stroke-width="7" stroke-linecap="round" />
   <path d="M54 72l14 12-14 12" fill="none" stroke="#22304A" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" />
   <path d="M54 72l14 12-14 12" fill="none" stroke="#FFD34D" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" />
@@ -116,8 +142,12 @@
   <circle cx="46" cy="32" r="16" fill="#FFF6E3" stroke="#22304A" stroke-width="5" />
   <path d="M16 82c0-16 13-26 30-26s30 10 30 26z" fill="#9FB4C9" stroke="#22304A" stroke-width="5" stroke-linejoin="round" />
   <circle cx="76" cy="72" r="17" fill="#5C8A3A" stroke="#22304A" stroke-width="4" />
-  <path d="M85 74a9 9 0 1 1-3.4-7" fill="none" stroke="#FFF6E3" stroke-width="5" stroke-linecap="round" />
-  <path d="M85 62v8h-8" fill="none" stroke="#FFF6E3" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" />
+  <!-- A circular arrow, so the badge says "bring back" rather than drawing a
+       second plus beside the minus on the remove button. The arc is a dashed
+       circle: 250 degrees of it, with the head filling the gap. -->
+  <circle cx="76" cy="72" r="8.4" fill="none" stroke="#FFF6E3" stroke-width="4.6"
+          stroke-dasharray="36.65 16.13" transform="rotate(90 76 72)" />
+  <path d="M89.0 67.3 L78.8 71.0 L84.3 73.5 Z" fill="#FFF6E3" />
 </svg>
 
 <svg class="icon" data-name="end_game" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
@@ -128,12 +158,19 @@
 </svg>
 
 <svg class="icon" data-name="hand_over" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-  <path d="M24 40a28 28 0 0 1 48-10" fill="none" stroke="#22304A" stroke-width="6" stroke-linecap="round" />
-  <path d="M76 14v18H58" fill="none" stroke="#22304A" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" />
-  <path d="M76 62a28 28 0 0 1-48 10" fill="none" stroke="#22304A" stroke-width="6" stroke-linecap="round" />
-  <path d="M24 88V70h18" fill="none" stroke="#22304A" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" />
+  <!-- Two arrows chasing each other round the money: the bank changing hands.
+       Each arc is 140 degrees of a dashed circle, so the pair is symmetrical
+       and the heads sit in the gaps. -->
+  <g fill="none" stroke="#22304A" stroke-width="7" stroke-dasharray="68.07 120.43">
+    <circle cx="50" cy="51" r="30" transform="rotate(160 50 51)" />
+    <circle cx="50" cy="51" r="30" transform="rotate(340 50 51)" />
+  </g>
+  <g fill="#22304A">
+    <path d="M63.3 14.4 L57.2 31.3 L70.8 29.4 Z" />
+    <path d="M36.7 87.6 L42.8 70.7 L29.2 72.6 Z" />
+  </g>
   <circle cx="50" cy="51" r="17" fill="#FFD34D" stroke="#22304A" stroke-width="4.5" />
-  <use href="#bMark" transform="translate(40.5 41) scale(0.212)" color="#22304A" />
+  <use href="#bMark" transform="translate(37 38) scale(0.26)" color="#22304A" />
 </svg>
 
 <svg class="icon" data-name="share_board" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">

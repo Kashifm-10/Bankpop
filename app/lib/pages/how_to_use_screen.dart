@@ -266,6 +266,10 @@ class _PlayerGuide extends StatelessWidget {
             'The numbers on a pack (19/22) are how many cards are left. The '
                 'banker shuffles when a pack runs out, and a card in somebody\'s '
                 'hand never comes back into the deal.',
+            'Tapping the Chance or Community Chest square on the board shows '
+                'the card that pack deals, as a picture - the squares are part '
+                'of the board a player can read, and nothing is drawn by '
+                'looking.',
           ],
         ),
         GuideCard(
@@ -307,6 +311,7 @@ class _PlayerGuide extends StatelessWidget {
           icon: Icons.touch_app_outlined,
         ),
         GuideButtonRow(control: GameControls.scan),
+        GuideButtonRow(control: GameControls.payBank),
         GuideButtonRow(control: GameControls.history),
         GuideButtonRow(control: GameControls.board),
         GuideButtonRow(control: GameControls.chanceDeck),
@@ -317,6 +322,8 @@ class _PlayerGuide extends StatelessWidget {
         GuideButtonRow(control: GameControls.reward),
         GuideButtonRow(control: GameControls.bankrupt),
         GuideButtonRow(control: GameControls.leave),
+        GuideButtonRow(control: GameControls.menu),
+        GuideButtonRow(control: GameControls.info),
         GuideCallout(
           icon: Icons.flag_outlined,
           warning: true,
@@ -477,6 +484,9 @@ class _BankerGuide extends StatelessWidget {
                 'away.',
             'A pack that has been worked through shuffles itself; the count '
                 'starts again.',
+            'Tapping a pack\'s square on the board is a look, not a deal: the '
+                'card face opens as a picture with nothing on it, and closes '
+                'on an outside tap. A drawn card is the one with the buttons.',
           ],
         ),
         GuideCard(
@@ -523,6 +533,12 @@ class _BankerGuide extends StatelessWidget {
         GuideButtonRow(control: GameControls.giveCard),
         GuideButtonRow(control: GameControls.reward),
         GuideButtonRow(control: GameControls.suspend),
+        GuideButtonRow(control: GameControls.resume),
+        GuideButtonRow(control: GameControls.endGame),
+        GuideButtonRow(control: GameControls.handOver),
+        GuideButtonRow(control: GameControls.leave),
+        GuideButtonRow(control: GameControls.menu),
+        GuideButtonRow(control: GameControls.info),
         GuideCallout(
           icon: Icons.info_outline,
           text:

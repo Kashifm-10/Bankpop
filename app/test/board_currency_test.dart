@@ -26,6 +26,14 @@ void main() {
     expect(BoardCurrencies.choices, <String>[mark]);
   });
 
+  test('the light cut is the same sign in its own glyph', () {
+    // One family, two characters: the heavy sign for prices, the light one for
+    // small print. Both are one character long, so an amount stays a string.
+    expect(BoardCurrencies.markLight, '\uE001');
+    expect(BoardCurrencies.markLight.length, 1);
+    expect(BoardCurrencies.formatLight(60), '${BoardCurrencies.markLight}60');
+  });
+
   testWidgets('every text style falls back to the sign\'s font',
       (WidgetTester tester) async {
     for (final Brightness brightness in Brightness.values) {

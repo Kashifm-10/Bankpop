@@ -9,7 +9,6 @@ import 'package:mon/services/bank_handover.dart';
 import 'package:mon/services/camera_access.dart';
 import 'package:mon/services/game_session.dart';
 import 'package:mon/services/player_exit.dart';
-import 'package:mon/widgets/app_dialog.dart';
 import 'package:mon/widgets/app_message.dart';
 import 'package:mon/widgets/scanner_error_view.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -326,21 +325,15 @@ class _PlayerQRScannerScreenState extends State<PlayerQRScannerScreen> {
       final Map<String, dynamic> row = (raw as Map).cast<String, dynamic>();
       if (PlayerStanding.fromRow(row) != PlayerStanding.kicked) continue;
       if (mounted) {
-        await showAppDialog<void>(
+        // A refusal is a notification, not a question: it arrives as the same
+        // card every other message does, and the scanner is usable again
+        // underneath it.
+        await showMessage(
           context,
+          'The banker removed you from this game, so there is no seat to '
+          'rejoin. Ask them to start a new game if you want to play again.',
           title: 'You were removed',
-          icon: Icons.person_remove_alt_1,
-          accent: const Color(0xFFC62828),
-          message: 'The banker removed you from this game, so there is no seat '
-              'to rejoin. Ask them to start a new game if you want to play '
-              'again.',
-          actions: <Widget>[
-            AppDialogButton(
-              label: 'OK',
-              primary: true,
-              onPressed: () => Navigator.of(context).pop(),
-            ),
-          ],
+          kind: MessageKind.failure,
         );
       }
       _scanned = false;

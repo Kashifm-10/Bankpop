@@ -8,7 +8,6 @@ import 'package:mon/routes.dart';
 import 'package:mon/services/board_catalog.dart';
 import 'package:mon/services/game_session.dart';
 import 'package:mon/services/player_exit.dart';
-import 'package:mon/widgets/app_dialog.dart';
 import 'package:mon/widgets/app_message.dart';
 import 'package:mon/widgets/app_metrics.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -212,22 +211,14 @@ class SelectRoleScreen extends StatelessWidget {
       if (PlayerStanding.fromRow(row) != PlayerStanding.kicked) continue;
       _explainedRefusal = true;
       if (context.mounted) {
-        await showAppDialog<void>(
+        await showMessage(
           context,
+          'The banker removed you from this game, so there is no seat to '
+          'rejoin. Ask them to put you back - they can do that from the table, '
+          'and you will start again with an empty wallet and no cards - or to '
+          'start a new game.',
           title: 'You were removed',
-          icon: Icons.person_remove_alt_1,
-          accent: const Color(0xFFC62828),
-          message: 'The banker removed you from this game, so there is no seat '
-              'to rejoin. Ask them to put you back - they can do that from the '
-              'table, and you will start again with an empty wallet and no '
-              'cards - or to start a new game.',
-          actions: <Widget>[
-            AppDialogButton(
-              label: 'OK',
-              primary: true,
-              onPressed: () => Navigator.of(context).pop(),
-            ),
-          ],
+          kind: MessageKind.failure,
         );
       }
       return null;
