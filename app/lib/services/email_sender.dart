@@ -30,17 +30,24 @@ class EmailSender {
 
   /// Sends the message, and turns a refusal into a sentence an account screen
   /// can show. [via] is for tests: the real call uses the build's own service.
+  ///
+  /// [serviceUrl] is `mail_api_url` from the `email_settings` row, which is how
+  /// a deployed app finds the Django service without a rebuild. A loopback page
+  /// ignores it and posts to the local service, and a
+  /// `--dart-define=MAIL_API_URL` still overrides everything.
   static Future<EmailResult> send({
     required String to,
     required String subject,
     required String text,
     required String html,
+    String serviceUrl = '',
     MailApi? via,
   }) async {
-    final MailApi service = via ?? MailApi();
+    final MailApi service = via ?? MailApi(hostedUrl: serviceUrl);
     if (!service.configured) {
       return const EmailResult.failure(
-        'This build has no mail service. Build it with '
+        'This build has no mail service. Fill in mail_api_url in the '
+        'email_settings row (run supabase/mail_api_url.sql), or build with '
         '--dart-define=MAIL_API_URL=<the django-mail-api address> and '
         '--dart-define=MAIL_API_TOKEN=<that service\'s MAIL_API_TOKEN>.',
       );
@@ -51,7 +58,8 @@ class EmailSender {
       return const EmailResult.ok('Email sent.');
     } on MailApiException catch (error) {
       debugPrint('The mail service refused the message: $error');
-      return EmailResult.failure(_sentence(error, hasToken: service.token.isNotEmpty));
+      return EmailResult.failure(
+          _sentence(error, hasToken: service.token.isNotEmpty));
     } catch (error) {
       debugPrint('Could not send mail: $error');
       return const EmailResult.failure(

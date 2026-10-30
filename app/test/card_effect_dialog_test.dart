@@ -5,6 +5,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mon/models/bankpop_board.dart';
 import 'package:mon/services/card_deck.dart';
 import 'package:mon/widgets/card_effect_flow.dart';
 
@@ -49,7 +50,11 @@ void main() {
       find.image(const AssetImage('assets/Icons/chance_inside_trimmed.png')),
       findsOneWidget,
     );
-    expect(find.text('The bank pays you a dividend of \$50.'), findsOneWidget);
+    // The card was written with a dollar; the face shows the app's own sign.
+    expect(
+      find.text(BoardCurrencies.write('The bank pays you a dividend of \$50.')),
+      findsOneWidget,
+    );
     expect(find.text('Reward'), findsOneWidget);
     expect(find.text('Close'), findsOneWidget);
   });

@@ -254,10 +254,12 @@ class _PlayerGuide extends StatelessWidget {
           icon: Icons.casino_outlined,
           title: 'Chance and Community Chest',
           lines: <String>[
-            'In a cards game both packs sit on the board, beside the square '
+            'The packs are the board itself, not a button: in a cards game '
+                'Chance and Community Chest sit on the board, beside the square '
                 'they belong to.',
-            'The banker taps a pack to deal the next card, and a dialog shows '
-                'the table what it asks for.',
+            'Tap a pack to deal the next card, and a dialog shows the table '
+                'what it asks for. There is no separate "draw a card" button '
+                'any more - the pack you tap is the card you draw.',
             'The green button on that dialog pays you your reward, or takes the '
                 'payment the card demands - the amount is the card\'s, not '
                 'yours to choose.',
@@ -307,6 +309,8 @@ class _PlayerGuide extends StatelessWidget {
         GuideButtonRow(control: GameControls.scan),
         GuideButtonRow(control: GameControls.history),
         GuideButtonRow(control: GameControls.board),
+        GuideButtonRow(control: GameControls.chanceDeck),
+        GuideButtonRow(control: GameControls.chestDeck),
         GuideButtonRow(control: GameControls.myCards),
         GuideButtonRow(control: GameControls.trade),
         GuideButtonRow(control: GameControls.receive),
@@ -410,8 +414,7 @@ class _BankerGuide extends StatelessWidget {
                 'leaves them outside the game.',
             'A player you removed cannot ask again; seat them with a fresh '
                 'request if the table agrees.',
-            'The Join QR lives on the Bank QR button whenever you need it '
-                'again.',
+            'The Join QR button opens it again whenever you need it.',
           ],
         ),
         GuideCard(
@@ -465,7 +468,8 @@ class _BankerGuide extends StatelessWidget {
           title: 'The two packs',
           lines: <String>[
             'Chance and Community Chest sit on the board, on the squares they '
-                'belong to, with a count of the cards left.',
+                'belong to, with a count of the cards left - there is no draw '
+                'button in the app bar.',
             'Tap a pack to deal the next card; the dialog shows what it asks '
                 'for and the green button pays or collects it.',
             'The shuffle mark on a pack reorders it - and asks you first, '
@@ -513,6 +517,8 @@ class _BankerGuide extends StatelessWidget {
         GuideButtonRow(control: GameControls.showBankQr),
         GuideButtonRow(control: GameControls.history),
         GuideButtonRow(control: GameControls.board),
+        GuideButtonRow(control: GameControls.chanceDeck),
+        GuideButtonRow(control: GameControls.chestDeck),
         GuideButtonRow(control: GameControls.receive),
         GuideButtonRow(control: GameControls.giveCard),
         GuideButtonRow(control: GameControls.reward),

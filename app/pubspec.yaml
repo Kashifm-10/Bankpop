@@ -124,6 +124,14 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  # BankPop's money sign, built by tool/make_currency_font.py. Uses-material
+  # icons do not include a glyph for it, so it ships as a one-glyph font and is
+  # listed as a fallback on every text style (lib/theme.dart).
+  fonts:
+    - family: BankpopMark
+      fonts:
+        - asset: assets/fonts/BankpopMark.ttf
+
   # To add assets to your application, add an assets section, like this:
   assets:
     # The illustrated icons the game screens use in place of plain glyphs.
@@ -149,6 +157,37 @@ flutter:
     - assets/Icons/chance_inside_trimmed.png
     - assets/Icons/chest_inside_trimmed.png
     - assets/Icons/reward.png
+    - assets/Icons/board.png
+    - assets/Icons/declare.png
+    - assets/Icons/join.png
+    # The same three cropped to their own edges, so a button is the drawing and
+    # none of the transparent margin (or the specks) around it.
+    - assets/Icons/board_trimmed.png
+    - assets/Icons/declare_trimmed.png
+    - assets/Icons/join_trimmed.png
+    # The rest of the action set, drawn in the same sticker style: the game
+    # screen actions, the menu rows, the player row actions and the utility
+    # buttons (boards, import, support, camera, keypad).
+    - assets/Icons/controls.png
+    - assets/Icons/show_qr.png
+    - assets/Icons/scan.png
+    - assets/Icons/pay_bank.png
+    - assets/Icons/pause.png
+    - assets/Icons/resume.png
+    - assets/Icons/end_game.png
+    - assets/Icons/hand_over.png
+    - assets/Icons/advance.png
+    - assets/Icons/remove_player.png
+    - assets/Icons/restore_player.png
+    - assets/Icons/share_board.png
+    - assets/Icons/download_board.png
+    - assets/Icons/new_board.png
+    - assets/Icons/import_board.png
+    - assets/Icons/paste.png
+    - assets/Icons/open_file.png
+    - assets/Icons/support.png
+    - assets/Icons/camera.png
+    - assets/Icons/keypad.png
     - assets/images/app_icon_rounded_logo.png
     - assets/images/play_icon.jpg
     - assets/images/advance.png

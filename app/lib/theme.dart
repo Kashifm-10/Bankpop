@@ -18,7 +18,7 @@ class CustomTheme {
     final TextTheme base = GoogleFonts.quicksandTextTheme(
       ThemeData(brightness: brightness).textTheme,
     );
-    return base.copyWith(
+    return _bankpopMark(base.copyWith(
       displayLarge: base.displayLarge?.copyWith(fontWeight: FontWeight.w800),
       displayMedium: base.displayMedium?.copyWith(fontWeight: FontWeight.w800),
       displaySmall: base.displaySmall?.copyWith(fontWeight: FontWeight.w700),
@@ -35,8 +35,17 @@ class CustomTheme {
       labelLarge: base.labelLarge?.copyWith(fontWeight: FontWeight.w700),
       labelMedium: base.labelMedium?.copyWith(fontWeight: FontWeight.w600),
       labelSmall: base.labelSmall?.copyWith(fontWeight: FontWeight.w600),
-    );
+    ));
   }
+
+  /// Quicksand has no glyph for BankPop's money sign (U+E000), so the sign's
+  /// own font is listed as the fallback on every style: the engine reaches for
+  /// it only for that character, and the rest of the text is untouched.
+  static TextTheme _bankpopMark(TextTheme theme) =>
+      theme.apply(fontFamilyFallback: const <String>[markFamily]);
+
+  /// The family declared in pubspec.yaml for assets/fonts/BankpopMark.ttf.
+  static const String markFamily = 'BankpopMark';
 
   static ThemeData lightThemeData() {
     return ThemeData(
@@ -58,6 +67,7 @@ class CustomTheme {
           fontWeight: FontWeight.w800,
           color: const Color(0xFF33691E),
           fontFamily: family,
+          fontFamilyFallback: const <String>[markFamily],
         ),
         contentTextStyle: TextStyle(
           fontSize: 14.5,
@@ -65,6 +75,7 @@ class CustomTheme {
           fontWeight: FontWeight.w500,
           color: const Color(0xFF33691E),
           fontFamily: family,
+          fontFamilyFallback: const <String>[markFamily],
         ),
       ),
       // Dialog actions (Cancel / Continue) used to come out in the scheme's
@@ -97,6 +108,7 @@ class CustomTheme {
           fontWeight: FontWeight.w800,
           color: const Color(0xFFC5E1A5),
           fontFamily: family,
+          fontFamilyFallback: const <String>[markFamily],
         ),
         contentTextStyle: TextStyle(
           fontSize: 14.5,
@@ -104,6 +116,7 @@ class CustomTheme {
           fontWeight: FontWeight.w500,
           color: const Color(0xFFE0E0E0),
           fontFamily: family,
+          fontFamilyFallback: const <String>[markFamily],
         ),
       ),
       textButtonTheme: TextButtonThemeData(

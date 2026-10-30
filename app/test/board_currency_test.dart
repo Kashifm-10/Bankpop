@@ -1,5 +1,7 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mon/models/bankpop_board.dart';
+import 'package:mon/theme.dart';
 
 BankpopBoard _board({
   String boardId = 'usa',
@@ -16,60 +18,82 @@ BankpopBoard _board({
 }
 
 void main() {
-  test('each built-in country has its own money', () {
-    expect(BoardCurrencies.forBoard('india'), '₹');
-    expect(BoardCurrencies.forBoard('usa'), r'$');
-    expect(BoardCurrencies.forBoard('uk'), '£');
-    expect(BoardCurrencies.forBoard('france'), '€');
-    expect(BoardCurrencies.forBoard('japan'), '¥');
-    expect(BoardCurrencies.forBoard('brazil'), r'R$');
-    expect(BoardCurrencies.forBoard('uae'), 'AED');
+  const String mark = BoardCurrencies.mark;
+
+  test('the sign is the BankPop mark, not a national currency', () {
+    expect(mark, '\uE000');
+    expect(BoardCurrencies.fallback, mark);
+    expect(BoardCurrencies.choices, <String>[mark]);
   });
 
-  test('an unknown board reads the default currency', () {
-    expect(BoardCurrencies.forBoard('custom_unknown'), BoardCurrencies.fallback);
+  testWidgets('every text style falls back to the sign\'s font',
+      (WidgetTester tester) async {
+    for (final Brightness brightness in Brightness.values) {
+      final TextTheme theme = CustomTheme.textThemeFor(brightness);
+      for (final TextStyle? style in <TextStyle?>[
+        theme.displayLarge,
+        theme.titleLarge,
+        theme.bodyMedium,
+        theme.labelSmall,
+      ]) {
+        expect(style?.fontFamilyFallback, contains(CustomTheme.markFamily));
+      }
+    }
+    // The family the pubspec declares for assets/fonts/BankpopMark.ttf.
+    expect(CustomTheme.markFamily, 'BankpopMark');
   });
 
-  test('a price takes the symbol of its board', () {
-    expect(BoardCurrencies.format('₹', 200), '₹200');
-    expect(BoardCurrencies.format(r'$', 60), r'$60');
-    expect(BoardCurrencies.format('AED', 200), 'AED 200');
+  test('every board is quoted in the same sign', () {
+    expect(BoardCurrencies.forBoard('india'), mark);
+    expect(BoardCurrencies.forBoard('usa'), mark);
+    expect(BoardCurrencies.forBoard('uk'), mark);
+    expect(BoardCurrencies.forBoard('france'), mark);
+    expect(BoardCurrencies.forBoard('japan'), mark);
+    expect(BoardCurrencies.forBoard('brazil'), mark);
+    expect(BoardCurrencies.forBoard('uae'), mark);
+    expect(BoardCurrencies.forBoard('custom_unknown'), mark);
+  });
+
+  test('a price takes the sign of its board', () {
+    expect(BoardCurrencies.format(mark, 200), '${mark}200');
     // A wallet value arrives as a double; it is printed like the board.
-    expect(BoardCurrencies.format('£', 200.0), '£200');
-    expect(BoardCurrencies.format('£', 12.5), '£12.5');
+    expect(BoardCurrencies.format(mark, 200.0), '${mark}200');
+    expect(BoardCurrencies.format(mark, 12.5), '${mark}12.5');
   });
 
-  test('a board row without a symbol falls back to its country', () {
-    expect(_board(boardId: 'india').currency, '₹');
-    expect(_board().currency, r'$');
+  test('a board row reads the mark, with or without a stored sign', () {
+    expect(_board(boardId: 'india').currency, mark);
+    expect(_board().currency, mark);
+    expect(_board(boardId: 'custom_1').currency, mark);
   });
 
-  test('a stored symbol is the board\'s own', () {
-    expect(_board(boardId: 'india', currency: '€').currency, '€');
-    expect(_board(boardId: 'custom_1', currency: r'R$').currency, r'R$');
+  test('a sign stored by an older board is replaced, not printed', () {
+    expect(_board(boardId: 'india', currency: '\u20B9').currency, mark);
+    expect(_board(boardId: 'custom_1', currency: r'R$').currency, mark);
   });
 
-  test('a custom board without a symbol reads the default', () {
-    expect(_board(boardId: 'custom_1').currency, BoardCurrencies.fallback);
+  test('the row the cache stores carries the mark', () {
+    final BankpopBoard board = _board(boardId: 'custom_1');
+    expect(board.toMap()['currency'], mark);
+    expect(BankpopBoard.fromMap(board.toMap()).currency, mark);
   });
 
-  test('the symbol survives the row the cache stores', () {
-    final BankpopBoard board = _board(boardId: 'custom_1', currency: 'AED');
-    expect(board.toMap()['currency'], 'AED');
-    expect(BankpopBoard.fromMap(board.toMap()).currency, 'AED');
-  });
-
-  test('renaming a board keeps its money unless another is given', () {
-    final BankpopBoard board = _board(boardId: 'custom_1', currency: '₹');
+  test('renaming a board keeps the mark', () {
+    final BankpopBoard board = _board(boardId: 'custom_1', currency: '\u20B9');
     expect(
       board.renamed(renames: const <String, String>{}, name: 'New').currency,
-      '₹',
+      mark,
     );
+  });
+
+  test('board copy is rewritten to the one sign', () {
+    expect(BoardCurrencies.write('Collect \u00A350'), 'Collect ${mark}50');
+    expect(BoardCurrencies.write('Pay \u20B9200'), 'Pay ${mark}200');
     expect(
-      board
-          .renamed(renames: const <String, String>{}, name: 'New', currency: '€')
-          .currency,
-      '€',
+      BoardCurrencies.write('Advance to Go (Collect \u20AC200)'),
+      'Advance to Go (Collect ${mark}200)',
     );
+    // Text with no money in it is left exactly as it is.
+    expect(BoardCurrencies.write('Go to Jail'), 'Go to Jail');
   });
 }

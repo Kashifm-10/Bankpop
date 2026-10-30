@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lottie/lottie.dart';
+import 'package:mon/widgets/bankpop_coin.dart';
 import 'package:mon/routes.dart';
 import 'package:mon/services/account.dart';
 import 'package:mon/widgets/app_content.dart';
@@ -25,7 +26,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   static const List<_Slide> _slides = <_Slide>[
     _Slide(
-      lottie: 'assets/lottie/bank_role.json',
+      // The coin shower from the old pack had a dollar stamped on every coin.
+      // BankPop's coin is drawn instead, with the app's own money sign.
+      coin: true,
       title: 'Bankpop',
       body: 'The banker keeps the money, the players keep playing. No paper '
           'bills, no missing coins - just tap and play.',
@@ -102,11 +105,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       children: <Widget>[
                         SizedBox(
                           height: 34.h,
-                          child: Lottie.asset(
-                            current.lottie,
-                            fit: BoxFit.contain,
-                            repeat: true,
-                          ),
+                          child: current.coin
+                              ? Center(
+                                  child: BankpopCoin(size: 22.h),
+                                )
+                              : Lottie.asset(
+                                  current.lottie,
+                                  fit: BoxFit.contain,
+                                  repeat: true,
+                                ),
                         ),
                         SizedBox(height: 3.h),
                         Text(
@@ -200,12 +207,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
 class _Slide {
   const _Slide({
-    required this.lottie,
+    this.lottie = '',
+    this.coin = false,
     required this.title,
     required this.body,
   });
 
+  /// The animation on this slide, empty when the slide shows the coin.
   final String lottie;
+
+  /// True for the slide that shows BankPop's own coin rather than an
+  /// animation from the icon pack.
+  final bool coin;
   final String title;
   final String body;
 }

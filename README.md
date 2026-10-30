@@ -68,12 +68,23 @@ everywhere:
 | `localhost` / `127.0.0.1`, on any port (`dev.sh`, `flutter run`) | `http://127.0.0.1:8000` |
 | the deployed site, or a phone | the hosted service |
 
-The hosted address is `MailApi.hostedService` in
-[`app/lib/services/mail_api.dart`](app/lib/services/mail_api.dart), or
-`--dart-define=MAIL_API_HOSTED_URL=https://...` for a build. Until it is filled
-in, a hosted build says it has no mail service instead of posting into nothing.
-`--dart-define=MAIL_API_URL=https://...` overrides both, which is how a staging
-build points at a staging service.
+The hosted service's address lives in the database, in `mail_api_url` on the
+`email_settings` row - `supabase/mail_api_url.sql` adds the column and exposes it
+through `email_public_settings`, and the app already reads that row for
+`app_url`. Hosting the service is therefore a row update, not a new build:
+
+```sql
+update public.email_settings
+   set mail_api_url = 'https://mail.your-host.example'
+ where id = 1;
+```
+
+Two build settings remain as fallbacks for a row that is still empty:
+`--dart-define=MAIL_API_HOSTED_URL=https://...`, or `MailApi.hostedService` in
+[`app/lib/services/mail_api.dart`](app/lib/services/mail_api.dart). Until one of
+the three is set, a hosted build says it has no mail service instead of posting
+into nothing. `--dart-define=MAIL_API_URL=https://...` overrides all of them,
+which is how a staging build points at a staging service.
 
 For a hosted build the token is a build setting - `MAIL_API_TOKEN` from
 `django-mail-api/.env`, passed by `dev.sh` and by the compose file. A web build
@@ -96,6 +107,14 @@ flutter run
 
 Android, iOS, desktop and web all build from `app/`. The release APK workflow in
 `.github/` builds from there too.
+
+Money is written in one sign everywhere - BankPop's own heavy-bar B, not a
+national currency. It is a glyph in `app/assets/fonts/BankpopMark.ttf` at
+U+E000, listed as `fontFamilyFallback` on every text style, so a price is still
+one plain string (`BoardCurrencies.format`) and the app, the deeds and the
+printed board all draw the same character. `app/tool/make_currency_font.py`
+rebuilds the font from the drawing; the drawing itself lives in
+`design/currency-glyphs.html`.
 
 ## The mail service
 
@@ -137,7 +156,7 @@ Run these once, in order, in the Supabase SQL editor:
 | `supabase/mortgage_trades.sql` | Mortgages and the trade ledger |
 | `supabase/card_decks.sql` | The shuffled Chance and Community Chest packs |
 | `supabase/card_charges.sql` | Each player's share of a "collect from everyone" card |
-| `supabase/board_currency.sql` | The money symbol a board's prices are written in |
+| `supabase/board_currency.sql` | The `currency` column a board's prices are stored with (the app now writes BankPop's own sign into it) |
 | `supabase/hardening.sql` | The atomic money-transfer functions |
 | `supabase/player_status.sql`, `supabase/players_cleanup.sql` | Presence, and one seat with one standing |
 

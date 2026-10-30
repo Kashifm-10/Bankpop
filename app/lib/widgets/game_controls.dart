@@ -14,6 +14,7 @@ class GameControl {
     required this.detail,
     required this.color,
     this.art,
+    this.artScale = 0.68,
   });
 
   /// The glyph, used when the control has no illustrated icon.
@@ -35,6 +36,13 @@ class GameControl {
   /// palette's accent colour is only kept for the legend text and the glyph
   /// fallback. Null for a control that still draws its [icon].
   final String? art;
+
+  /// How much of the tile [art] fills, along the shorter side.
+  ///
+  /// Square drawings are happy at the default. A wide one - the board is half
+  /// as tall as it is long - has to take more of the tile, or it reads as a
+  /// sliver next to the square icons.
+  final double artScale;
 }
 
 /// The palette the game screens share. Cream paper, dark brown ink and a small
@@ -50,6 +58,7 @@ abstract final class GameControlStyle {
 abstract final class GameControls {
   static const GameControl info = GameControl(
     icon: Icons.info_outline,
+    art: 'assets/Icons/controls.png',
     label: 'Controls',
     detail: 'Opens this list, explaining every icon on the screen.',
     color: Color(0xFF1565C0),
@@ -65,18 +74,13 @@ abstract final class GameControls {
 
   static const GameControl board = GameControl(
     icon: Icons.grid_on,
+    art: 'assets/Icons/board_trimmed.png',
+    // The board is drawn in perspective and wide, so it uses nearly the whole
+    // tile to sit at the same weight as the square icons beside it.
+    artScale: 0.95,
     label: 'Board',
     detail: 'The board, with who owns what. Tap a property to read its deed.',
     color: Color(0xFF2E7D32),
-  );
-
-  static const GameControl drawCard = GameControl(
-    icon: Icons.casino_outlined,
-    label: 'Draw a card',
-    detail: 'Draws the next Chance or Community Chest card. Each pack is '
-        'shuffled once when the game starts, and again when it has been worked '
-        'through.',
-    color: Color(0xFF6A1B9A),
   );
 
   static const GameControl leave = GameControl(
@@ -90,6 +94,7 @@ abstract final class GameControls {
 
   static const GameControl receive = GameControl(
     icon: Icons.qr_code_2,
+    art: 'assets/Icons/show_qr.png',
     label: 'Show QR',
     detail: 'Shows your QR code, so another player can scan it and pay you.',
     color: Color(0xFF00796B),
@@ -161,6 +166,7 @@ abstract final class GameControls {
   /// card QR, so there is only one camera button on the screen.
   static const GameControl scan = GameControl(
     icon: Icons.qr_code_scanner,
+    art: 'assets/Icons/scan.png',
     label: 'Scan',
     detail: 'Scan a player\'s QR to pay them, or the bank\'s card QR to buy '
         'the property it is selling.',
@@ -169,23 +175,28 @@ abstract final class GameControls {
 
   static const GameControl payBank = GameControl(
     icon: Icons.payments_outlined,
+    art: 'assets/Icons/pay_bank.png',
     label: 'Pay to bank',
     detail: 'Pays the bank straight from your balance - no scanning in this '
         'game.',
     color: Color(0xFFC62828),
   );
 
+  /// The table's invitation: the QR a player scans to ask for a seat, and the
+  /// code beside it. Called Join QR because that is what a player uses it for.
   static const GameControl showBankQr = GameControl(
     icon: Icons.groups,
-    label: 'Bank QR',
-    detail: 'Shows the bank\'s QR, so a player who is not at the table yet can '
-        'scan it and join this game.',
+    art: 'assets/Icons/join_trimmed.png',
+    artScale: 0.84,
+    label: 'Join QR',
+    detail: 'Shows the game ID and its QR, so a player who is not at the table '
+        'yet can scan it and join this game.',
     color: Color(0xFF1E88E5),
   );
 
   static const GameControl bankrupt = GameControl(
     icon: Icons.gavel,
-    art: null,
+    art: 'assets/Icons/declare_trimmed.png',
     label: 'Declare bankrupt',
     detail: 'Leaves the table for good: your cash, houses and cards are sold '
         'and the money pays the players you owe.',
@@ -194,10 +205,47 @@ abstract final class GameControls {
 
   static const GameControl suspend = GameControl(
     icon: Icons.pause_circle_outline,
-    label: 'Suspend / end',
-    detail: 'Suspends the table for everyone - players are paused and can '
-        'come back later - or ends the game for good.',
+    art: 'assets/Icons/pause.png',
+    label: 'Suspend game',
+    detail: 'Pauses the table for everyone. Nothing is lost - resuming '
+        'continues exactly where the table stopped.',
     color: Color(0xFF689F38),
+  );
+
+  /// The same menu entry in its other state: a paused game offers resume.
+  static const GameControl resume = GameControl(
+    icon: Icons.play_circle_outline,
+    art: 'assets/Icons/resume.png',
+    label: 'Resume game',
+    detail: 'Lets everyone play on from where the game was paused.',
+    color: Color(0xFF689F38),
+  );
+
+  static const GameControl endGame = GameControl(
+    icon: Icons.flag_outlined,
+    art: 'assets/Icons/end_game.png',
+    label: 'End game',
+    detail: 'Marks the game finished for good. It can be looked at later, but '
+        'nothing can be paid, traded or joined in it again.',
+    color: Color(0xFFC62828),
+  );
+
+  static const GameControl handOver = GameControl(
+    icon: Icons.swap_horiz,
+    art: 'assets/Icons/hand_over.png',
+    label: 'Hand over the bank',
+    detail: 'Shows a QR another player scans to become the banker, with the '
+        'bank balance exactly as it is now.',
+    color: Color(0xFF2E7D32),
+  );
+
+  /// The menu button itself: the same paper sticker as the actions, drawn as
+  /// three dots. Used where a screen has more actions than fit in one row.
+  static const GameControl menu = GameControl(
+    icon: Icons.more_horiz,
+    label: 'Game menu',
+    detail: 'Pause, end or hand over the bank, and the way out of this table.',
+    color: Color(0xFF4E342E),
   );
 }
 
@@ -216,7 +264,7 @@ class GameIconButton extends StatelessWidget {
     this.height,
     this.fill = false,
     this.enabled = true,
-    this.artScale = 0.68,
+    this.artScale,
   });
 
   final GameControl control;
@@ -239,8 +287,12 @@ class GameIconButton extends StatelessWidget {
 
   /// How much of [size] the illustrated art fills. Most icons are drawn with a
   /// margin around them; a deck of cards is a tall face and wants more of the
-  /// tile, or it is only a sliver of paper in the middle.
-  final double artScale;
+  /// tile, or it is only a sliver of paper in the middle. Null takes the
+  /// control's own [GameControl.artScale], so one icon can fill more of its
+  /// tile than the rest without every call site saying so.
+  final double? artScale;
+
+  double get _artScale => artScale ?? control.artScale;
 
   bool get _active => enabled && onPressed != null;
 
@@ -291,8 +343,8 @@ class GameIconButton extends StatelessWidget {
                         // is drawn large and scaled down to the space it is
                         // given.
                         ? FractionallySizedBox(
-                            widthFactor: artScale,
-                            heightFactor: artScale,
+                            widthFactor: _artScale,
+                            heightFactor: _artScale,
                             child: FittedBox(
                               child: Icon(
                                 control.icon,
@@ -314,7 +366,7 @@ class GameIconButton extends StatelessWidget {
                         child: fill
                             ? Padding(
                                 padding: EdgeInsets.all(
-                                  size * (1 - artScale) / 2,
+                                  size * (1 - _artScale) / 2,
                                 ),
                                 child: Image.asset(
                                   control.art!,
@@ -323,8 +375,8 @@ class GameIconButton extends StatelessWidget {
                               )
                             : Image.asset(
                                 control.art!,
-                                width: _shorterSide * artScale,
-                                height: _shorterSide * artScale,
+                                width: _shorterSide * _artScale,
+                                height: _shorterSide * _artScale,
                                 fit: BoxFit.contain,
                               ),
                       ),
@@ -477,4 +529,57 @@ Future<void> showGameControlsSheet(
       );
     },
   );
+}
+
+/// The paper tile that opens a game menu.
+///
+/// Placed as the `child` of a [PopupMenuButton], so it looks exactly like the
+/// action stickers beside it while the menu carries the actions that do not fit
+/// in the row any more.
+class GameMenuTile extends StatelessWidget {
+  const GameMenuTile({super.key, this.size = 36});
+
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: GameControls.menu.label,
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: GameControlStyle.paper,
+          borderRadius: BorderRadius.circular(size * 0.32),
+          border: Border.all(color: const Color(0xFFE6DCC3)),
+        ),
+        child: Icon(
+          Icons.more_horiz,
+          size: size * 0.58,
+          color: GameControls.menu.color,
+        ),
+      ),
+    );
+  }
+}
+
+/// One row of a game menu: the action's own drawing, then its name.
+class GameMenuRow extends StatelessWidget {
+  const GameMenuRow({super.key, required this.control});
+
+  final GameControl control;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: <Widget>[
+        if (control.art != null)
+          Image.asset(control.art!, width: 22, height: 22, fit: BoxFit.contain)
+        else
+          Icon(control.icon, size: 20, color: control.color),
+        const SizedBox(width: 10),
+        Text(control.label),
+      ],
+    );
+  }
 }

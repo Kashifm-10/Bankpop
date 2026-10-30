@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:mon/services/email_settings.dart';
 import 'package:mon/services/mail_api.dart';
 
 MailApi _service(Future<http.Response> Function(http.Request) answer,
@@ -199,6 +200,67 @@ void main() {
       );
 
       expect(api.baseUrl, 'https://mail.example');
+    });
+
+    test('the address in email_settings is used off loopback', () {
+      final MailApi api = MailApi(
+        origin: 'https://bankpop.netlify.app',
+        hostedUrl: 'https://mail.bankpop.app/',
+        token: 't',
+      );
+
+      expect(api.configured, isTrue);
+      expect(api.baseUrl, 'https://mail.bankpop.app');
+    });
+
+    test('a phone reads the same address from the row', () {
+      final MailApi api = MailApi(
+        origin: '',
+        hostedUrl: 'https://mail.bankpop.app',
+        token: 't',
+      );
+
+      expect(api.baseUrl, 'https://mail.bankpop.app');
+    });
+
+    test('a loopback page still posts to the local service', () {
+      final MailApi api = MailApi(
+        origin: 'http://localhost:5180',
+        hostedUrl: 'https://mail.bankpop.app',
+        token: 't',
+      );
+
+      expect(api.baseUrl, MailApi.localService);
+    });
+
+    test('a row with no address leaves a hosted build unconfigured', () {
+      final MailApi api = MailApi(
+        origin: 'https://bankpop.netlify.app',
+        hostedUrl: '  ',
+        token: 't',
+      );
+
+      expect(api.configured, isFalse);
+    });
+  });
+
+  group('EmailSettings', () {
+    test('reads both public addresses, without trailing slashes', () {
+      final EmailSettings settings = EmailSettings.fromRow(<String, dynamic>{
+        'app_url': 'https://bankpop.netlify.app/',
+        'mail_api_url': 'https://mail.bankpop.app/',
+      });
+
+      expect(settings.resolvedAppUrl, 'https://bankpop.netlify.app');
+      expect(settings.resolvedMailApiUrl, 'https://mail.bankpop.app');
+    });
+
+    test('a project without the column yet reads it as unset', () {
+      final EmailSettings settings = EmailSettings.fromRow(<String, dynamic>{
+        'app_url': 'https://bankpop.netlify.app',
+      });
+
+      expect(settings.resolvedMailApiUrl, isEmpty);
     });
   });
 }

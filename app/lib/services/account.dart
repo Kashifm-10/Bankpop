@@ -105,6 +105,12 @@ class Account {
   static const String idKey = 'account_id';
   static const String emailKey = 'account_email';
 
+  /// Set once the cover (the welcome page with the name and the tap prompt)
+  /// has been tapped. It is separate from [onboardingDoneKey] because the cover
+  /// is the very first screen after the splash: a player who closed the app on
+  /// it should still see it next time, and once it is tapped the app moves on.
+  static const String welcomeDoneKey = 'welcome_done';
+
   /// Set once the story has been shown (or the device already had an account).
   ///
   /// Signing in is optional, so this - not an account - is what decides whether
@@ -128,6 +134,19 @@ class Account {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     final String? email = prefs.getString(emailKey);
     return email != null && email.isNotEmpty;
+  }
+
+  /// Whether the cover has already been tapped on this device.
+  static Future<bool> hasSeenWelcome() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(welcomeDoneKey) ?? false;
+  }
+
+  /// Marks the cover as tapped, so a launch goes straight to the rest of the
+  /// app instead of showing the title page again.
+  static Future<void> markWelcomeSeen() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(welcomeDoneKey, true);
   }
 
   /// Marks the introduction as seen, so a guest is not walked through it on
@@ -592,8 +611,8 @@ class Account {
         if (!code.contains(from)) continue;
         await Supabase.instance.client
             .from(table)
-            .update(<String, dynamic>{'code': code.replaceAll(from, to)})
-            .eq('id', row['id']);
+            .update(<String, dynamic>{'code': code.replaceAll(from, to)}).eq(
+                'id', row['id']);
       }
     } catch (error) {
       debugPrint('Could not move the $table codes from the guest id: $error');

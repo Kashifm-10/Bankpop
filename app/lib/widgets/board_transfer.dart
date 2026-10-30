@@ -223,7 +223,12 @@ class _ImportBoardSheetState extends State<_ImportBoardSheet> {
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: _reading ? null : _paste,
-                    icon: const Icon(Icons.content_paste, size: 18),
+                    icon: Image.asset(
+                      'assets/Icons/paste.png',
+                      width: 20,
+                      height: 20,
+                      fit: BoxFit.contain,
+                    ),
                     label: const Text('Paste'),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: const Color(0xFF33691E),
@@ -239,7 +244,12 @@ class _ImportBoardSheetState extends State<_ImportBoardSheet> {
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: _reading ? null : _pickFile,
-                    icon: const Icon(Icons.folder_open, size: 18),
+                    icon: Image.asset(
+                      'assets/Icons/open_file.png',
+                      width: 20,
+                      height: 20,
+                      fit: BoxFit.contain,
+                    ),
                     label: Text(_reading ? 'Opening…' : 'Choose file'),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: const Color(0xFF33691E),

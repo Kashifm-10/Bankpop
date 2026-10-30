@@ -532,7 +532,12 @@ class _PlayerQRScannerScreenState extends State<PlayerQRScannerScreen> {
         actions: [
           IconButton(
             tooltip: 'Enter the game code instead',
-            icon: const Icon(Icons.keyboard_alt_outlined),
+            icon: Image.asset(
+              'assets/Icons/keypad.png',
+              width: 24,
+              height: 24,
+              fit: BoxFit.contain,
+            ),
             onPressed: _promptForGameId,
           ),
           IconButton(

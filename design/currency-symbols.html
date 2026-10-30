@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>BankPop currency symbol - candidates</title>
+<style>
+  :root {
+    --cream: #fff8f1;
+    --ink: #3a2210;
+    --gold: #ffd34d;
+    --gold-deep: #f0a63a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 28px;
+    background: #f6efe2;
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    color: #2c2c2c;
+  }
+  h1 { font-size: 22px; margin: 0 0 4px; color: #33691e; letter-spacing: .2px; }
+  p.lead { margin: 0 0 22px; font-size: 13.5px; color: #6b7a5e; max-width: 760px; line-height: 1.5; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: #fff;
+    border: 1px solid #e8ddbb;
+    border-radius: 18px;
+    padding: 16px;
+    box-shadow: 0 6px 18px rgba(58, 34, 16, .06);
+  }
+  .head { display: flex; align-items: baseline; justify-content: space-between; }
+  .num { font-size: 11px; font-weight: 700; color: #9aa78c; letter-spacing: 1px; }
+  .name { font-size: 14.5px; font-weight: 700; color: #33691e; margin: 2px 0 2px; }
+  .note { font-size: 11.5px; color: #8a927f; line-height: 1.4; min-height: 30px; }
+  .big { display: block; width: 118px; height: 118px; margin: 8px auto 10px; }
+  .sizes {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    border-top: 1px dashed #eee3c8; padding-top: 10px; margin-top: 6px;
+  }
+  .sizes svg { display: block; }
+  .inline {
+    display: flex; align-items: center; gap: 6px;
+    font-weight: 800; color: #2c2c2c;
+  }
+  .inline .amt { font-size: 13px; letter-spacing: .2px; }
+  .tag {
+    display: inline-block; margin-top: 8px; font-size: 10.5px; font-weight: 700;
+    color: #8d6e00; background: #fff4cf; border: 1px solid #f2dfa2;
+    border-radius: 999px; padding: 2px 8px; letter-spacing: .4px;
+  }
+  footer { margin-top: 22px; font-size: 11.5px; color: #97a189; }
+</style>
+</head>
+<body>
+
+<h1 style="display:none">BankPop currency symbols</h1>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- 1. Solid coin -->
+    <symbol id="coin" viewBox="0 0 200 200">
+      <circle cx="100" cy="106" r="86" fill="#e59a2c" />
+      <circle cx="100" cy="98" r="86" fill="#ffd34d" stroke="#3a2210" stroke-width="9" />
+      <circle cx="100" cy="98" r="68" fill="none" stroke="#e79a26" stroke-width="7" />
+      <path d="M56 64a62 62 0 0 1 30-16" fill="none" stroke="#fff4c9"
+            stroke-width="10" stroke-linecap="round" opacity=".9" />
+      <g fill="#ffe9a8" stroke="#3a2210" stroke-width="7" stroke-linejoin="round"
+         paint-order="stroke" font-family="'Segoe UI Black','Arial Black',sans-serif"
+         font-weight="900" text-anchor="middle">
+        <text x="100" y="134" font-size="104">B</text>
+      </g>
+      <path d="M148 44l4 9 9 4-9 4-4 9-4-9-9-4 9-4z" fill="#fff8e1"
+            stroke="#3a2210" stroke-width="5" stroke-linejoin="round" />
+    </symbol>
+
+    <!-- 2. Bar B -->
+    <symbol id="barB" viewBox="0 0 200 200">
+      <g font-family="'Segoe UI Black','Arial Black',sans-serif" font-weight="900"
+         text-anchor="middle" fill="#ffcf3f" stroke="#3a2210" stroke-width="10"
+         paint-order="stroke" stroke-linejoin="round">
+        <text x="106" y="142" font-size="140">B</text>
+      </g>
+      <g fill="#ffcf3f" stroke="#3a2210" stroke-width="9" stroke-linejoin="round">
+        <rect x="14" y="70" width="46" height="20" rx="10" />
+        <rect x="14" y="106" width="46" height="20" rx="10" />
+      </g>
+      <path d="M116 148c0 0 6 10 6 20 0-6 8-10 8-10s-8-4-8-10c0 0-6 4-6 10z"
+            fill="none" />
+      <g stroke="#3a2210" stroke-width="6" stroke-linecap="round">
+        <path d="M32 44l14 10" />
+        <path d="M170 46l-12 12" />
+        <path d="M182 96l-16 4" />
+      </g>
+    </symbol>
+
+    <!-- 3. Squircle seal -->
+    <symbol id="sealB" viewBox="0 0 200 200">
+      <rect x="20" y="20" width="160" height="160" rx="46" fill="#689f38"
+            stroke="#3a2210" stroke-width="9" />
+      <rect x="38" y="38" width="124" height="124" rx="32" fill="none"
+            stroke="#b6da8e" stroke-width="5" opacity=".8" />
+      <text x="100" y="136" font-size="106" text-anchor="middle"
+            font-family="'Segoe UI Black','Arial Black',sans-serif" font-weight="900"
+            fill="#fff8e1" stroke="#2b4a15" stroke-width="6" paint-order="stroke">B</text>
+      <g fill="#fff8e1">
+        <circle cx="160" cy="52" r="7" />
+        <circle cx="40" cy="150" r="5" />
+      </g>
+    </symbol>
+
+    <!-- 4. Bubble letter B -->
+    <symbol id="blobB" viewBox="0 0 200 200">
+      <text x="100" y="152" font-size="156" text-anchor="middle"
+            font-family="'Segoe UI Black','Arial Black',sans-serif" font-weight="900"
+            fill="#fff6e3" stroke="#3a2210" stroke-width="15"
+            paint-order="stroke" stroke-linejoin="round">B</text>
+      <g stroke="#3a2210" stroke-width="6" fill="none" stroke-linecap="round">
+        <circle cx="26" cy="54" r="8" />
+        <circle cx="176" cy="128" r="7" />
+        <circle cx="166" cy="42" r="5" />
+      </g>
+      <path d="M178 78l4 9 9 4-9 4-4 9-4-9-9-4 9-4z" fill="#ffcf3f"
+            stroke="#3a2210" stroke-width="4" stroke-linejoin="round" />
+    </symbol>
+
+    <!-- 5. BP monogram ring -->
+    <symbol id="bpMark" viewBox="0 0 200 200">
+      <circle cx="100" cy="104" r="82" fill="#e59a2c" opacity=".55" />
+      <circle cx="100" cy="98" r="82" fill="#fff8e1" stroke="#3a2210" stroke-width="9" />
+      <text x="100" y="130" font-size="74" text-anchor="middle" letter-spacing="-2"
+            font-family="'Segoe UI Black','Arial Black',sans-serif" font-weight="900"
+            fill="#ffcf3f" stroke="#3a2210" stroke-width="7" paint-order="stroke">BP</text>
+      <path d="M100 26v-12M100 172v12M26 98H14M186 98h-12" stroke="#3a2210"
+            stroke-width="6" stroke-linecap="round" />
+    </symbol>
+
+    <!-- 6. Token / chip -->
+    <symbol id="chipB" viewBox="0 0 200 200">
+      <path d="M100 12l16 14 21-4 8 20 20 9-4 21 14 16-14 16 4 21-20 9-8 20-21-4-16 14-16-14-21 4-8-20-20-9 4-21-14-16 14-16-4-21 20-9 8-20 21 4z"
+            fill="#ffd34d" stroke="#3a2210" stroke-width="9" stroke-linejoin="round" />
+      <circle cx="100" cy="100" r="58" fill="#fff6e3" stroke="#3a2210" stroke-width="6" />
+      <text x="100" y="128" font-size="80" text-anchor="middle"
+            font-family="'Segoe UI Black','Arial Black',sans-serif" font-weight="900"
+            fill="#ffcf3f" stroke="#3a2210" stroke-width="7" paint-order="stroke">B</text>
+    </symbol>
+  </defs>
+</svg>
+
+<p class="lead">
+  Six candidates for one money mark across the app, drawn from the reference:
+  flat cartoon, heavy dark outline, cream and gold. Each card shows the mark big,
+  then at the sizes the app actually uses it - a balance chip, a table cell, and
+  a running total.
+</p>
+
+<div class="grid">
+
+  <div class="card">
+    <div class="head"><span class="num">01</span><span class="tag">safest</span></div>
+    <div class="name">Pop coin</div>
+    <div class="note">A coin with a B stamped in it. Reads as money at any size and ties to the app icon.</div>
+    <svg class="big"><use href="#coin" /></svg>
+    <div class="sizes">
+      <span class="inline"><svg width="22" height="22"><use href="#coin" /></svg><span class="amt">1,500</span></span>
+      <span class="inline"><svg width="15" height="15"><use href="#coin" /></svg><span class="amt" style="font-size:11px">250</span></span>
+      <span class="inline" style="font-size:10px;color:#8a927f">14px</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="head"><span class="num">02</span><span class="tag">loudest</span></div>
+    <div class="name">Bar B</div>
+    <div class="note">The letter alone with two bars, like a currency that already exists. Great on the table, plain in a list.</div>
+    <svg class="big"><use href="#barB" /></svg>
+    <div class="sizes">
+      <span class="inline"><svg width="22" height="22"><use href="#barB" /></svg><span class="amt">1,500</span></span>
+      <span class="inline"><svg width="15" height="15"><use href="#barB" /></svg><span class="amt" style="font-size:11px">250</span></span>
+      <span class="inline" style="font-size:10px;color:#8a927f">14px</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="head"><span class="num">03</span><span class="tag">app-like</span></div>
+    <div class="name">Seal</div>
+    <div class="note">A green squircle seal: reads like a badge or an app tile, and stays legible when tiny.</div>
+    <svg class="big"><use href="#sealB" /></svg>
+    <div class="sizes">
+      <span class="inline"><svg width="22" height="22"><use href="#sealB" /></svg><span class="amt">1,500</span></span>
+      <span class="inline"><svg width="15" height="15"><use href="#sealB" /></svg><span class="amt" style="font-size:11px">250</span></span>
+      <span class="inline" style="font-size:10px;color:#8a927f">14px</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="head"><span class="num">04</span><span class="tag">closest to ref</span></div>
+    <div class="name">Bubble B</div>
+    <div class="note">The reference sheet's cream letter with its heavy outline, plus bubbles. Friendliest, least coin-like.</div>
+    <svg class="big"><use href="#blobB" /></svg>
+    <div class="sizes">
+      <span class="inline"><svg width="22" height="22"><use href="#blobB" /></svg><span class="amt">1,500</span></span>
+      <span class="inline"><svg width="15" height="15"><use href="#blobB" /></svg><span class="amt" style="font-size:11px">250</span></span>
+      <span class="inline" style="font-size:10px;color:#8a927f">14px</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="head"><span class="num">05</span><span class="tag">brand first</span></div>
+    <div class="name">BP mark</div>
+    <div class="note">The initials in one ring: more logo than coin. Strong on the splash, only fair as a number prefix.</div>
+    <svg class="big"><use href="#bpMark" /></svg>
+    <div class="sizes">
+      <span class="inline"><svg width="22" height="22"><use href="#bpMark" /></svg><span class="amt">1,500</span></span>
+      <span class="inline"><svg width="15" height="15"><use href="#bpMark" /></svg><span class="amt" style="font-size:11px">250</span></span>
+      <span class="inline" style="font-size:10px;color:#8a927f">14px</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="head"><span class="num">06</span><span class="tag">game first</span></div>
+    <div class="name">Token</div>
+    <div class="note">A notched gaming chip with the B in the middle: says board game louder than it says money.</div>
+    <svg class="big"><use href="#chipB" /></svg>
+    <div class="sizes">
+      <span class="inline"><svg width="22" height="22"><use href="#chipB" /></svg><span class="amt">1,500</span></span>
+      <span class="inline"><svg width="15" height="15"><use href="#chipB" /></svg><span class="amt" style="font-size:11px">250</span></span>
+      <span class="inline" style="font-size:10px;color:#8a927f">14px</span>
+    </div>
+  </div>
+
+</div>
+
+<footer>
+  Every board currently carries its own symbol (₹, $, £, AED ...). One mark here
+  would replace all of them for prices, balances, payments and the ledger.
+</footer>
+
+</body>
+</html>

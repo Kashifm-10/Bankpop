@@ -53,7 +53,11 @@ class AccountMail {
         );
       }
 
-      final String? appUrl = await _appUrl();
+      // One read of the row: `app_url` builds the link, `mail_api_url` tells
+      // the sender where the Django service is, so hosting the service does not
+      // need a new build.
+      final EmailSettings? settings = await EmailSettings.load();
+      final String? appUrl = _appUrlFrom(settings);
       if (appUrl == null) {
         await _dropToken(token);
         return const MailResult.failure(
@@ -78,6 +82,7 @@ class AccountMail {
           actionUrl: link,
           appUrl: appUrl,
         ),
+        serviceUrl: settings?.resolvedMailApiUrl ?? '',
       );
 
       if (!sent.ok) {
@@ -235,16 +240,19 @@ class AccountMail {
         'reset_requested_at': DateTime.now().toUtc().toIso8601String(),
       }).eq('id', profile['id'].toString());
 
+      // A reset needs no link, so a missing app_url is not the failure here
+      // that it is for a verification mail - the mark just stops linking. The
+      // same row carries the mail service's address.
+      final EmailSettings? settings = await EmailSettings.load();
       final EmailResult sent = await EmailSender.send(
         to: address,
         subject: 'Your BankPop temporary password',
         text: MailTemplates.resetText(temporaryPassword: temporaryPassword),
-        // A reset needs no link, so a missing app_url is not the failure here
-        // that it is for a verification mail - the mark just stops linking.
         html: MailTemplates.resetHtml(
           temporaryPassword: temporaryPassword,
-          appUrl: await _appUrl() ?? '',
+          appUrl: _appUrlFrom(settings) ?? '',
         ),
+        serviceUrl: settings?.resolvedMailApiUrl ?? '',
       );
 
       if (!sent.ok) {
@@ -309,8 +317,10 @@ class AccountMail {
     }
   }
 
-  static Future<String?> _appUrl() async {
-    final EmailSettings? settings = await EmailSettings.load();
+  /// Where the app's own links open: the row's `app_url`, or - when the row
+  /// cannot be read - the browser's own origin. A phone has no origin to fall
+  /// back to, which is why the column has to be filled in for Android and iOS.
+  static String? _appUrlFrom(EmailSettings? settings) {
     final String url =
         settings?.resolvedAppUrl ?? (kIsWeb ? Uri.base.origin : '');
     return url.isEmpty ? null : url;

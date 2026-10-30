@@ -706,7 +706,12 @@ class _ProfilePageState extends State<ProfilePage> {
                       alignment: Alignment.centerRight,
                       child: ElevatedButton.icon(
                         onPressed: _contactSupport,
-                        icon: const Icon(Icons.bug_report_outlined),
+                        icon: Image.asset(
+                          'assets/Icons/support.png',
+                          width: 22,
+                          height: 22,
+                          fit: BoxFit.contain,
+                        ),
                         label: const Text("Contact Us"),
                         style: ElevatedButton.styleFrom(
                           backgroundColor:

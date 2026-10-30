@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:animated_flip_counter/animated_flip_counter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lottie/lottie.dart';
@@ -25,6 +26,7 @@ import 'package:mon/widgets/app_dialog.dart';
 import 'package:mon/widgets/app_message.dart';
 import 'package:mon/widgets/bank_handover_qr.dart';
 import 'package:mon/widgets/banker_board_panel.dart';
+import 'package:mon/widgets/bankpop_coin.dart';
 import 'package:mon/widgets/card_effect_flow.dart';
 import 'package:mon/widgets/player_badge.dart';
 import 'package:mon/widgets/game_controls.dart';
@@ -178,36 +180,34 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
 
   /// Suspend, resume or end this game.
   Future<void> _setSessionStatus(String status) async {
-    final bool? confirmed = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: Text(status == GameSession.ended
-            ? 'End this game?'
-            : status == GameSession.suspended
-                ? 'Suspend this game?'
-                : 'Resume this game?'),
-        content: Text(
-          status == GameSession.ended
-              ? 'The game is marked as finished and cannot be resumed. '
-                  'Players will be told it ended.'
-              : status == GameSession.suspended
-                  ? 'Every player device is told the game is paused. Nothing '
-                      'is lost - resuming continues exactly where you stopped.'
-                  : 'Players can play again from where the game was paused.',
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text(status == GameSession.ended ? 'End game' : 'Yes'),
-          ),
-        ],
-      ),
+    // The menu entry's own drawing: the confirmation wears the icon that was
+    // tapped, the same way the leave and bankruptcy dialogs do.
+    final GameControl control = status == GameSession.ended
+        ? GameControls.endGame
+        : status == GameSession.suspended
+            ? GameControls.suspend
+            : GameControls.resume;
+    final bool confirmed = await showAppConfirm(
+      context,
+      title: status == GameSession.ended
+          ? 'End this game?'
+          : status == GameSession.suspended
+              ? 'Suspend this game?'
+              : 'Resume this game?',
+      icon: control.icon,
+      art: control.art,
+      destructive: status == GameSession.ended,
+      confirmLabel: status == GameSession.ended ? 'End game' : 'Yes',
+      cancelLabel: 'Cancel',
+      message: status == GameSession.ended
+          ? 'The game is marked as finished and cannot be resumed. Players '
+              'will be told it ended.'
+          : status == GameSession.suspended
+              ? 'Every player device is told the game is paused. Nothing is '
+                  'lost - resuming continues exactly where you stopped.'
+              : 'Players can play again from where the game was paused.',
     );
-    if (confirmed != true || !mounted) return;
+    if (!confirmed || !mounted) return;
 
     final bool ok = await GameSession.setStatus(widget.gameId, status);
     if (!mounted) return;
@@ -269,6 +269,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
         context,
         title: '${claim.name} scanned your code',
         icon: Icons.swap_horiz,
+        art: GameControls.handOver.art,
         confirmLabel: 'Hand over',
         message:
             'Make ${claim.name} the banker? They get the bank balance exactly '
@@ -328,68 +329,27 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
     }
   }
 
-  void _showGameMenu() {
-    final bool suspended = _session?.isSuspended ?? false;
-    final bool ended = _session?.isEnded ?? false;
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: const Color(0xFFFFF8E1),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (BuildContext sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            const SizedBox(height: 8),
-            ListTile(
-              leading: Icon(
-                suspended
-                    ? Icons.play_circle_outline
-                    : Icons.pause_circle_outline,
-                color: const Color(0xFF689F38),
-              ),
-              title: Text(suspended ? 'Resume game' : 'Suspend game'),
-              subtitle: Text(
-                suspended
-                    ? 'Let everyone continue where they stopped'
-                    : 'Pause the game; players can return later',
-              ),
-              enabled: !ended,
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                _setSessionStatus(
-                  suspended ? GameSession.active : GameSession.suspended,
-                );
-              },
-            ),
-            ListTile(
-              leading:
-                  const Icon(Icons.flag_outlined, color: Color(0xFFC62828)),
-              title: const Text('End game'),
-              subtitle: const Text('Mark the game as finished for good'),
-              enabled: !ended,
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                _setSessionStatus(GameSession.ended);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.swap_horiz, color: Color(0xFF2E7D32)),
-              title: const Text('Hand over the bank'),
-              subtitle: const Text(
-                  'Another player takes over paying, advancing and pausing'),
-              enabled: !ended,
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                _handOverBank();
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
+  /// Runs the menu entry the banker picked.
+  ///
+  /// Each one asks for confirmation on its own - there is no intermediate
+  /// sheet any more, so "End game" goes straight to "End this game?" and
+  /// "Leave game" to the leave prompt.
+  Future<void> _runMenuAction(_BankerAction action) async {
+    switch (action) {
+      case _BankerAction.togglePause:
+        final bool suspended = _session?.isSuspended ?? false;
+        await _setSessionStatus(
+          suspended ? GameSession.active : GameSession.suspended,
+        );
+      case _BankerAction.endGame:
+        await _setSessionStatus(GameSession.ended);
+      case _BankerAction.handOver:
+        await _handOverBank();
+      case _BankerAction.leave:
+        final bool shouldLeave = await _onWillPop();
+        if (!shouldLeave || !mounted) return;
+        await _returnToTitle();
+    }
   }
 
   /// Live feed of this game's rows. Realtime pushes a change the moment it
@@ -991,133 +951,6 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
     return result;
   }
 
-  /// The banker's card draw: pick Chance or Community Chest, and the next card
-  /// of that pack is shown to the table.
-  ///
-  /// The packs are shuffled once when the game starts and then dealt in order,
-  /// so this shows how many cards are left in each. The picks are listed as
-  /// they are dealt; the shuffle option here is for a pack that has been worked
-  /// through (a draw does that on its own) or for a banker who wants a fresh
-  /// order.
-  Future<void> _showCardDecks() async {
-    final BankpopBoard board;
-    try {
-      board = await BoardCatalog.boardForGame(widget.gameId);
-    } catch (error) {
-      debugPrint('Could not read the board for a card draw: $error');
-      if (!mounted) return;
-      showMessage(context, 'The board could not be read - try again.');
-      return;
-    }
-    if (!mounted) return;
-
-    final int chanceLeft = await CardDeck.left(
-      gameId: widget.gameId,
-      kind: CardDeckKind.chance,
-      cards: board.chanceOptions,
-    );
-    final int chestLeft = await CardDeck.left(
-      gameId: widget.gameId,
-      kind: CardDeckKind.chest,
-      cards: board.communityChest,
-    );
-    if (!mounted) return;
-
-    final Object? picked = await showModalBottomSheet<Object>(
-      context: context,
-      backgroundColor: const Color(0xFFFFF8E1),
-      showDragHandle: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (BuildContext sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-              child: Text(
-                'Draw a card',
-                style: TextStyle(
-                  fontSize: 18.sp,
-                  fontWeight: FontWeight.bold,
-                  color: const Color(0xFF33691E),
-                ),
-              ),
-            ),
-            for (final CardDeckKind option in CardDeckKind.values)
-              ListTile(
-                leading: Icon(
-                  option == CardDeckKind.chance
-                      ? Icons.casino_outlined
-                      : Icons.inventory_2_outlined,
-                  color: const Color(0xFF6A1B9A),
-                ),
-                title: Text(option.label),
-                subtitle: Text(
-                  _packStatus(
-                    option,
-                    option == CardDeckKind.chance ? chanceLeft : chestLeft,
-                    option == CardDeckKind.chance
-                        ? board.chanceOptions.length
-                        : board.communityChest.length,
-                  ),
-                  style: const TextStyle(fontSize: 12),
-                ),
-                onTap: () => Navigator.of(sheetContext).pop(option),
-              ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.shuffle, color: Color(0xFF6A1B9A)),
-              title: const Text('Shuffle both packs'),
-              subtitle: const Text(
-                'Deals a fresh order from the top of each pack.',
-                style: TextStyle(fontSize: 12),
-              ),
-              onTap: () => Navigator.of(sheetContext).pop('shuffle'),
-            ),
-            const SizedBox(height: 12),
-          ],
-        ),
-      ),
-    );
-    if (!mounted || picked == null) return;
-
-    if (picked == 'shuffle') {
-      await CardDeck.shuffle(
-        gameId: widget.gameId,
-        kind: CardDeckKind.chance,
-        cards: board.chanceOptions,
-      );
-      await CardDeck.shuffle(
-        gameId: widget.gameId,
-        kind: CardDeckKind.chest,
-        cards: board.communityChest,
-      );
-      if (!mounted) return;
-      await showMessage(
-        context,
-        'Both packs are shuffled and ready to be drawn again.',
-        title: 'Packs shuffled',
-      );
-      return;
-    }
-
-    await _drawCard(picked as CardDeckKind);
-  }
-
-  /// What one pack's row says under its name.
-  String _packStatus(CardDeckKind kind, int left, int total) {
-    if (total == 0) {
-      return 'This board has no ${kind.label.toLowerCase()} cards.';
-    }
-    if (left <= 0) {
-      return 'The pack has been worked through: the next draw shuffles it again.';
-    }
-    return '$left of $total left. The next card comes off the top.';
-  }
-
   /// Deals the next card of [kind]'s pack and shows it. The card is not put
   /// back in the middle of the pack: the pack is worked through in order, and
   /// once it has all been seen the next draw shuffles it again.
@@ -1178,7 +1011,14 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
     }
   }
 
+  /// The table's invitation: the QR a player scans, and the code they type.
+  ///
+  /// Reading six characters off one screen and typing them on another is the
+  /// one part of joining that still goes wrong, so the code can be copied - the
+  /// icon turns into a tick for a moment to say it worked. [copied] lives out
+  /// here so it survives the row's rebuilds.
   void _showQRDialog(BuildContext context) {
+    bool copied = false;
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -1215,10 +1055,49 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                 size: 58.w,
                 padding: const EdgeInsets.all(10),
               ),
-              Text(
-                'Game ID: ${widget.gameId}',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18.sp),
-                textAlign: TextAlign.center,
+              StatefulBuilder(
+                builder: (BuildContext rowContext, StateSetter setRowState) {
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Flexible(
+                        child: Text(
+                          'Game ID: ${widget.gameId}',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18.sp,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: copied ? 'Copied' : 'Copy game ID',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () async {
+                          await Clipboard.setData(
+                            ClipboardData(text: widget.gameId),
+                          );
+                          if (!rowContext.mounted) return;
+                          setRowState(() => copied = true);
+                          await Future<void>.delayed(
+                            const Duration(milliseconds: 1600),
+                          );
+                          if (!rowContext.mounted) return;
+                          setRowState(() => copied = false);
+                        },
+                        icon: Icon(
+                          copied
+                              ? Icons.check_circle_rounded
+                              : Icons.copy_rounded,
+                          size: 20,
+                          color: copied
+                              ? const Color(0xFF689F38)
+                              : const Color(0xFF558B2F),
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
               Text(
                 'Scan or enter the Game ID to join',
@@ -1284,8 +1163,15 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
               const SizedBox(height: 12),
               OutlinedButton.icon(
                 onPressed: () => _showQRDialog(context),
-                icon: const Icon(Icons.qr_code_2, size: 18),
-                label: const Text('Show join QR'),
+                // The Join QR button's own drawing, so the same action wears the
+                // same picture in the panel and in the app bar.
+                icon: Image.asset(
+                  GameControls.showBankQr.art!,
+                  width: 20,
+                  height: 20,
+                  fit: BoxFit.contain,
+                ),
+                label: const Text('Show Join QR'),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: palette.actions,
                   side: BorderSide(color: palette.accent),
@@ -1573,6 +1459,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                           context,
                           title: 'Advance ${player.name}?',
                           icon: Icons.trending_up,
+                          art: 'assets/Icons/advance.png',
                           confirmLabel: 'Pay '
                               '${BoardCurrencies.format(BoardCatalog.activeCurrency, advanceAmount)}',
                           message:
@@ -1621,8 +1508,9 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                             return;
                           }
                           if (payerWallet < advanceAmount) {
-                            _finishAdvance('Insufficient balance to advance '
-                                '₹$advanceAmount');
+                            _finishAdvance(
+                                'Insufficient balance to advance '
+                                '${BoardCurrencies.mark}$advanceAmount');
                             return;
                           }
 
@@ -1640,8 +1528,9 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                             amount: advanceAmount,
                           );
                           if (!transfer.ok) {
-                            _finishAdvance('Insufficient balance to advance '
-                                '₹$advanceAmount');
+                            _finishAdvance(
+                                'Insufficient balance to advance '
+                                '${BoardCurrencies.mark}$advanceAmount');
                             return;
                           }
 
@@ -1658,8 +1547,9 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                             'time':
                                 DateFormat('HH:mm:ss').format(DateTime.now()),
                           });
-                          _finishAdvance(
-                              'Advanced ₹$advanceAmount to ${player.name}');
+                          _finishAdvance('Advanced '
+                              '${BoardCurrencies.mark}$advanceAmount to '
+                              '${player.name}');
                         } catch (error) {
                           debugPrint('Could not pay the advance: $error');
                           _finishAdvance(
@@ -1681,12 +1571,10 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                         ),
                       ),
                       child: Image.asset(
-                        'assets/images/advance.png',
+                        'assets/Icons/advance.png',
                         width: 20.sp,
                         height: 20.sp,
                         fit: BoxFit.contain,
-                        color: Colors.red,
-                        colorBlendMode: BlendMode.srcIn,
                       ),
                     ),
                   // Remove: the one action that is only ever offered for a
@@ -1707,8 +1595,12 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                           borderRadius: BorderRadius.circular(10),
                         ),
                       ),
-                      child: Icon(Icons.person_remove_alt_1,
-                          size: 16.sp, color: const Color(0xFFC62828)),
+                      child: Image.asset(
+                        'assets/Icons/remove_player.png',
+                        width: 18.sp,
+                        height: 18.sp,
+                        fit: BoxFit.contain,
+                      ),
                     ),
                   ],
                   // Restore: the way back for a removal that was a mistake.
@@ -1732,8 +1624,12 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                           borderRadius: BorderRadius.circular(10),
                         ),
                       ),
-                      child: Icon(Icons.person_add_alt_1,
-                          size: 16.sp, color: const Color(0xFF2E7D32)),
+                      child: Image.asset(
+                        'assets/Icons/restore_player.png',
+                        width: 18.sp,
+                        height: 18.sp,
+                        fit: BoxFit.contain,
+                      ),
                     ),
                   ],
                 ],
@@ -1789,6 +1685,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
       context,
       title: 'Remove ${player.name}?',
       icon: Icons.person_remove_alt_1,
+      art: 'assets/Icons/remove_player.png',
       destructive: true,
       confirmLabel: 'Remove player',
       message: 'This cannot be undone: they lose their seat at this table for '
@@ -1873,6 +1770,7 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
       context,
       title: 'Put ${player.name} back?',
       icon: Icons.person_add_alt_1,
+      art: 'assets/Icons/restore_player.png',
       confirmLabel: 'Restore player',
       cancelLabel: 'Cancel',
       message: 'They come back to this game with an empty wallet and no cards. '
@@ -1943,14 +1841,8 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
 
   /// Suspend and resume are the same button in two states, so its icon and its
   /// sentence in the legend follow the session.
-  GameControl get _suspendControl => (_session?.isSuspended ?? false)
-      ? const GameControl(
-          icon: Icons.play_circle_outline,
-          label: 'Resume / end',
-          detail: 'The table is suspended. Resume it for everyone, or end the '
-              'game for good.',
-          color: Color(0xFF689F38),
-        )
+  GameControl get _pauseControl => (_session?.isSuspended ?? false)
+      ? GameControls.resume
       : GameControls.suspend;
 
   /// Exactly the icons this screen is showing.
@@ -1960,10 +1852,12 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
   /// player row, and the give-card action on a property's deed once the game
   /// plays with cards.
   List<GameControl> get _screenControls => <GameControl>[
+        GameControls.menu,
         GameControls.history,
-        GameControls.drawCard,
         GameControls.showBankQr,
-        _suspendControl,
+        _pauseControl,
+        GameControls.endGame,
+        GameControls.handOver,
         GameControls.leave,
         if (payOption == 'ScanPay') GameControls.receive,
         // Only a live table has cards to sell, actors to pay and packs to deal.
@@ -2000,37 +1894,54 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
           actions: [
             Row(
               children: <Widget>[
-                // Chance and Community Chest are dealt by the banker, not
-                // shown as a list of the whole pack.
-                GameIconButton(
-                  control: GameControls.drawCard,
-                  size: 36,
-                  onPressed: _showCardDecks,
-                ),
-                const SizedBox(width: 4),
                 GameIconButton(
                   control: GameControls.showBankQr,
                   size: 36,
                   onPressed: () => _showQRDialog(context),
                 ),
                 const SizedBox(width: 4),
-                // Suspend / resume / end. A suspended game is the only way a
-                // player can leave and come back to the same board later, so
-                // this is one tap rather than a buried settings page.
-                GameIconButton(
-                  control: _suspendControl,
-                  size: 36,
-                  onPressed: _showGameMenu,
-                ),
-                const SizedBox(width: 4),
-                GameIconButton(
-                  control: GameControls.leave,
-                  size: 36,
-                  onPressed: () async {
-                    final bool shouldLeave = await _onWillPop();
-                    if (!shouldLeave) return;
-                    await _returnToTitle();
+                // Pause, end, hand over and leave live in one menu: they are
+                // the rarest actions on the screen, and each one asks before
+                // it does anything, so the menu is a list of doors rather than
+                // a row of buttons that can be hit by accident.
+                PopupMenuButton<_BankerAction>(
+                  tooltip: GameControls.menu.label,
+                  position: PopupMenuPosition.under,
+                  color: GameControlStyle.paper,
+                  elevation: 6,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  onSelected: (_BankerAction action) =>
+                      unawaited(_runMenuAction(action)),
+                  itemBuilder: (BuildContext menuContext) {
+                    final bool ended = _session?.isEnded ?? false;
+                    return <PopupMenuEntry<_BankerAction>>[
+                      PopupMenuItem<_BankerAction>(
+                        value: _BankerAction.togglePause,
+                        enabled: !ended,
+                        child: GameMenuRow(control: _pauseControl),
+                      ),
+                      PopupMenuItem<_BankerAction>(
+                        value: _BankerAction.endGame,
+                        enabled: !ended,
+                        child:
+                            const GameMenuRow(control: GameControls.endGame),
+                      ),
+                      PopupMenuItem<_BankerAction>(
+                        value: _BankerAction.handOver,
+                        enabled: !ended,
+                        child:
+                            const GameMenuRow(control: GameControls.handOver),
+                      ),
+                      const PopupMenuDivider(),
+                      const PopupMenuItem<_BankerAction>(
+                        value: _BankerAction.leave,
+                        child: GameMenuRow(control: GameControls.leave),
+                      ),
+                    ];
                   },
+                  child: const GameMenuTile(),
                 ),
                 const SizedBox(width: 4),
                 GameInfoButton(
@@ -2133,14 +2044,10 @@ class _BankerGameScreenState extends State<BankerGameScreen> {
                             const SizedBox(width: 8),
                             SizedBox(
                               height: 38.sp,
-                              // Looped, like the other marks on the screen:
-                              // played once it stopped on a last frame, which
-                              // reads as a frozen screen rather than a balanced
-                              // one.
-                              child: Lottie.asset(
-                                'assets/lottie/coin.json',
-                                repeat: true,
-                              ),
+                              // The coin is drawn, not borrowed: the pack's
+                              // version was stamped with a dollar, a euro and a
+                              // yen, and this table writes one money sign.
+                              child: BankpopCoin(size: 38.sp),
                             ),
                           ],
                         ),
@@ -2371,3 +2278,10 @@ class Player {
   @override
   int get hashCode => Object.hash(playerID, name, value, avatar, standing);
 }
+
+/// The entries of the banker's top-right menu.
+///
+/// They are the rarest actions on the screen and each one confirms before it
+/// does anything, so they live behind a menu instead of in the icon row: pause
+/// and end are separate doors rather than one shared sheet.
+enum _BankerAction { togglePause, endGame, handOver, leave }

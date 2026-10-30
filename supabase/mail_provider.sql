@@ -43,7 +43,11 @@ alter table if exists public.email_settings
   add column if not exists provider      text not null default 'smtp',
   add column if not exists from_email    text,
   add column if not exists api_key       text,
-  add column if not exists sender_domain text;
+  add column if not exists sender_domain text,
+  -- Where this service is reachable. Public, so the app reads it through the
+  -- view below; see supabase/mail_api_url.sql for the migration that adds it
+  -- to an existing project.
+  add column if not exists mail_api_url  text;
 
 -- A provider this service cannot use would be accepted here and then refused
 -- at send time with a clear message; catching the typo at write time is nicer.
@@ -68,7 +72,7 @@ begin
 
   execute $sql$
     create or replace view public.email_public_settings as
-      select id, app_url, enabled, updated_at
+      select id, app_url, enabled, updated_at, mail_api_url
         from public.email_settings
   $sql$;
 
@@ -92,8 +96,11 @@ comment on column public.email_settings.api_key is
   'MAIL_API_KEY for the HTTP providers (brevo, resend, mailgun, postmark).';
 comment on column public.email_settings.sender_domain is
   'Mailgun sender domain (Mailgun only).';
+comment on column public.email_settings.mail_api_url is
+  'Public base URL of the django-mail-api service (e.g. https://mail.example). '
+  'Empty means the app falls back to its build setting.';
 comment on view public.email_public_settings is
-  'The one column the app needs from email_settings: where its web build lives.';
+  'The two public columns the app needs: where its web build lives, and where the mail service lives.';
 
 commit;
 

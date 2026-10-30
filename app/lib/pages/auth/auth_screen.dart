@@ -138,8 +138,7 @@ class _AuthScreenState extends State<AuthScreen> {
     // Read before signing in: adopting the account moves `playerID` to the
     // account's id, and the guest id is gone from the device after that.
     final String? guestId = await Account.guestPlayerId();
-    final bool guestPlayed =
-        guestId != null && await Account.hasGames(guestId);
+    final bool guestPlayed = guestId != null && await Account.hasGames(guestId);
 
     final AuthResult result = await Account.signIn(
       email: _email.text,
@@ -281,253 +280,297 @@ class _AuthScreenState extends State<AuthScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFFFF8E1),
-      body: SafeArea(
-        child: GestureDetector(
-          behavior: HitTestBehavior.translucent,
-          onTap: () => FocusScope.of(context).unfocus(),
-          child: Center(
-            child: ConstrainedBox(
-              // A login form keeps a phone-like measure; on a desktop window it
-              // sits as a card in the middle rather than stretching its fields.
-              constraints: const BoxConstraints(maxWidth: 520),
-              child: SingleChildScrollView(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              child: _pendingEmail != null
-                  ? _PendingVerification(
-                      email: _pendingEmail!,
-                      problem: _pendingMailProblem,
-                      busy: _resending,
-                      onResend: () => _resend(_pendingEmail!),
-                      onBack: () => setState(() {
-                        _pendingEmail = null;
-                        _pendingMailProblem = null;
-                        _isSignUp = false;
-                        _error = null;
-                      }),
-                    )
-                  : Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: <Widget>[
-                        Text(
-                          _isSignUp ? 'Create your account' : 'Welcome back',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 24.sp,
-                            fontWeight: FontWeight.bold,
-                            color: const Color(0xFF33691E),
-                          ),
-                        ),
-                        SizedBox(height: 1.h),
-                        Text(
-                          _isSignUp
-                              ? 'Your games stay linked to this email, even '
-                                  'after a reinstall or on a new device.'
-                              : 'Sign in to bring back your games on this '
-                                  'device.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 14.sp,
-                            height: 1.35,
-                            color: const Color(0xFF558B2F),
-                          ),
-                        ),
-                        SizedBox(height: 3.h),
-                        TextField(
-                          controller: _email,
-                          focusNode: _emailFocus,
-                          keyboardType: TextInputType.emailAddress,
-                          autocorrect: false,
-                          textInputAction: TextInputAction.next,
-                          onSubmitted: (_) => _passwordFocus.requestFocus(),
-                          decoration: _decoration(
-                            label: 'Email',
-                            icon: Icons.alternate_email,
-                          ),
-                        ),
-                        SizedBox(height: 1.5.h),
-                        TextField(
-                          controller: _password,
-                          focusNode: _passwordFocus,
-                          obscureText: _obscure,
-                          autocorrect: false,
-                          enableSuggestions: false,
-                          textInputAction: _isSignUp
-                              ? TextInputAction.next
-                              : TextInputAction.done,
-                          onSubmitted: (_) => _isSignUp
-                              ? _confirmFocus.requestFocus()
-                              : _submit(),
-                          decoration: _decoration(
-                            label: 'Password',
-                            icon: Icons.lock_outline,
-                            suffix: IconButton(
-                              tooltip:
-                                  _obscure ? 'Show password' : 'Hide password',
-                              icon: Icon(
-                                _obscure
-                                    ? Icons.visibility_off
-                                    : Icons.visibility,
-                                size: 20,
-                                color: const Color(0xFF689F38),
-                              ),
-                              onPressed: () =>
-                                  setState(() => _obscure = !_obscure),
-                            ),
-                          ),
-                        ),
-                        if (_isSignUp) ...<Widget>[
-                          SizedBox(height: 0.8.h),
-                          const Text(
-                            PasswordRules.hint,
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              color: Color(0xFF7CB342),
-                            ),
-                          ),
-                          SizedBox(height: 1.2.h),
-                          TextField(
-                            controller: _confirm,
-                            focusNode: _confirmFocus,
-                            obscureText: _obscureConfirm,
-                            autocorrect: false,
-                            enableSuggestions: false,
-                            textInputAction: TextInputAction.done,
-                            onSubmitted: (_) => _submit(),
-                            decoration: _decoration(
-                              label: 'Type the password again',
-                              icon: Icons.check_circle_outline,
-                              suffix: IconButton(
-                                tooltip: _obscureConfirm
-                                    ? 'Show password'
-                                    : 'Hide password',
-                                icon: Icon(
-                                  _obscureConfirm
-                                      ? Icons.visibility_off
-                                      : Icons.visibility,
-                                  size: 20,
-                                  color: const Color(0xFF689F38),
-                                ),
-                                onPressed: () => setState(
-                                    () => _obscureConfirm = !_obscureConfirm),
+      body: Container(
+        // The same cream wash the cover and the home screen use: the account
+        // screen is the app's front door, not a white form bolted onto it.
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: <Color>[Color(0xFFFFFDF7), Color(0xFFFFF1CC)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: SafeArea(
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: () => FocusScope.of(context).unfocus(),
+            child: Center(
+              child: ConstrainedBox(
+                // A login form keeps a phone-like measure; on a desktop window it
+                // sits as a card in the middle rather than stretching its fields.
+                constraints: const BoxConstraints(maxWidth: 520),
+                child: SingleChildScrollView(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  child: _pendingEmail != null
+                      ? _PendingVerification(
+                          email: _pendingEmail!,
+                          problem: _pendingMailProblem,
+                          busy: _resending,
+                          onResend: () => _resend(_pendingEmail!),
+                          onBack: () => setState(() {
+                            _pendingEmail = null;
+                            _pendingMailProblem = null;
+                            _isSignUp = false;
+                            _error = null;
+                          }),
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: <Widget>[
+                            // Who the player is logging into: without this the page
+                            // was two fields on a cream screen, which says nothing
+                            // about the game or why an account is worth having.
+                            const _BrandHeader(),
+                            SizedBox(height: 2.6.h),
+                            Text(
+                              _isSignUp
+                                  ? 'Create your account'
+                                  : 'Welcome back',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 24.sp,
+                                fontWeight: FontWeight.bold,
+                                color: const Color(0xFF33691E),
                               ),
                             ),
-                          ),
-                        ],
-                        if (_error != null) ...<Widget>[
-                          SizedBox(height: 1.5.h),
-                          Text(
-                            _error!,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: const Color(0xFFC62828),
-                              fontSize: 13.sp,
-                              height: 1.35,
-                            ),
-                          ),
-                        ],
-                        if (_unverifiedEmail != null) ...<Widget>[
-                          SizedBox(height: 1.2.h),
-                          _VerificationPendingNotice(
-                            email: _unverifiedEmail!,
-                            busy: _resending,
-                            onResend: () => _resend(_unverifiedEmail!),
-                          ),
-                        ],
-                        if (!_isSignUp) ...<Widget>[
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton(
-                              onPressed: _busy ? null : _forgotPassword,
-                              child: const Text(
-                                'Forgot password?',
-                                style: TextStyle(color: Color(0xFF2E7D32)),
+                            SizedBox(height: 1.h),
+                            Text(
+                              _isSignUp
+                                  ? 'Your games stay linked to this email, even '
+                                      'after a reinstall or on a new device.'
+                                  : 'Sign in to bring back your games on this '
+                                      'device.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 14.sp,
+                                height: 1.35,
+                                color: const Color(0xFF558B2F),
                               ),
                             ),
-                          ),
-                        ],
-                        SizedBox(height: _isSignUp ? 2.2.h : 1.h),
-                        SizedBox(
-                          height: 52,
-                          child: ElevatedButton(
-                            onPressed: _busy ? null : _submit,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF689F38),
-                              foregroundColor: Colors.white,
-                              disabledBackgroundColor: const Color(0xFFA5D6A7),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
+                            SizedBox(height: 3.h),
+                            TextField(
+                              controller: _email,
+                              focusNode: _emailFocus,
+                              keyboardType: TextInputType.emailAddress,
+                              autocorrect: false,
+                              textInputAction: TextInputAction.next,
+                              onSubmitted: (_) => _passwordFocus.requestFocus(),
+                              decoration: _decoration(
+                                label: 'Email',
+                                icon: Icons.alternate_email,
                               ),
                             ),
-                            child: _busy
-                                ? const SizedBox(
-                                    width: 22,
-                                    height: 22,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2.4,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : Text(
-                                    _isSignUp ? 'Create account' : 'Sign in',
-                                    style: TextStyle(
-                                      fontSize: 17.sp,
-                                      fontWeight: FontWeight.bold,
-                                    ),
+                            SizedBox(height: 1.5.h),
+                            TextField(
+                              controller: _password,
+                              focusNode: _passwordFocus,
+                              obscureText: _obscure,
+                              autocorrect: false,
+                              enableSuggestions: false,
+                              textInputAction: _isSignUp
+                                  ? TextInputAction.next
+                                  : TextInputAction.done,
+                              onSubmitted: (_) => _isSignUp
+                                  ? _confirmFocus.requestFocus()
+                                  : _submit(),
+                              decoration: _decoration(
+                                label: 'Password',
+                                icon: Icons.lock_outline,
+                                suffix: IconButton(
+                                  tooltip: _obscure
+                                      ? 'Show password'
+                                      : 'Hide password',
+                                  icon: Icon(
+                                    _obscure
+                                        ? Icons.visibility_off
+                                        : Icons.visibility,
+                                    size: 20,
+                                    color: const Color(0xFF689F38),
                                   ),
-                          ),
-                        ),
-                        SizedBox(height: 1.2.h),
-                        TextButton(
-                          onPressed: _busy ? null : _switchMode,
-                          child: Text(
-                            _isSignUp
-                                ? 'I already have an account'
-                                : 'New here? Create an account',
-                            style: const TextStyle(color: Color(0xFF2E7D32)),
-                          ),
-                        ),
-                        Divider(
-                          height: 3.h,
-                          color: const Color(0xFFDCEDC8),
-                        ),
-                        TextButton(
-                          onPressed: _busy ? null : _continueAsGuest,
-                          child: Text(
-                            widget.returnOnSuccess
-                                ? 'Keep playing as a guest'
-                                : 'Continue without an account',
-                            style: TextStyle(
-                              fontSize: 15.sp,
-                              fontWeight: FontWeight.w600,
-                              color: const Color(0xFF33691E),
+                                  onPressed: () =>
+                                      setState(() => _obscure = !_obscure),
+                                ),
+                              ),
                             ),
-                          ),
+                            if (_isSignUp) ...<Widget>[
+                              SizedBox(height: 0.8.h),
+                              const Text(
+                                PasswordRules.hint,
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: Color(0xFF7CB342),
+                                ),
+                              ),
+                              SizedBox(height: 1.2.h),
+                              TextField(
+                                controller: _confirm,
+                                focusNode: _confirmFocus,
+                                obscureText: _obscureConfirm,
+                                autocorrect: false,
+                                enableSuggestions: false,
+                                textInputAction: TextInputAction.done,
+                                onSubmitted: (_) => _submit(),
+                                decoration: _decoration(
+                                  label: 'Type the password again',
+                                  icon: Icons.check_circle_outline,
+                                  suffix: IconButton(
+                                    tooltip: _obscureConfirm
+                                        ? 'Show password'
+                                        : 'Hide password',
+                                    icon: Icon(
+                                      _obscureConfirm
+                                          ? Icons.visibility_off
+                                          : Icons.visibility,
+                                      size: 20,
+                                      color: const Color(0xFF689F38),
+                                    ),
+                                    onPressed: () => setState(() =>
+                                        _obscureConfirm = !_obscureConfirm),
+                                  ),
+                                ),
+                              ),
+                            ],
+                            if (_error != null) ...<Widget>[
+                              SizedBox(height: 1.5.h),
+                              Text(
+                                _error!,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: const Color(0xFFC62828),
+                                  fontSize: 13.sp,
+                                  height: 1.35,
+                                ),
+                              ),
+                            ],
+                            if (_unverifiedEmail != null) ...<Widget>[
+                              SizedBox(height: 1.2.h),
+                              _VerificationPendingNotice(
+                                email: _unverifiedEmail!,
+                                busy: _resending,
+                                onResend: () => _resend(_unverifiedEmail!),
+                              ),
+                            ],
+                            if (!_isSignUp) ...<Widget>[
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton(
+                                  onPressed: _busy ? null : _forgotPassword,
+                                  child: const Text(
+                                    'Forgot password?',
+                                    style: TextStyle(color: Color(0xFF2E7D32)),
+                                  ),
+                                ),
+                              ),
+                            ],
+                            SizedBox(height: _isSignUp ? 2.2.h : 1.h),
+                            SizedBox(
+                              height: 52,
+                              child: ElevatedButton(
+                                onPressed: _busy ? null : _submit,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF689F38),
+                                  foregroundColor: Colors.white,
+                                  disabledBackgroundColor:
+                                      const Color(0xFFA5D6A7),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                ),
+                                child: _busy
+                                    ? const SizedBox(
+                                        width: 22,
+                                        height: 22,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2.4,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                    : Text(
+                                        _isSignUp
+                                            ? 'Create account'
+                                            : 'Sign in',
+                                        style: TextStyle(
+                                          fontSize: 17.sp,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                              ),
+                            ),
+                            SizedBox(height: 1.2.h),
+                            TextButton(
+                              onPressed: _busy ? null : _switchMode,
+                              child: Text(
+                                _isSignUp
+                                    ? 'I already have an account'
+                                    : 'New here? Create an account',
+                                style:
+                                    const TextStyle(color: Color(0xFF2E7D32)),
+                              ),
+                            ),
+                            Divider(
+                              height: 3.h,
+                              color: const Color(0xFFDCEDC8),
+                            ),
+                            TextButton(
+                              onPressed: _busy ? null : _continueAsGuest,
+                              child: Text(
+                                widget.returnOnSuccess
+                                    ? 'Keep playing as a guest'
+                                    : 'Continue without an account',
+                                style: TextStyle(
+                                  fontSize: 15.sp,
+                                  fontWeight: FontWeight.w600,
+                                  color: const Color(0xFF33691E),
+                                ),
+                              ),
+                            ),
+                            SizedBox(height: 1.h),
+                            Text(
+                              'Guest games stay on this device. Clearing the app '
+                              'data or uninstalling removes them, and they cannot '
+                              'be opened on another device.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 11.sp,
+                                height: 1.3,
+                                color: const Color(0xFF7CB342),
+                              ),
+                            ),
+                            SizedBox(height: 1.5.h),
+                            Text(
+                              'Passwords are stored as a salted PBKDF2 hash on our '
+                              'database - never as plain text.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 11.sp,
+                                color: const Color(0xFF7CB342),
+                              ),
+                            ),
+                            SizedBox(height: 0.6.h),
+                            // Two ways to find out what the account is for without
+                            // creating one: the guide and the rules are readable
+                            // from here.
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: <Widget>[
+                                TextButton(
+                                  onPressed: () =>
+                                      context.push(AppRoutes.howToUse),
+                                  child: const Text('How to use'),
+                                ),
+                                const Text('·',
+                                    style: TextStyle(color: Color(0xFFA5D6A7))),
+                                TextButton(
+                                  onPressed: () =>
+                                      context.push(AppRoutes.gameRules),
+                                  child: const Text('Game rules'),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
-                        SizedBox(height: 1.h),
-                        Text(
-                          'Guest games stay on this device. Clearing the app '
-                          'data or uninstalling removes them, and they cannot '
-                          'be opened on another device.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 11.sp,
-                            height: 1.3,
-                            color: const Color(0xFF7CB342),
-                          ),
-                        ),
-                        SizedBox(height: 1.5.h),
-                        Text(
-                          'Passwords are stored as a salted PBKDF2 hash on our '
-                          'database - never as plain text.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 11.sp,
-                            color: const Color(0xFF7CB342),
-                          ),
-                        ),
-                      ],
-                    ),
+                ),
               ),
             ),
           ),
@@ -586,6 +629,8 @@ class _PendingVerification extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
+        const _BrandHeader(),
+        SizedBox(height: 2.h),
         const Icon(Icons.mark_email_unread_outlined,
             size: 58, color: Color(0xFF689F38)),
         SizedBox(height: 2.h),
@@ -925,6 +970,136 @@ class _GuestLimits extends StatelessWidget {
               ],
             ),
           ),
+      ],
+    );
+  }
+}
+
+/// The lockup at the top of the account screens: the app's own icon, its name,
+/// what the game is, and three chips saying what an account is *for*.
+///
+/// Both halves of the screen and the "check your mail" panel wear it, so the
+/// page always says which app this is. It was two fields on a cream sheet
+/// before, and a player had no way to tell what they were signing into.
+class _BrandHeader extends StatelessWidget {
+  const _BrandHeader();
+
+  static const List<(IconData, String)> _benefits = <(IconData, String)>[
+    (Icons.devices_rounded, 'Games on any device'),
+    (Icons.qr_code_scanner, 'Scan to pay'),
+    (Icons.mark_email_read_outlined, 'Verify by email'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                boxShadow: const <BoxShadow>[
+                  BoxShadow(
+                    color: Color(0x1A000000),
+                    blurRadius: 12,
+                    offset: Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: Image.asset(
+                  'assets/images/app_icon_rounded_logo.png',
+                  width: 46,
+                  height: 46,
+                  fit: BoxFit.cover,
+                  // A build without the icon (a plain widget test) still shows
+                  // the lockup rather than a red box.
+                  errorBuilder: (
+                    BuildContext context,
+                    Object error,
+                    StackTrace? stack,
+                  ) =>
+                      Container(
+                    width: 46,
+                    height: 46,
+                    color: const Color(0xFF689F38),
+                    alignment: Alignment.center,
+                    child: const Icon(
+                      Icons.attach_money_rounded,
+                      size: 26,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'BankPop',
+                    style: TextStyle(
+                      fontSize: 24.sp,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.6,
+                      height: 1.05,
+                      color: const Color(0xFF33691E),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'The board game your phone pays for.',
+                    style: TextStyle(
+                      fontSize: 12.5.sp,
+                      fontWeight: FontWeight.w600,
+                      height: 1.3,
+                      color: const Color(0xFF7CB342),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          alignment: WrapAlignment.center,
+          spacing: 6,
+          runSpacing: 6,
+          children: <Widget>[
+            for (final (IconData icon, String label) in _benefits)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.8),
+                  borderRadius: BorderRadius.circular(30),
+                  border: Border.all(color: const Color(0xFFE8DDBB)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Icon(icon, size: 13, color: const Color(0xFF689F38)),
+                    const SizedBox(width: 5),
+                    Text(
+                      label,
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF4A5A3A),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
       ],
     );
   }

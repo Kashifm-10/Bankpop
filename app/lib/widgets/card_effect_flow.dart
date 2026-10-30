@@ -122,7 +122,9 @@ class _CardEffectDialogState extends State<_CardEffectDialog> {
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
                       Text(
-                        widget.cardText,
+                        // The card was written with its board's own sign; the
+                        // table reads one money, so it is swapped here.
+                        BoardCurrencies.write(widget.cardText),
                         textAlign: TextAlign.center,
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,

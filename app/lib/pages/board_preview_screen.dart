@@ -198,20 +198,33 @@ class _BoardPreviewScreenState extends State<BoardPreviewScreen> {
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Icon(Icons.download_outlined,
-                    color: Color(0xFF689F38)),
+                : Image.asset(
+                    'assets/Icons/download_board.png',
+                    width: 26.sp,
+                    height: 26.sp,
+                    fit: BoxFit.contain,
+                  ),
           ),
           if (_selected().isCustom)
             IconButton(
               tooltip: 'Share this board as JSON',
               onPressed: () => _shareBoard(_selected()),
-              icon: const Icon(Icons.ios_share, color: Color(0xFF689F38)),
+              icon: Image.asset(
+                'assets/Icons/share_board.png',
+                width: 26.sp,
+                height: 26.sp,
+                fit: BoxFit.contain,
+              ),
             ),
           IconButton(
             tooltip: 'Create your own board',
             onPressed: _createBoard,
-            icon: const Icon(Icons.add_circle_outline,
-                color: Color(0xFF689F38)),
+            icon: Image.asset(
+              'assets/Icons/new_board.png',
+              width: 26.sp,
+              height: 26.sp,
+              fit: BoxFit.contain,
+            ),
           ),
         ],
       ),
